@@ -47,9 +47,11 @@ The flight controller is fully open source. If you're a developer or a technical
 
 ## Get in touch
 
-Early access and pilot programs for farms in [your region — update this].
+Early access and pilot programs for farms in North Carolina, US.
 
 [mapthefarm.com](https://mapthefarm.com)
+
+Please call at 336.618.9745
 
 ---
 
