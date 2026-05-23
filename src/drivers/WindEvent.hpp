@@ -25,4 +25,8 @@ struct WindEvent {
     double rollDeg;                 // Roll displacement  (+ = right, - = left)
     double pitchDeg;                // Pitch displacement (+ = nose-up, - = nose-down)
     bool   fired = false;           // Internal: prevents double-firing
+
+    // Add this so brace-init works in the vector
+    WindEvent(MissionCommander::Stage s, double t, double r, double p)
+        : stage(s), stageTimeSec(t), rollDeg(r), pitchDeg(p), fired(false)
 };
