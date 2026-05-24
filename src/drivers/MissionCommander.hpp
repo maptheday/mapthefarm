@@ -48,7 +48,7 @@ class MissionCommander {
 public:
     // ── Mission parameters ───────────────────────────────────
     static constexpr double TARGET_ALTITUDE_M  = 1.5;
-    static constexpr double HOVER_DURATION_SEC = 5.0;
+    static constexpr double HOVER_DURATION_SEC = 15.0;
 
     // ── Countdown duration ───────────────────────────────────
     // How many seconds to count down after arm switch is flipped.

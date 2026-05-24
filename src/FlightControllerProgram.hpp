@@ -48,15 +48,16 @@ private:
     SimulatedBarometer hardware_baro;
     SimulatedESC       simulated_esc;
 
-    IIMU* imu  = nullptr;
+    IIMU*       imu  = nullptr;
     IBarometer* baro = nullptr;
-    IESC* esc  = nullptr;
+    IESC*       esc  = nullptr;
 
     MissionCommander mission;
 
     PIDController altitude_pid;
     PIDController roll_pid;
     PIDController pitch_pid;
+    PIDController yaw_pid;       // NEW: controls rotation around vertical axis
     MotorMixer    mixer;
 
     // ── Physical properties of this drone ────────────────────
@@ -73,11 +74,14 @@ private:
     double roll_velocity  = 0.0;
     double pitch_angle    = 0.0;
     double pitch_velocity = 0.0;
+    double yaw_angle      = 0.0;  // NEW: heading in degrees (0 = north, 90 = east)
+    double yaw_velocity   = 0.0;  // NEW: rotation rate in deg/s
 
     // ── 2. The Inter-Core Bridge (IPC) ────────────────────────
     struct {
         double target_roll   = 0.0;
         double target_pitch  = 0.0;
+        double target_yaw    = 0.0;  // NEW: desired heading in degrees
         double throttle_cmd  = 0.0;
         bool   armed         = false;
 
@@ -132,7 +136,6 @@ private:
 
     // ── Shared constructor body ───────────────────────────────
     void init() {
-        // Only default to simulated hardware if real hardware wasn't injected
         if (!imu)  imu  = &hardware_imu;
         if (!baro) baro = &hardware_baro;
         if (!esc)  esc  = &simulated_esc;
@@ -140,16 +143,20 @@ private:
         altitude_pid.Kp = 1.2;   altitude_pid.Ki = 0.05;  altitude_pid.Kd = 0.8;
         altitude_pid.maxOutput = 0.4;
 
-        // Fixed bang-bang tuning: scaled down to output values between 0.0 and 1.0
         roll_pid.Kp  = 0.016;  roll_pid.Ki  = 0.001;  roll_pid.Kd  = 0.008;
         roll_pid.maxOutput = 0.8;
 
         pitch_pid.Kp = 0.016;  pitch_pid.Ki = 0.001;  pitch_pid.Kd = 0.008;
         pitch_pid.maxOutput = 0.8;
+
+        // Yaw is slower to respond than roll/pitch — lower Kp, no Ki to
+        // avoid windup during long holds, moderate Kd for smooth stops.
+        yaw_pid.Kp = 0.010;  yaw_pid.Ki = 0.0;  yaw_pid.Kd = 0.005;
+        yaw_pid.maxOutput = 0.3;  // yaw authority capped lower than roll/pitch
     }
 
 public:
-    // ── Constructor (simulation — uses SimulatedESC) ──────────
+    // ── Constructor (simulation) ──────────────────────────────
     FlightControllerProgram(const DroneConfig& cfg,
                             IPlatformMutex& physics_mx,
                             IPlatformMutex& ipc_mx)
@@ -161,7 +168,7 @@ public:
         init();
     }
 
-    // ── Constructor (hardware — real ESC + sensors injected) ──
+    // ── Constructor (hardware) ────────────────────────────────
     FlightControllerProgram(const DroneConfig& cfg,
                             IPlatformMutex& physics_mx,
                             IPlatformMutex& ipc_mx,
@@ -173,8 +180,8 @@ public:
         , ipc_mutex(ipc_mx)
         , mixer(real_esc)
     {
-        esc = &real_esc;
-        imu = &real_imu;
+        esc  = &real_esc;
+        imu  = &real_imu;
         baro = &real_baro;
         init();
     }
@@ -198,10 +205,11 @@ public:
                   << std::setw(10) << "Alt(m)"
                   << std::setw(10) << "Roll"
                   << std::setw(10) << "Pitch"
+                  << std::setw(10) << "Yaw"
                   << std::setw(10) << "Throttle"
                   << std::setw(24) << "Motors (M1 M2 M3 M4)"
                   << "Notes\n";
-        std::cout << std::string(90, '-') << "\n";
+        std::cout << std::string(100, '-') << "\n";
     }
 
     // ============================================================
@@ -214,7 +222,7 @@ public:
             cycle_core0++;
 
             // 1. Read sensors
-            double measured_alt, measured_roll, measured_pitch;
+            double measured_alt, measured_roll, measured_pitch, measured_yaw;
             {
                 PlatformLockGuard lock(physics_mutex);
                 hardware_baro.injectAltitude(altitude);
@@ -222,10 +230,8 @@ public:
                 measured_alt   = baro->readAltitudeMeters();
                 measured_roll  = imu->readGyroRoll();
                 measured_pitch = imu->readGyroPitch();
+                measured_yaw   = yaw_angle;  // read directly from sim state
             }
-
-            // 3. Altitude PID (outer loop)
-            static double target_altitude = 0.0;
 
             // 2. Mission logic & wind events
             MissionCommander::Stage currentStage = mission.getStage();
@@ -233,7 +239,7 @@ public:
                 stageTimer = 0.0;
                 lastStage  = currentStage;
                 if (currentStage == MissionCommander::Stage::LAND) {
-                    target_altitude = 0.0;
+                    target_altitude_hold = 0.0;
                 }
             }
             stageTimer += dt;
@@ -241,30 +247,35 @@ public:
 
             DronePacket cmd = mission.update(measured_alt, measured_roll, measured_pitch, dt);
 
+            // 3. Altitude PID (outer loop)
             if (mission.getStage() == MissionCommander::Stage::TAKEOFF ||
                 mission.getStage() == MissionCommander::Stage::HOVER) {
-                target_altitude = MissionCommander::TARGET_ALTITUDE_M;
+                target_altitude_hold = MissionCommander::TARGET_ALTITUDE_M;
             }
             else if (mission.getStage() != MissionCommander::Stage::WAIT_FOR_ARM &&
                      mission.getStage() != MissionCommander::Stage::COUNTDOWN &&
                      mission.getStage() != MissionCommander::Stage::LAND) {
-                target_altitude -= 0.5 * dt;
-                if (target_altitude < 0.0) target_altitude = 0.0;
+                target_altitude_hold -= 0.5 * dt;
+                if (target_altitude_hold < 0.0) target_altitude_hold = 0.0;
             }
 
-            double throttle_trim  = altitude_pid.calculate(target_altitude, measured_alt, dt);
+            double throttle_trim  = altitude_pid.calculate(target_altitude_hold, measured_alt, dt);
             double final_throttle = cmd.throttle + throttle_trim;
-            
-            // Apply Idle Throttle to prevent motors from completely stopping in the air
+
             if (final_throttle > 1.0) final_throttle = 1.0;
             if (cmd.armed && final_throttle < 0.05) final_throttle = 0.05;
             else if (!cmd.armed && final_throttle < 0.0) final_throttle = 0.0;
 
             // 4. Write to IPC bridge
+            //    target_yaw holds the last commanded heading. When the mission
+            //    doesn't issue a yaw command we hold whatever heading we're at,
+            //    so we pass measured_yaw as the target to keep the drone pointed
+            //    in the same direction rather than drifting.
             {
                 PlatformLockGuard lock(ipc_mutex);
                 ipc_bridge.target_roll  = cmd.targetRoll;
                 ipc_bridge.target_pitch = cmd.targetPitch;
+                ipc_bridge.target_yaw   = cmd.targetYaw;  // from MissionCommander
                 ipc_bridge.throttle_cmd = final_throttle;
                 ipc_bridge.armed        = cmd.armed;
             }
@@ -283,12 +294,13 @@ public:
                           (measured_pitch > -1.0 && measured_pitch < 1.0);
 
             std::cout << std::right << std::fixed << std::setprecision(2)
-                      << std::setw(4)  << cycle_core0   << "  "
+                      << std::setw(4)  << cycle_core0      << "  "
                       << std::left  << std::setw(11) << mission.stageName()
                       << std::right << std::setw(7)  << measured_alt   << "m  "
-                      << std::setw(7)  << measured_roll  << "deg  "
-                      << std::setw(7)  << measured_pitch << "deg  "
-                      << std::setw(7)  << final_throttle << "  "
+                      << std::setw(7)  << measured_roll    << "deg  "
+                      << std::setw(7)  << measured_pitch   << "deg  "
+                      << std::setw(7)  << measured_yaw     << "deg  "
+                      << std::setw(7)  << final_throttle   << "  "
                       << std::setw(5)  << m1 << " "
                       << std::setw(5)  << m2 << " "
                       << std::setw(5)  << m3 << " "
@@ -307,41 +319,45 @@ public:
     //  CORE 1: Flight Stabilization (250 Hz)
     // ============================================================
     void runCore1_Flight() {
-        const double dt   = 0.004;
+        const double dt = 0.004;
 
         while (simulation_running) {
 
             // 1. Read from IPC bridge
-            double target_roll, target_pitch, throttle_cmd;
+            double target_roll, target_pitch, target_yaw, throttle_cmd;
             bool is_armed;
             {
                 PlatformLockGuard lock(ipc_mutex);
                 target_roll  = ipc_bridge.target_roll;
                 target_pitch = ipc_bridge.target_pitch;
+                target_yaw   = ipc_bridge.target_yaw;
                 throttle_cmd = ipc_bridge.throttle_cmd;
                 is_armed     = ipc_bridge.armed;
             }
 
             // 2. Read IMU
-            double measured_roll, measured_pitch;
+            double measured_roll, measured_pitch, measured_yaw;
             {
                 PlatformLockGuard lock(physics_mutex);
                 hardware_imu.injectState(roll_angle, pitch_angle);
                 measured_roll  = imu->readGyroRoll();
                 measured_pitch = imu->readGyroPitch();
+                measured_yaw   = yaw_angle;
             }
 
-            // 3. Attitude PIDs
+            // 3. Attitude PIDs — now includes yaw
             double roll_cmd  = roll_pid.calculate(target_roll,  measured_roll,  dt);
             double pitch_cmd = pitch_pid.calculate(target_pitch, measured_pitch, dt);
+            double yaw_cmd   = yaw_pid.calculate(target_yaw,   measured_yaw,   dt);
 
-            // 4. Motor mixer — sends commands to ESC
+            // 4. Motor mixer — now passes yaw_cmd as the fourth argument
             if (is_armed) {
-                mixer.mix(throttle_cmd, roll_cmd, pitch_cmd);
+                mixer.mix(throttle_cmd, roll_cmd, pitch_cmd, yaw_cmd);
             } else {
                 mixer.disarm();
             }
 
+            // Write motor snapshot back to IPC bridge for telemetry
             {
                 PlatformLockGuard lock(ipc_mutex);
                 ipc_bridge.motor_m1 = esc->getMotor(1);
@@ -350,7 +366,7 @@ public:
                 ipc_bridge.motor_m4 = esc->getMotor(4);
             }
 
-            // 5. Update physics (SIMULATION ONLY — not on real hardware)
+            // 5. Update physics (simulation only — not compiled on hardware)
 #ifndef ESP_BUILD
             {
                 PlatformLockGuard lock(physics_mutex);
@@ -359,32 +375,50 @@ public:
                     double avg_throttle = (esc->getMotor(1) + esc->getMotor(2) +
                                           esc->getMotor(3) + esc->getMotor(4)) / 4.0;
 
-                    double roll_rad   = roll_angle  * M_PI / 180.0;
-                    double pitch_rad  = pitch_angle * M_PI / 180.0;
-                    double tilt_cos   = std::cos(roll_rad) * std::cos(pitch_rad);
-
-                    double raw_thrust     = avg_throttle * config.total_thrust_max;
-                    double vertical_thrust = raw_thrust * tilt_cos;  // upward component only
-                    double gravity         = config.mass_kg * 9.81;
-                    double vertical_accel  = (vertical_thrust - gravity) / config.mass_kg;
-                    vertical_vel = (vertical_vel + vertical_accel * dt) * 0.985;  // Realistic air resistance
+                    double roll_rad    = roll_angle  * M_PI / 180.0;
+                    double pitch_rad   = pitch_angle * M_PI / 180.0;
+                    double tilt_cos    = std::cos(roll_rad) * std::cos(pitch_rad);
+                    double raw_thrust  = avg_throttle * config.total_thrust_max;
+                    double vert_thrust = raw_thrust * tilt_cos;
+                    double gravity     = config.mass_kg * 9.81;
+                    double vert_accel  = (vert_thrust - gravity) / config.mass_kg;
+                    vertical_vel = (vertical_vel + vert_accel * dt) * 0.985;
                 } else {
-                    vertical_vel = (vertical_vel - 9.81 * dt) * 0.99;  // Realistic descent
+                    vertical_vel = (vertical_vel - 9.81 * dt) * 0.99;
                 }
 
                 altitude += vertical_vel * dt;
                 if (altitude < 0.0) { altitude = 0.0; vertical_vel = 0.0; }
 
+                // Roll and pitch torque from differential motor thrust
                 double roll_torque  = (esc->getMotor(2) + esc->getMotor(4))
                                     - (esc->getMotor(1) + esc->getMotor(3));
                 double pitch_torque = (esc->getMotor(3) + esc->getMotor(4))
                                     - (esc->getMotor(1) + esc->getMotor(2));
 
-                const double realistic_drag = 0.96;  // More realistic air resistance
-                roll_velocity  = (roll_velocity  + (roll_torque  / config.inertia) * dt) * realistic_drag;
-                pitch_velocity = (pitch_velocity + (pitch_torque / config.inertia) * dt) * realistic_drag;
-                roll_angle    += roll_velocity  * dt;
-                pitch_angle   += pitch_velocity * dt;
+                // Yaw torque from diagonal motor pairs.
+                // CCW motors (M1, M4) produce CW frame reaction (+yaw).
+                // CW  motors (M2, M3) produce CCW frame reaction (-yaw).
+                double yaw_torque = (esc->getMotor(1) + esc->getMotor(4))
+                                  - (esc->getMotor(2) + esc->getMotor(3));
+
+                const double drag = 0.96;
+                roll_velocity  = (roll_velocity  + (roll_torque  / config.inertia) * dt) * drag;
+                pitch_velocity = (pitch_velocity + (pitch_torque / config.inertia) * dt) * drag;
+
+                // Yaw inertia is higher than roll/pitch because it involves
+                // the whole frame rotating, not just tilting.
+                // We approximate it as 2x the roll/pitch inertia.
+                const double yaw_inertia = config.inertia * 2.0;
+                yaw_velocity  = (yaw_velocity + (yaw_torque / yaw_inertia) * dt) * drag;
+
+                roll_angle  += roll_velocity  * dt;
+                pitch_angle += pitch_velocity * dt;
+                yaw_angle   += yaw_velocity   * dt;
+
+                // Keep yaw in -180 to +180 range
+                if (yaw_angle >  180.0) yaw_angle -= 360.0;
+                if (yaw_angle < -180.0) yaw_angle += 360.0;
             }
 #endif
 
@@ -400,4 +434,7 @@ public:
         launcher.launchCore1([this]() { runCore1_Flight(); });
         launcher.waitForCompletion();
     }
+
+private:
+    double target_altitude_hold = 0.0;  // moved to member so LAND stage can reset it
 };
