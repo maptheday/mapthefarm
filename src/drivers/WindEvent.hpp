@@ -28,5 +28,5 @@ struct WindEvent {
 
     // Add this so brace-init works in the vector
     WindEvent(MissionCommander::Stage s, double t, double r, double p)
-        : stage(s), stageTimeSec(t), rollDeg(r), pitchDeg(p), fired(false)
+        : stage(s), stageTimeSec(t), rollDeg(r), pitchDeg(p), fired(false) {}
 };

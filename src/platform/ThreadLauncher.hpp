@@ -1,5 +1,5 @@
 #pragma once
-#include "../interfaces/IPlatformLauncher.hpp"
+#include "IPlatformLauncher.hpp"
 #include <thread>
 
 // ============================================================

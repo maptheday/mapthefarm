@@ -99,11 +99,11 @@ public:
 
         // ── Stage machine ─────────────────────────────────────
         switch (_stage) {
-            case Stage::WAIT_FOR_ARM: runWaitForArm(cmd, dt);               break;
-            case Stage::COUNTDOWN:    runCountdown(cmd, dt);                 break;
-            case Stage::TAKEOFF:      runTakeoff(cmd, currentAltitude);      break;
-            case Stage::HOVER:        runHover(cmd, currentAltitude, dt);    break;
-            case Stage::LAND:         runLand(cmd, currentAltitude);         break;
+            case Stage::WAIT_FOR_ARM: runWaitForArm(cmd, dt);                        break;
+            case Stage::COUNTDOWN:    runCountdown(cmd, dt);                        break;
+            case Stage::TAKEOFF:      runTakeoff(cmd, currentAltitude, currentRoll, currentPitch); break;
+            case Stage::HOVER:        runHover(cmd, currentAltitude, dt);           break;
+            case Stage::LAND:         runLand(cmd, currentAltitude, currentRoll, currentPitch);  break;
             case Stage::SHUTDOWN:     cmd.armed = false; cmd.throttle = 0.0; break;
         }
 
@@ -131,6 +131,8 @@ private:
     double _hoverTimer      = 0.0;
     int    _lastBeepSecond  = -1;   // tracks which second we last printed
     double _waitPrintTimer  = 0.0;  // throttles "waiting..." messages
+    double _landStartRoll   = 0.0;  // freeze attitude during landing
+    double _landStartPitch  = 0.0;  // to prevent PID-driven lift
 
     // ── isArmPinHigh() ────────────────────────────────────────
     //
@@ -216,14 +218,14 @@ private:
     }
 
     // ── TAKEOFF ───────────────────────────────────────────────
-    void runTakeoff(DronePacket& cmd, double altitude) {
+    void runTakeoff(DronePacket& cmd, double altitude, double roll, double pitch) {
         cmd.armed       = true;
         cmd.throttle    = 0.6;
         cmd.targetRoll  = 0.0;
         cmd.targetPitch = 0.0;
 
         if (altitude >= TARGET_ALTITUDE_M - 0.05) {
-            std::cout << "\n[MISSION] Target altitude reached ("
+            std::cout << "\n[MISSION] Target altitude reached (" 
                       << altitude << "m). Entering hover.\n\n";
             _stage = Stage::HOVER;
         }
@@ -233,7 +235,7 @@ private:
     void runHover(DronePacket& cmd, double altitude, double dt) {
         _hoverTimer += dt;
         cmd.armed       = true;
-        cmd.throttle    = 0.5;
+        cmd.throttle    = 0.15;  // Start lower — let altitude PID trim up as needed
         cmd.targetRoll  = 0.0;
         cmd.targetPitch = 0.0;
 
@@ -244,15 +246,24 @@ private:
     }
 
     // ── LAND ──────────────────────────────────────────────────
-    void runLand(DronePacket& cmd, double altitude) {
+    void runLand(DronePacket& cmd, double altitude, double roll, double pitch) {
+        // On first entry to LAND, freeze the current attitude
+        static bool land_started = false;
+        if (!land_started) {
+            _landStartRoll  = roll;
+            _landStartPitch = pitch;
+            land_started = true;
+        }
+        
         cmd.armed       = true;
-        cmd.throttle    = 0.35;
-        cmd.targetRoll  = 0.0;
-        cmd.targetPitch = 0.0;
+        cmd.throttle    = 0.05;  // Very low throttle — force descent
+        cmd.targetRoll  = _landStartRoll;   // Hold landing attitude — no corrections
+        cmd.targetPitch = _landStartPitch;  // prevents PID-driven unbalanced thrust
 
         if (altitude <= 0.05) {
             std::cout << "\n[MISSION] Touchdown. Disarming motors.\n\n";
             _stage = Stage::SHUTDOWN;
+            land_started = false;  // reset for next flight
         }
     }
 

@@ -1,20 +1,30 @@
+#pragma once
 #include <iostream>
 #include <iomanip>
 #include <chrono>
 #include <thread>
 #include <vector>
-#include <mutex>
 #include <atomic>
+#include <cmath>
 
 #include "core/PID.hpp"
+#include "core/MotorMixer.hpp"
 #include "interfaces/IIMU.hpp"
 #include "interfaces/IBarometer.hpp"
+#include "interfaces/IESC.hpp"
 #include "drivers/SimulatedIMU.hpp"
 #include "drivers/SimulatedBarometer.hpp"
+#include "drivers/SimulatedESC.hpp"
 #include "drivers/MissionCommander.hpp"
 #include "drivers/WindEvent.hpp"
 #include "drivers/DronePacket.hpp"
-#include "interfaces/IPlatformLauncher.hpp"
+#include "platform/IPlatformLauncher.hpp"
+#include "platform/IPlatformMutex.hpp"
+#include "config/DroneConfig.hpp"
+
+#ifdef ESP_BUILD
+#include "freertos/FreeRTOS.h"
+#endif
 
 // ============================================================
 //  FlightControllerProgram (Dual-Core Architecture)
@@ -22,28 +32,41 @@
 //  CORE 0 (Avionics / Navigation): Runs at 20 Hz (50ms)
 //  CORE 1 (Flight / Stabilization): Runs at 250 Hz (4ms)
 //
-//  Core launching is handled by an IPlatformLauncher so this
-//  class has zero platform-specific code. Pass a ThreadLauncher
-//  on Mac, an EspLauncher when flashing to the ESP32-S3.
+//  Constructor variants:
+//
+//    Mac simulation (SimulatedESC used internally):
+//      FlightControllerProgram program(config, physics_mx, ipc_mx);
+//
+//    ESP32-S3 hardware (real ESC + sensors injected):
+//      FlightControllerProgram program(config, physics_mx, ipc_mx, esc, imu, baro);
 // ============================================================
 
 class FlightControllerProgram {
 private:
-    // ── Simulated hardware chips ──────────────────────────────
-    SimulatedIMU        hardware_imu;
-    SimulatedBarometer  hardware_baro;
+    // ── Hardware drivers ──────────────────────────────────────
+    SimulatedIMU       hardware_imu;
+    SimulatedBarometer hardware_baro;
+    SimulatedESC       simulated_esc;
 
-    IIMU*       imu  = nullptr;
+    IIMU* imu  = nullptr;
     IBarometer* baro = nullptr;
+    IESC* esc  = nullptr;
 
     MissionCommander mission;
 
     PIDController altitude_pid;
     PIDController roll_pid;
     PIDController pitch_pid;
+    MotorMixer    mixer;
 
-    // ── 1. The Physical Universe (Simulation Data) ────────────
-    std::mutex physics_mutex;
+    // ── Physical properties of this drone ────────────────────
+    const DroneConfig& config;
+
+    // ── Platform mutexes ─────────────────────────────────────
+    IPlatformMutex& physics_mutex;
+    IPlatformMutex& ipc_mutex;
+
+    // ── 1. The Physical Universe (Simulation State) ───────────
     double altitude       = 0.0;
     double vertical_vel   = 0.0;
     double roll_angle     = 0.0;
@@ -52,12 +75,16 @@ private:
     double pitch_velocity = 0.0;
 
     // ── 2. The Inter-Core Bridge (IPC) ────────────────────────
-    std::mutex ipc_mutex;
     struct {
         double target_roll   = 0.0;
         double target_pitch  = 0.0;
         double throttle_cmd  = 0.0;
         bool   armed         = false;
+
+        double motor_m1 = 0.0;
+        double motor_m2 = 0.0;
+        double motor_m3 = 0.0;
+        double motor_m4 = 0.0;
     } ipc_bridge;
 
     // ── System Control ────────────────────────────────────────
@@ -69,68 +96,119 @@ private:
     double                  stageTimer = 0.0;
 
     std::vector<WindEvent> wind_schedule = {
-        { MissionCommander::Stage::TAKEOFF, 1.5,  -15.0,   0.0 },
-        { MissionCommander::Stage::HOVER,   1.0,    0.0,  12.0 },
-        { MissionCommander::Stage::HOVER,   3.5,   10.0,  -8.0 },
+        WindEvent(MissionCommander::Stage::TAKEOFF, 1.5, -15.0,   0.0),
+        WindEvent(MissionCommander::Stage::HOVER,   1.0,   0.0,  12.0),
+        WindEvent(MissionCommander::Stage::HOVER,   3.5,  10.0,  -8.0),
     };
+
+    // ── Platform sleep helper ─────────────────────────────────
+    void sleepMs(int ms) {
+#ifdef ESP_BUILD
+        vTaskDelay(pdMS_TO_TICKS(ms));
+#else
+        std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+#endif
+    }
 
     void applyWindEvents() {
         for (WindEvent& g : wind_schedule) {
             if (!g.fired && mission.getStage() == g.stage && stageTimer >= g.stageTimeSec) {
                 std::cout << "\n>>> [WIND GUST]"
                           << "  stage=" << mission.stageName()
-                          << "  t+" << g.stageTimeSec << "s"
-                          << "  roll+" << g.rollDeg << "°"
-                          << "  pitch+" << g.pitchDeg << "° <<<\n\n";
+                          << "  t+"     << g.stageTimeSec << "s"
+                          << "  roll+"  << g.rollDeg      << "deg"
+                          << "  pitch+" << g.pitchDeg     << "deg <<<\n\n";
 
-                std::lock_guard<std::mutex> lock(physics_mutex);
-                roll_angle    += g.rollDeg;
-                pitch_angle   += g.pitchDeg;
-                roll_velocity += g.rollDeg  * 2.0;
-                pitch_velocity+= g.pitchDeg * 2.0;
+                PlatformLockGuard lock(physics_mutex);
+                roll_angle     += g.rollDeg;
+                pitch_angle    += g.pitchDeg;
+                roll_velocity  += g.rollDeg  * 2.0;
+                pitch_velocity += g.pitchDeg * 2.0;
 
                 g.fired = true;
             }
         }
     }
 
-public:
-    FlightControllerProgram() {
-        imu  = &hardware_imu;
-        baro = &hardware_baro;
+    // ── Shared constructor body ───────────────────────────────
+    void init() {
+        // Only default to simulated hardware if real hardware wasn't injected
+        if (!imu)  imu  = &hardware_imu;
+        if (!baro) baro = &hardware_baro;
+        if (!esc)  esc  = &simulated_esc;
 
-        altitude_pid.Kp = 1.2;  altitude_pid.Ki = 0.05; altitude_pid.Kd = 0.8;
+        altitude_pid.Kp = 1.2;   altitude_pid.Ki = 0.05;  altitude_pid.Kd = 0.8;
         altitude_pid.maxOutput = 0.4;
 
-        roll_pid.Kp  = 8.0;  roll_pid.Ki  = 0.1;  roll_pid.Kd  = 3.0;
-        pitch_pid.Kp = 8.0;  pitch_pid.Ki = 0.1;  pitch_pid.Kd = 3.0;
+        // Fixed bang-bang tuning: scaled down to output values between 0.0 and 1.0
+        roll_pid.Kp  = 0.016;  roll_pid.Ki  = 0.001;  roll_pid.Kd  = 0.008;
+        roll_pid.maxOutput = 0.8;
+
+        pitch_pid.Kp = 0.016;  pitch_pid.Ki = 0.001;  pitch_pid.Kd = 0.008;
+        pitch_pid.maxOutput = 0.8;
+    }
+
+public:
+    // ── Constructor (simulation — uses SimulatedESC) ──────────
+    FlightControllerProgram(const DroneConfig& cfg,
+                            IPlatformMutex& physics_mx,
+                            IPlatformMutex& ipc_mx)
+        : config(cfg)
+        , physics_mutex(physics_mx)
+        , ipc_mutex(ipc_mx)
+        , mixer(simulated_esc)
+    {
+        init();
+    }
+
+    // ── Constructor (hardware — real ESC + sensors injected) ──
+    FlightControllerProgram(const DroneConfig& cfg,
+                            IPlatformMutex& physics_mx,
+                            IPlatformMutex& ipc_mx,
+                            IESC& real_esc,
+                            IIMU& real_imu,
+                            IBarometer& real_baro)
+        : config(cfg)
+        , physics_mutex(physics_mx)
+        , ipc_mutex(ipc_mx)
+        , mixer(real_esc)
+    {
+        esc = &real_esc;
+        imu = &real_imu;
+        baro = &real_baro;
+        init();
     }
 
     void setup() {
         std::cout << "========================================================\n";
         std::cout << "         DRONE FLIGHT CONTROLLER (DUAL-CORE)            \n";
         std::cout << "         Core 0: Avionics (20Hz) | Core 1: Flight (250Hz)\n";
+        std::cout << "         Mass: "   << config.mass_kg << "kg"
+                  << "  Arm: "           << config.arm_length_m * 1000.0 << "mm"
+                  << "  Hover: "         << (int)(config.hover_throttle * 100.0) << "% throttle\n";
         std::cout << "========================================================\n\n";
 
         imu->initialize();
         baro->initialize();
+        esc->initialize();
 
         std::cout << std::left
                   << std::setw(6)  << "Cycle"
                   << std::setw(11) << "Stage"
                   << std::setw(10) << "Alt(m)"
-                  << std::setw(10) << "Roll°"
-                  << std::setw(10) << "Pitch°"
+                  << std::setw(10) << "Roll"
+                  << std::setw(10) << "Pitch"
                   << std::setw(10) << "Throttle"
+                  << std::setw(24) << "Motors (M1 M2 M3 M4)"
                   << "Notes\n";
-        std::cout << std::string(68, '-') << "\n";
+        std::cout << std::string(90, '-') << "\n";
     }
 
     // ============================================================
-    //  CORE 0: Avionics & Navigation (Runs at 20 Hz)
+    //  CORE 0: Avionics & Navigation (20 Hz)
     // ============================================================
     void runCore0_Avionics() {
-        const double dt_core0 = 0.05; // 50 ms
+        const double dt = 0.05;
 
         while (simulation_running) {
             cycle_core0++;
@@ -138,49 +216,53 @@ public:
             // 1. Read sensors
             double measured_alt, measured_roll, measured_pitch;
             {
-                std::lock_guard<std::mutex> lock(physics_mutex);
-
+                PlatformLockGuard lock(physics_mutex);
                 hardware_baro.injectAltitude(altitude);
                 hardware_imu.injectState(roll_angle, pitch_angle);
-
                 measured_alt   = baro->readAltitudeMeters();
                 measured_roll  = imu->readGyroRoll();
                 measured_pitch = imu->readGyroPitch();
             }
 
-            // 2. Mission Logic & Wind Timer
+            // 3. Altitude PID (outer loop)
+            static double target_altitude = 0.0;
+
+            // 2. Mission logic & wind events
             MissionCommander::Stage currentStage = mission.getStage();
             if (currentStage != lastStage) {
                 stageTimer = 0.0;
                 lastStage  = currentStage;
+                if (currentStage == MissionCommander::Stage::LAND) {
+                    target_altitude = 0.0;
+                }
             }
-            stageTimer += dt_core0;
+            stageTimer += dt;
             applyWindEvents();
 
-            DronePacket cmd = mission.update(measured_alt, measured_roll, measured_pitch, dt_core0);
-
-            // 3. Altitude PID (Outer Loop)
-            static double target_altitude = 0.0;
+            DronePacket cmd = mission.update(measured_alt, measured_roll, measured_pitch, dt);
 
             if (mission.getStage() == MissionCommander::Stage::TAKEOFF ||
                 mission.getStage() == MissionCommander::Stage::HOVER) {
                 target_altitude = MissionCommander::TARGET_ALTITUDE_M;
             }
             else if (mission.getStage() != MissionCommander::Stage::WAIT_FOR_ARM &&
-                       mission.getStage() != MissionCommander::Stage::COUNTDOWN) {
-                target_altitude -= 0.5 * dt_core0;
+                     mission.getStage() != MissionCommander::Stage::COUNTDOWN &&
+                     mission.getStage() != MissionCommander::Stage::LAND) {
+                target_altitude -= 0.5 * dt;
                 if (target_altitude < 0.0) target_altitude = 0.0;
             }
 
-            double throttle_trim  = altitude_pid.calculate(target_altitude, measured_alt, dt_core0);
+            double throttle_trim  = altitude_pid.calculate(target_altitude, measured_alt, dt);
             double final_throttle = cmd.throttle + throttle_trim;
-
+            
+            // Apply Idle Throttle to prevent motors from completely stopping in the air
             if (final_throttle > 1.0) final_throttle = 1.0;
-            if (final_throttle < 0.0) final_throttle = 0.0;
+            if (cmd.armed && final_throttle < 0.05) final_throttle = 0.05;
+            else if (!cmd.armed && final_throttle < 0.0) final_throttle = 0.0;
 
             // 4. Write to IPC bridge
             {
-                std::lock_guard<std::mutex> lock(ipc_mutex);
+                PlatformLockGuard lock(ipc_mutex);
                 ipc_bridge.target_roll  = cmd.targetRoll;
                 ipc_bridge.target_pitch = cmd.targetPitch;
                 ipc_bridge.throttle_cmd = final_throttle;
@@ -188,31 +270,44 @@ public:
             }
 
             // 5. Telemetry
-            bool stable = (measured_roll > -1.0 && measured_roll < 1.0) &&
+            double m1, m2, m3, m4;
+            {
+                PlatformLockGuard lock(ipc_mutex);
+                m1 = ipc_bridge.motor_m1;
+                m2 = ipc_bridge.motor_m2;
+                m3 = ipc_bridge.motor_m3;
+                m4 = ipc_bridge.motor_m4;
+            }
+
+            bool stable = (measured_roll  > -1.0 && measured_roll  < 1.0) &&
                           (measured_pitch > -1.0 && measured_pitch < 1.0);
 
             std::cout << std::right << std::fixed << std::setprecision(2)
-                      << std::setw(4)  << cycle_core0 << "  "
+                      << std::setw(4)  << cycle_core0   << "  "
                       << std::left  << std::setw(11) << mission.stageName()
                       << std::right << std::setw(7)  << measured_alt   << "m  "
-                      << std::setw(7)  << measured_roll  << "°  "
-                      << std::setw(7)  << measured_pitch << "°  "
+                      << std::setw(7)  << measured_roll  << "deg  "
+                      << std::setw(7)  << measured_pitch << "deg  "
                       << std::setw(7)  << final_throttle << "  "
+                      << std::setw(5)  << m1 << " "
+                      << std::setw(5)  << m2 << " "
+                      << std::setw(5)  << m3 << " "
+                      << std::setw(5)  << m4 << "  "
                       << (stable ? "STABLE" : "") << "\n";
 
             if (mission.isComplete() || cycle_core0 > 1000) {
                 simulation_running = false;
             }
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            sleepMs(50);
         }
     }
 
     // ============================================================
-    //  CORE 1: Flight Stabilization (Runs at 250 Hz)
+    //  CORE 1: Flight Stabilization (250 Hz)
     // ============================================================
     void runCore1_Flight() {
-        const double dt_core1 = 0.004; // 4 ms
+        const double dt   = 0.004;
 
         while (simulation_running) {
 
@@ -220,7 +315,7 @@ public:
             double target_roll, target_pitch, throttle_cmd;
             bool is_armed;
             {
-                std::lock_guard<std::mutex> lock(ipc_mutex);
+                PlatformLockGuard lock(ipc_mutex);
                 target_roll  = ipc_bridge.target_roll;
                 target_pitch = ipc_bridge.target_pitch;
                 throttle_cmd = ipc_bridge.throttle_cmd;
@@ -230,49 +325,75 @@ public:
             // 2. Read IMU
             double measured_roll, measured_pitch;
             {
-                std::lock_guard<std::mutex> lock(physics_mutex);
-
+                PlatformLockGuard lock(physics_mutex);
                 hardware_imu.injectState(roll_angle, pitch_angle);
-
                 measured_roll  = imu->readGyroRoll();
                 measured_pitch = imu->readGyroPitch();
             }
 
-            // 3. Attitude PIDs (Inner Loop)
-            double roll_cmd  = roll_pid.calculate(target_roll, measured_roll, dt_core1);
-            double pitch_cmd = pitch_pid.calculate(target_pitch, measured_pitch, dt_core1);
+            // 3. Attitude PIDs
+            double roll_cmd  = roll_pid.calculate(target_roll,  measured_roll,  dt);
+            double pitch_cmd = pitch_pid.calculate(target_pitch, measured_pitch, dt);
 
-            // 4. Update Physical World
-            {
-                std::lock_guard<std::mutex> lock(physics_mutex);
-                if (is_armed) {
-                    double vertical_accel = (throttle_cmd - 0.5) * 20.0;
-                    vertical_vel = (vertical_vel + vertical_accel * dt_core1) * 0.92;
-                } else {
-                    vertical_vel = (vertical_vel - 9.8 * dt_core1) * 0.95;
-                }
-
-                altitude += vertical_vel * dt_core1;
-                if (altitude < 0.0) { altitude = 0.0; vertical_vel = 0.0; }
-
-                const double inertia = 0.1;
-                const double drag    = 0.88;
-                roll_velocity  = (roll_velocity  + (roll_cmd  / inertia) * dt_core1) * drag;
-                pitch_velocity = (pitch_velocity + (pitch_cmd / inertia) * dt_core1) * drag;
-                roll_angle  += roll_velocity  * dt_core1;
-                pitch_angle += pitch_velocity * dt_core1;
+            // 4. Motor mixer — sends commands to ESC
+            if (is_armed) {
+                mixer.mix(throttle_cmd, roll_cmd, pitch_cmd);
+            } else {
+                mixer.disarm();
             }
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(4));
+            {
+                PlatformLockGuard lock(ipc_mutex);
+                ipc_bridge.motor_m1 = esc->getMotor(1);
+                ipc_bridge.motor_m2 = esc->getMotor(2);
+                ipc_bridge.motor_m3 = esc->getMotor(3);
+                ipc_bridge.motor_m4 = esc->getMotor(4);
+            }
+
+            // 5. Update physics (SIMULATION ONLY — not on real hardware)
+#ifndef ESP_BUILD
+            {
+                PlatformLockGuard lock(physics_mutex);
+
+                if (is_armed) {
+                    double avg_throttle = (esc->getMotor(1) + esc->getMotor(2) +
+                                          esc->getMotor(3) + esc->getMotor(4)) / 4.0;
+
+                    double roll_rad   = roll_angle  * M_PI / 180.0;
+                    double pitch_rad  = pitch_angle * M_PI / 180.0;
+                    double tilt_cos   = std::cos(roll_rad) * std::cos(pitch_rad);
+
+                    double raw_thrust     = avg_throttle * config.total_thrust_max;
+                    double vertical_thrust = raw_thrust * tilt_cos;  // upward component only
+                    double gravity         = config.mass_kg * 9.81;
+                    double vertical_accel  = (vertical_thrust - gravity) / config.mass_kg;
+                    vertical_vel = (vertical_vel + vertical_accel * dt) * 0.985;  // Realistic air resistance
+                } else {
+                    vertical_vel = (vertical_vel - 9.81 * dt) * 0.99;  // Realistic descent
+                }
+
+                altitude += vertical_vel * dt;
+                if (altitude < 0.0) { altitude = 0.0; vertical_vel = 0.0; }
+
+                double roll_torque  = (esc->getMotor(2) + esc->getMotor(4))
+                                    - (esc->getMotor(1) + esc->getMotor(3));
+                double pitch_torque = (esc->getMotor(3) + esc->getMotor(4))
+                                    - (esc->getMotor(1) + esc->getMotor(2));
+
+                const double realistic_drag = 0.96;  // More realistic air resistance
+                roll_velocity  = (roll_velocity  + (roll_torque  / config.inertia) * dt) * realistic_drag;
+                pitch_velocity = (pitch_velocity + (pitch_torque / config.inertia) * dt) * realistic_drag;
+                roll_angle    += roll_velocity  * dt;
+                pitch_angle   += pitch_velocity * dt;
+            }
+#endif
+
+            sleepMs(4);
         }
     }
 
     // ============================================================
     //  runDualCore — platform-agnostic launch
-    //
-    //  Pass a ThreadLauncher for Mac simulation.
-    //  Pass an EspLauncher when running on the ESP32-S3.
-    //  This method has no #ifdef and no platform knowledge.
     // ============================================================
     void runDualCore(IPlatformLauncher& launcher) {
         launcher.launchCore0([this]() { runCore0_Avionics(); });
