@@ -17,11 +17,11 @@
 //    EspLauncher launcher;
 //    program.runDualCore(launcher);
 //
-//  Only compiled when ESP_BUILD is defined (set via
+//  Only compiled when ON_REAL_HARDWARE is defined (set via
 //  build_flags in platformio.ini for the esp32s3 env).
 // ============================================================
 
-#ifdef ESP_BUILD
+#ifdef ON_REAL_HARDWARE
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -76,4 +76,4 @@ public:
     }
 };
 
-#endif // ESP_BUILD
+#endif // ON_REAL_HARDWARE

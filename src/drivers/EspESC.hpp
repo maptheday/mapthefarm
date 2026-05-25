@@ -1,7 +1,7 @@
 #pragma once
 #include "../interfaces/IESC.hpp"
 
-#ifdef ESP_BUILD
+#ifdef ON_REAL_HARDWARE
 #include "Arduino.h"
 
 // ============================================================
@@ -130,4 +130,4 @@ private:
     }
 };
 
-#endif // ESP_BUILD
+#endif // ON_REAL_HARDWARE

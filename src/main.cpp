@@ -3,7 +3,7 @@
 #include "platform/ThreadMutex.hpp"
 #include "config/DroneConfig.hpp"
 
-#ifdef ESP_BUILD
+#ifdef ON_REAL_HARDWARE
 #include "platform/EspLauncher.hpp"
 #include "platform/EspMutex.hpp"
 #include "drivers/EspESC.hpp"
@@ -18,7 +18,7 @@ int main() {
         9.0      // ~900g thrust per motor in Newtons
     );
 
-#ifdef ESP_BUILD
+#ifdef ON_REAL_HARDWARE
     EspMutex    physics_mx;
     EspMutex    ipc_mx;
     EspLauncher launcher;
@@ -31,7 +31,7 @@ int main() {
     // for the native build — no esc object needed here
 #endif
 
-#ifdef ESP_BUILD
+#ifdef ON_REAL_HARDWARE
     FlightControllerProgram program(config, physics_mx, ipc_mx, esc);
 #else
     FlightControllerProgram program(config, physics_mx, ipc_mx);

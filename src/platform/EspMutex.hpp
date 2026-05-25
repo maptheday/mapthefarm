@@ -1,7 +1,7 @@
 #pragma once
 #include "IPlatformMutex.hpp"
 
-#ifdef ESP_BUILD
+#ifdef ON_REAL_HARDWARE
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
@@ -23,4 +23,4 @@ private:
     SemaphoreHandle_t handle;
 };
 
-#endif // ESP_BUILD
+#endif // ON_REAL_HARDWARE

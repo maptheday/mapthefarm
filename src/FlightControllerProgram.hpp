@@ -22,7 +22,7 @@
 #include "platform/IPlatformMutex.hpp"
 #include "config/DroneConfig.hpp"
 
-#ifdef ESP_BUILD
+#ifdef ON_REAL_HARDWARE
 #include "freertos/FreeRTOS.h"
 #endif
 
@@ -107,7 +107,7 @@ private:
 
     // ── Platform sleep helper ─────────────────────────────────
     void sleepMs(int ms) {
-#ifdef ESP_BUILD
+#ifdef ON_REAL_HARDWARE
         vTaskDelay(pdMS_TO_TICKS(ms));
 #else
         std::this_thread::sleep_for(std::chrono::milliseconds(ms));
@@ -226,11 +226,11 @@ public:
             {
                 PlatformLockGuard lock(physics_mutex);
                 hardware_baro.injectAltitude(altitude);
-                hardware_imu.injectState(roll_angle, pitch_angle);
+                hardware_imu.injectState(roll_angle, pitch_angle, yaw_angle);
                 measured_alt   = baro->readAltitudeMeters();
                 measured_roll  = imu->readGyroRoll();
                 measured_pitch = imu->readGyroPitch();
-                measured_yaw   = yaw_angle;  // read directly from sim state
+                measured_yaw   = imu->readYawDeg();  // sim: from injected state, hardware: from real IMU
             }
 
             // 2. Mission logic & wind events
@@ -275,7 +275,9 @@ public:
                 PlatformLockGuard lock(ipc_mutex);
                 ipc_bridge.target_roll  = cmd.targetRoll;
                 ipc_bridge.target_pitch = cmd.targetPitch;
-                ipc_bridge.target_yaw   = cmd.targetYaw;  // from MissionCommander
+                // If the mission hasn't issued an explicit yaw command, hold
+                // the current heading rather than snapping back to 0 degrees.
+                ipc_bridge.target_yaw   = cmd.holdYaw ? measured_yaw : cmd.targetYaw;
                 ipc_bridge.throttle_cmd = final_throttle;
                 ipc_bridge.armed        = cmd.armed;
             }
@@ -339,10 +341,10 @@ public:
             double measured_roll, measured_pitch, measured_yaw;
             {
                 PlatformLockGuard lock(physics_mutex);
-                hardware_imu.injectState(roll_angle, pitch_angle);
+                hardware_imu.injectState(roll_angle, pitch_angle, yaw_angle);
                 measured_roll  = imu->readGyroRoll();
                 measured_pitch = imu->readGyroPitch();
-                measured_yaw   = yaw_angle;
+                measured_yaw   = imu->readYawDeg();  // sim: injected, hardware: real IMU chip
             }
 
             // 3. Attitude PIDs — now includes yaw
@@ -367,7 +369,7 @@ public:
             }
 
             // 5. Update physics (simulation only — not compiled on hardware)
-#ifndef ESP_BUILD
+#ifndef ON_REAL_HARDWARE
             {
                 PlatformLockGuard lock(physics_mutex);
 

@@ -3,22 +3,28 @@
 // ============================================================
 //  DronePacket
 //
-//  This is the exact data structure the Synapse transmitter
-//  sends to the drone over nRF24 radio every cycle.
+//  The command packet that MissionCommander produces each
+//  Core 0 cycle and writes into the IPC bridge.
 //
-//  In simulation, MissionCommander fills this struct instead
-//  of real radio hardware.  On real hardware, your radio task
-//  would receive bytes over nRF24 and deserialise them into
-//  this same struct.  The flight controller never knows the
-//  difference.
+//  Core 1 reads this to know what the drone should be doing
+//  right now — armed or not, what attitude to hold, what
+//  throttle to apply.
 //
-//  All angles in degrees.  Throttle is 0.0 – 1.0 (0% – 100%).
+//  All angle targets in degrees.
+//  throttle is 0.0 (stopped) to 1.0 (full).
 // ============================================================
-
 struct DronePacket {
-    double throttle    = 0.0;   // 0.0 = motors off, 1.0 = full power
-    double targetRoll  = 0.0;   // degrees  (inner loop setpoint)
-    double targetPitch = 0.0;   // degrees  (inner loop setpoint)
-    double targetYaw   = 0.0;   // degrees  (inner loop setpoint, not used yet)
-    bool   armed       = false; // safety: motors only spin when true
+    bool   armed       = false;
+    double throttle    = 0.0;
+
+    double targetRoll  = 0.0;   // degrees, 0 = level
+    double targetPitch = 0.0;   // degrees, 0 = level
+    double targetYaw   = 0.0;   // degrees, 0 = hold launch heading
+
+    // If true, Core 0 wants Core 1 to hold the current yaw
+    // rather than rotate toward targetYaw. Set this when the
+    // mission hasn't issued an explicit yaw command — it tells
+    // the yaw PID "stay wherever you are" instead of snapping
+    // back to 0 degrees.
+    bool holdYaw = true;
 };
