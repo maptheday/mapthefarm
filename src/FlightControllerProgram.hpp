@@ -24,6 +24,7 @@
 
 #ifdef ON_REAL_HARDWARE
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #endif
 
 // ============================================================

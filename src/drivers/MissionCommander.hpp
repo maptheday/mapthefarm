@@ -103,7 +103,7 @@ public:
             case Stage::COUNTDOWN:    runCountdown(cmd, dt);                        break;
             case Stage::TAKEOFF:      runTakeoff(cmd, currentAltitude, currentRoll, currentPitch); break;
             case Stage::HOVER:        runHover(cmd, currentAltitude, dt);           break;
-            case Stage::LAND:         runLand(cmd, currentAltitude, currentRoll, currentPitch);  break;
+            case Stage::LAND:         runLand(cmd, currentAltitude, currentRoll, currentPitch, dt); break;
             case Stage::SHUTDOWN:     cmd.armed = false; cmd.throttle = 0.0; break;
         }
 
@@ -129,6 +129,7 @@ private:
     Stage  _stage           = Stage::WAIT_FOR_ARM;
     double _countdownTimer  = 0.0;
     double _hoverTimer      = 0.0;
+    double _landTimer       = 0.0;  // time spent in LAND stage
     int    _lastBeepSecond  = -1;   // tracks which second we last printed
     double _waitPrintTimer  = 0.0;  // throttles "waiting..." messages
     double _landStartRoll   = 0.0;  // freeze attitude during landing
@@ -246,22 +247,27 @@ private:
     }
 
     // ── LAND ──────────────────────────────────────────────────
-    void runLand(DronePacket& cmd, double altitude, double roll, double pitch) {
+    void runLand(DronePacket& cmd, double altitude, double roll, double pitch, double dt) {
         // On first entry to LAND, freeze the current attitude
         static bool land_started = false;
         if (!land_started) {
             _landStartRoll  = roll;
             _landStartPitch = pitch;
+            _landTimer      = 0.0;
             land_started = true;
         }
+        
+        _landTimer += dt;  // Count time in landing phase
         
         cmd.armed       = true;
         cmd.throttle    = 0.05;  // Very low throttle — force descent
         cmd.targetRoll  = _landStartRoll;   // Hold landing attitude — no corrections
         cmd.targetPitch = _landStartPitch;  // prevents PID-driven unbalanced thrust
 
-        if (altitude <= 0.05) {
-            std::cout << "\n[MISSION] Touchdown. Disarming motors.\n\n";
+        // After 5 seconds of low throttle at low altitude, assume touchdown
+        // Timer-based detection is more reliable than barometer on first hardware test
+        if (_landTimer > 5.0) {
+            std::cout << "\n[MISSION] Touchdown (after " << _landTimer << "s). Disarming motors.\n\n";
             _stage = Stage::SHUTDOWN;
             land_started = false;  // reset for next flight
         }
