@@ -47,7 +47,7 @@ class EspIMU : public IIMU {
 public:
     void initialize() override {
         // Initialize I2C if not already done
-        Wire.begin(8, 9);  // SDA=GPIO8, SCL=GPIO9 (ESP32-S3 defaults)
+        Wire.begin(15, 16);  // SDA=GPIO8, SCL=GPIO9 (ESP32-S3 defaults)
         Wire.setClock(400000);  // 400 kHz I2C speed
 
         delay(100);  // Give MPU6050 time to power up

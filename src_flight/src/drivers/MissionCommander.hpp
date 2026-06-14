@@ -224,6 +224,8 @@ private:
         cmd.throttle    = 0.6;
         cmd.targetRoll  = 0.0;
         cmd.targetPitch = 0.0;
+        cmd.holdYaw  = true;   // don't rotate, hold current heading
+        cmd.targetYaw = 0.0;   // ignored when holdYaw=true, but explicit
 
         if (altitude >= TARGET_ALTITUDE_M - 0.05) {
             std::cout << "\n[MISSION] Target altitude reached (" 
