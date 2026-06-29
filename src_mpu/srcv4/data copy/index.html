@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Map The Farm — Flight Controller</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header>
+    <div class="logo">MAP THE FARM</div>
+    <div class="status-bar">
+      <span class="status-dot" id="connectionDot"></span>
+      <span id="connectionLabel">Connecting…</span>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- 3D Cube (primary visual) -->
+    <section class="panel panel--cube">
+      <div class="panel__label">ORIENTATION</div>
+      <div id="3Dcube"></div>
+      <button class="btn btn--ghost" onclick="resetPosition(this)" id="reset">Reset</button>
+    </section>
+
+    <!-- IMU Readings -->
+    <section class="panel panel--imu">
+      <div class="panel__label">IMU</div>
+
+      <div class="data-group">
+        <div class="data-group__title">Gyroscope (°)</div>
+        <div class="data-row">
+          <span class="axis">X</span><span class="value" id="gyroX">—</span>
+        </div>
+        <div class="data-row">
+          <span class="axis">Y</span><span class="value" id="gyroY">—</span>
+        </div>
+        <div class="data-row">
+          <span class="axis">Z</span><span class="value" id="gyroZ">—</span>
+        </div>
+      </div>
+
+      <div class="data-group">
+        <div class="data-group__title">Accelerometer (m/s²)</div>
+        <div class="data-row">
+          <span class="axis">X</span><span class="value" id="accX">—</span>
+        </div>
+        <div class="data-row">
+          <span class="axis">Y</span><span class="value" id="accY">—</span>
+        </div>
+        <div class="data-row">
+          <span class="axis">Z</span><span class="value" id="accZ">—</span>
+        </div>
+      </div>
+
+      <div class="data-group">
+        <div class="data-group__title">Environment</div>
+        <div class="data-row">
+          <span class="axis">TEMP</span><span class="value" id="temp">—</span><span class="unit">°C</span>
+        </div>
+        <div class="data-row">
+          <span class="axis">ALT</span><span class="value" id="altitude">—</span><span class="unit">m</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Motor Control -->
+    <section class="panel panel--motors">
+      <div class="panel__label">MOTORS</div>
+
+      <div class="motor-grid">
+        <div class="motor" id="motor1">
+          <div class="motor__label">M1<span class="motor__pos">FL</span></div>
+          <div class="motor__bar"><div class="motor__fill" id="bar1"></div></div>
+          <div class="motor__value" id="pct1">0%</div>
+        </div>
+        <div class="motor" id="motor2">
+          <div class="motor__label">M2<span class="motor__pos">FR</span></div>
+          <div class="motor__bar"><div class="motor__fill" id="bar2"></div></div>
+          <div class="motor__value" id="pct2">0%</div>
+        </div>
+        <div class="motor" id="motor3">
+          <div class="motor__label">M3<span class="motor__pos">RL</span></div>
+          <div class="motor__bar"><div class="motor__fill" id="bar3"></div></div>
+          <div class="motor__value" id="pct3">0%</div>
+        </div>
+        <div class="motor" id="motor4">
+          <div class="motor__label">M4<span class="motor__pos">RR</span></div>
+          <div class="motor__bar"><div class="motor__fill" id="bar4"></div></div>
+          <div class="motor__value" id="pct4">0%</div>
+        </div>
+      </div>
+
+      <div class="throttle-control">
+        <label class="throttle-control__label">
+          THROTTLE <span id="throttleDisplay">0%</span>
+        </label>
+        <input type="range" id="throttleSlider" min="0" max="100" value="0"
+               oninput="onThrottleChange(this.value)" />
+      </div>
+
+      <div class="arm-controls">
+        <button class="btn btn--arm" id="armBtn" onclick="armMotors()">ARM</button>
+        <button class="btn btn--disarm" id="disarmBtn" onclick="disarmMotors()">DISARM</button>
+      </div>
+
+      <div class="arm-status" id="armStatus">DISARMED</div>
+    </section>
+
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>

@@ -1,78 +1,416 @@
-/*
-  Rui Santos
-  Complete project details at https://RandomNerdTutorials.com/esp32-mpu-6050-web-server/
+/* ============================================================
+   Map The Farm — Autonomous Flight Dashboard
+   ============================================================ */
 
-  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files.
-  The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-*/
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap');
 
-html {
-  font-family: Arial;
-  display: inline-block;
-  text-align: center;
+:root {
+  --bg:           #0a0c0f;
+  --bg-panel:     #111318;
+  --bg-inset:     #0d0f13;
+  --border:       #1e2230;
+  --accent:       #00e5a0;
+  --accent-dim:   #00e5a018;
+  --warn:         #f59e0b;
+  --danger:       #ef4444;
+  --danger-dim:   #ef444418;
+  --text-primary: #e8eaf0;
+  --text-muted:   #6b7280;
+  --text-axis:    #9ca3af;
+  --font-mono:    'JetBrains Mono', monospace;
+  --font-body:    'Inter', sans-serif;
+  --radius:       6px;
 }
-p {
-  font-size: 1.2rem;
-}
-body {
-  margin: 0;
-}
-.topnav {
-  overflow: hidden;
-  background-color: #003366;
-  color: #FFD43B;
-  font-size: 1rem;
-}
-.content {
-  padding: 20px;
-}
-.card {
-  background-color: white;
-  box-shadow: 2px 2px 12px 1px rgba(140,140,140,.5);
-}
-.card-title {
-  color:#003366;
-  font-weight: bold;
-}
-.cards {
-  max-width: 800px;
-  margin: 0 auto;
-  display: grid; grid-gap: 2rem;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-}
-.reading {
-  font-size: 1.2rem;
-}
-.cube-content{
-  width: 100%;
-  background-color: white;
-  height: 300px; margin: auto;
-  padding-top:2%;
-}
-#reset{
-  border: none;
-  color: #FEFCFB;
-  background-color: #003366;
-  padding: 10px;
-  text-align: center;
-  display: inline-block;
-  font-size: 14px; width: 150px;
-  border-radius: 4px;
-}
-#resetX, #resetY, #resetZ{
-  border: none;
-  color: #FEFCFB;
-  background-color: #003366;
-  padding-top: 10px;
-  padding-bottom: 10px;
-  text-align: center;
-  display: inline-block;
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font-body);
   font-size: 14px;
-  width: 20px;
-  border-radius: 4px;
+}
+
+/* ── Header ─────────────────────────────────────────────── */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.logo {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: background 0.3s;
+}
+.status-dot.connected    { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+.status-dot.disconnected { background: var(--danger); }
+
+.flight-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--text-muted);
+  color: var(--text-muted);
+  transition: all 0.3s;
+}
+.flight-badge.flying {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 8px var(--accent-dim);
+}
+.flight-badge.landing {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+/* ── Layout ─────────────────────────────────────────────── */
+main {
+  display: grid;
+  grid-template-columns: 1fr 260px 240px;
+  gap: 1px;
+  background: var(--border);
+  height: calc(100vh - 49px);
+}
+
+.panel {
+  background: var(--bg-panel);
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.panel__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+/* ── Cube panel ─────────────────────────────────────────── */
+.panel--cube {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
 }
 
 #3Dcube {
   width: 100%;
-  height: 400px;
+  flex: 1;
+  min-height: 280px;
+}
+
+#3Dcube canvas { width: 100% !important; height: 100% !important; }
+
+/* ── Mission panel ───────────────────────────────────────── */
+.panel--mission {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.altitude-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.altitude-display__value {
+  font-family: var(--font-mono);
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1;
+}
+
+.altitude-display__value.accent { color: var(--accent); }
+
+.altitude-display__label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.altitude-display__arrow {
+  font-size: 20px;
+  color: var(--text-muted);
+}
+
+/* Input */
+.mission-input { display: flex; flex-direction: column; gap: 8px; }
+
+.mission-input__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+}
+
+.mission-input__row {
+  display: flex;
+  gap: 8px;
+}
+
+.mission-input__row input {
+  flex: 1;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  padding: 10px 12px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.mission-input__row input:focus {
+  border-color: var(--accent);
+}
+
+.mission-input__hint {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+/* Mission controls */
+.mission-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+/* Altitude bar */
+.alt-bar-wrap { display: flex; flex-direction: column; gap: 6px; }
+
+.alt-bar-track {
+  height: 8px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  position: relative;
+  overflow: hidden;
+}
+
+.alt-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.alt-bar-target {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: 2px;
+  background: var(--warn);
+  transition: left 0.3s ease;
+}
+
+.alt-bar-labels {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+/* ── Telemetry panel ─────────────────────────────────────── */
+.panel--telemetry {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.data-group { display: flex; flex-direction: column; gap: 2px; }
+
+.data-group__title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+}
+
+.data-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 3px 0;
+}
+
+.axis {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--text-axis);
+  min-width: 52px;
+}
+
+.value {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+  text-align: right;
+}
+
+.unit {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: 4px;
+  min-width: 16px;
+}
+
+/* Motor grid */
+.motor-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.motor {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  transition: border-color 0.2s;
+}
+
+.motor.active { border-color: var(--accent); }
+
+.motor__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.motor__pos {
+  font-size: 9px;
+  opacity: 0.5;
+}
+
+.motor__bar {
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.motor__fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  transition: width 0.1s ease;
+}
+
+.motor__value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: right;
+}
+
+/* ── Buttons ─────────────────────────────────────────────── */
+.btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-inset);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn:hover { color: var(--text-primary); border-color: var(--text-muted); }
+
+.btn--ghost  { background: transparent; }
+
+.btn--fly {
+  border-color: var(--accent);
+  color: var(--accent);
+  padding: 10px 20px;
+}
+.btn--fly:hover { background: var(--accent-dim); }
+
+.btn--land {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.btn--land:hover { background: #f59e0b18; }
+
+.btn--stop {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.btn--stop:hover { background: var(--danger-dim); }
+
+/* ── Responsive ─────────────────────────────────────────── */
+@media (max-width: 900px) {
+  main {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+  #3Dcube { min-height: 240px; }
 }

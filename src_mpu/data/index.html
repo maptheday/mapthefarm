@@ -1,52 +1,146 @@
-<!--
-  Rui Santos
-  Complete project details at https://RandomNerdTutorials.com/esp32-mpu-6050-web-server/
-
-  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files.
-  The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
--->
-
-<!DOCTYPE HTML><html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <title>ESP Web Server</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="icon" href="data:,">
-  <link rel="stylesheet" type="text/css" href="style.css">
-  <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Map The Farm — Flight Controller</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="topnav">
-    <h1><i class="far fa-compass"></i> MPU6050 <i class="far fa-compass"></i></h1>
-  </div>
-  <div class="content">
-    <div class="cards">
-      <div class="card">
-        <p class="card-title">GYROSCOPE</p>
-        <p><span class="reading">X: <span id="gyroX"></span> rad</span></p>
-        <p><span class="reading">Y: <span id="gyroY"></span> rad</span></p>
-        <p><span class="reading">Z: <span id="gyroZ"></span> rad</span></p>
+
+  <header>
+    <div class="logo">MAP THE FARM</div>
+    <div class="header-right">
+      <div class="status-bar">
+        <span class="status-dot" id="connectionDot"></span>
+        <span id="connectionLabel">Connecting…</span>
       </div>
-      <div class="card">
-        <p class="card-title">ACCELEROMETER</p>
-        <p><span class="reading">X: <span id="accX"></span> ms<sup>2</sup></span></p>
-        <p><span class="reading">Y: <span id="accY"></span> ms<sup>2</sup></span></p>
-        <p><span class="reading">Z: <span id="accZ"></span> ms<sup>2</sup></span></p>
-      </div>
-      <div class="card">
-        <p class="card-title">TEMPERATURE</p>
-        <p><span class="reading"><span id="temp"></span> &deg;C</span></p>
-        <p class="card-title">3D ANIMATION</p>
-        <button id="reset" onclick="resetPosition(this)">RESET POSITION</button>
-        <button id="resetX" onclick="resetPosition(this)">X</button>
-        <button id="resetY" onclick="resetPosition(this)">Y</button>
-        <button id="resetZ" onclick="resetPosition(this)">Z</button>
-      </div>
+      <div class="flight-badge" id="flightBadge">GROUNDED</div>
     </div>
-    <div class="cube-content">
+  </header>
+
+  <main>
+
+    <!-- 3D Cube -->
+    <section class="panel panel--cube">
+      <div class="panel__label">ORIENTATION</div>
       <div id="3Dcube"></div>
-    </div>
-  </div>
-<script src="script.js"></script>
+      <button class="btn btn--ghost" onclick="resetPosition(this)" id="reset">Reset IMU</button>
+    </section>
+
+    <!-- Flight Mission -->
+    <section class="panel panel--mission">
+      <div class="panel__label">MISSION</div>
+
+      <div class="altitude-display">
+        <div class="altitude-display__actual">
+          <div class="altitude-display__value" id="actualAlt">0.0</div>
+          <div class="altitude-display__label">ACTUAL (ft)</div>
+        </div>
+        <div class="altitude-display__arrow">→</div>
+        <div class="altitude-display__target">
+          <div class="altitude-display__value accent" id="targetAlt">0.0</div>
+          <div class="altitude-display__label">TARGET (ft)</div>
+        </div>
+      </div>
+
+      <!-- Altitude input -->
+      <div class="mission-input">
+        <label class="mission-input__label">SET TARGET ALTITUDE (ft)</label>
+        <div class="mission-input__row">
+          <input type="number" id="altInput" min="0" max="50"
+                 placeholder="e.g. 10" step="1" />
+          <button class="btn btn--fly" onclick="fly()">FLY</button>
+        </div>
+        <div class="mission-input__hint">Max 50ft · BME280 altitude reference</div>
+      </div>
+
+      <!-- Controls -->
+      <div class="mission-controls">
+        <button class="btn btn--land" onclick="land()">LAND</button>
+        <button class="btn btn--stop" onclick="stop()">■ STOP</button>
+      </div>
+
+      <!-- Altitude bar -->
+      <div class="alt-bar-wrap">
+        <div class="alt-bar-track">
+          <div class="alt-bar-fill" id="altBar"></div>
+          <div class="alt-bar-target" id="altBarTarget"></div>
+        </div>
+        <div class="alt-bar-labels">
+          <span>0 ft</span><span>50 ft</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- IMU + PID Debug -->
+    <section class="panel panel--telemetry">
+      <div class="panel__label">TELEMETRY</div>
+
+      <div class="data-group">
+        <div class="data-group__title">Orientation (°)</div>
+        <div class="data-row">
+          <span class="axis">ROLL</span>
+          <span class="value" id="gyroX">—</span>
+        </div>
+        <div class="data-row">
+          <span class="axis">PITCH</span>
+          <span class="value" id="gyroY">—</span>
+        </div>
+        <div class="data-row">
+          <span class="axis">YAW</span>
+          <span class="value" id="gyroZ">—</span>
+        </div>
+      </div>
+
+      <div class="data-group">
+        <div class="data-group__title">PID Output</div>
+        <div class="data-row">
+          <span class="axis">BASE</span>
+          <span class="value" id="baseThrottle">—</span>
+          <span class="unit">%</span>
+        </div>
+        <div class="data-row">
+          <span class="axis">ROLL Δ</span>
+          <span class="value" id="rollCorrection">—</span>
+          <span class="unit">%</span>
+        </div>
+        <div class="data-row">
+          <span class="axis">PITCH Δ</span>
+          <span class="value" id="pitchCorrection">—</span>
+          <span class="unit">%</span>
+        </div>
+      </div>
+
+      <!-- Motor grid -->
+      <div class="data-group__title" style="margin-top:4px">Motors</div>
+      <div class="motor-grid">
+        <div class="motor" id="motor1">
+          <div class="motor__label">M1 <span class="motor__pos">FL</span></div>
+          <div class="motor__bar"><div class="motor__fill" id="bar1"></div></div>
+          <div class="motor__value" id="pct1">0%</div>
+        </div>
+        <div class="motor" id="motor2">
+          <div class="motor__label">M2 <span class="motor__pos">FR</span></div>
+          <div class="motor__bar"><div class="motor__fill" id="bar2"></div></div>
+          <div class="motor__value" id="pct2">0%</div>
+        </div>
+        <div class="motor" id="motor3">
+          <div class="motor__label">M3 <span class="motor__pos">RL</span></div>
+          <div class="motor__bar"><div class="motor__fill" id="bar3"></div></div>
+          <div class="motor__value" id="pct3">0%</div>
+        </div>
+        <div class="motor" id="motor4">
+          <div class="motor__label">M4 <span class="motor__pos">RR</span></div>
+          <div class="motor__bar"><div class="motor__fill" id="bar4"></div></div>
+          <div class="motor__value" id="pct4">0%</div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="script.js"></script>
 </body>
 </html>

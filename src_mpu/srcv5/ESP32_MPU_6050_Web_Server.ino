@@ -25,8 +25,7 @@ JsonDocument readings;
 Adafruit_MPU6050 mpu;
 Madgwick filter;
 EspBarometer barometer;
-// One ESC instance per motor (GPIO 4/5/6/7 → RMT channels 0/1/2/3)
-EspESC esc1, esc2, esc3, esc4;
+EspESC esc;
 
 // ==========================================
 // PID CONTROLLERS
@@ -102,13 +101,29 @@ void physicsTask(void* parameter) {
     sensors_event_t a, g, temp;
     mpu.getEvent(&a, &g, &temp);
 
+    // Convert gyro from rad/s → deg/s
+    // The MPU6050 gives us rotational speed in radians per second
+    // but Madgwick expects degrees per second — 57.2958 is just the conversion factor
     float gx = g.gyro.x * 57.2958f;
     float gy = g.gyro.y * 57.2958f;
     float gz = g.gyro.z * 57.2958f;
 
+    // Tell the filter how much time actually passed since the last loop
+    // This is the "ruler" — without it, the filter can't convert
+    // "spinning at 20°/sec" into "rotated X degrees"
+    // (the old API wants frequency not time, so we flip it: 1/dt)
     if (dt > 0 && dt < 1.0f) filter.begin(1.0f / dt);
+
+    // Feed gyro + accelerometer into the filter
+    // Gyro does the dead reckoning: rotation += speed × dt
+    // Accelerometer corrects slow drift by always knowing which way is "down"
+    // Output is a best-guess orientation that gets more accurate over time
     filter.updateIMU(gx, gy, gz, a.acceleration.x, a.acceleration.y, a.acceleration.z);
 
+    // Pull the drift-corrected orientation out of the filter (degrees)
+    // Roll  = tilt left/right
+    // Pitch = tilt forward/backward
+    // Yaw   = spin left/right (drifts over time — no magnetometer to anchor it)
     float roll  = filter.getRoll();
     float pitch = filter.getPitch();
     float yaw   = filter.getYaw();
@@ -152,6 +167,11 @@ void physicsTask(void* parameter) {
       //  M3 (RL)   M4 (RR)
       //      REAR
       //
+      // zach: rollcorrection is positive when the drone is tiling right 
+      // so on the right motors we subtract it and on the left motors we add it. 
+      // Pitch correction is positive when the nose is up
+      // so on the front motors we add it and on the rear motors we subtract it.
+      //
       // Roll +  → tilt right → FL & RL need more power (left side lifts)
       // Pitch + → nose up    → FL & FR need more power (front lifts)
       m1 = baseThrottle + pitchCorrection + rollCorrection;  // FL
@@ -165,16 +185,13 @@ void physicsTask(void* parameter) {
       m3 = constrain(m3, 0.0f, 1.0f);
       m4 = constrain(m4, 0.0f, 1.0f);
 
-      esc1.write(m1);
-      esc2.write(m2);
-      esc3.write(m3);
-      esc4.write(m4);
+      esc.write(m1, m2, m3, m4);
     } else {
       // Flight disabled — all motors off
       altitudePID.reset();
       rollPID.reset();
       pitchPID.reset();
-      esc1.disarm(); esc2.disarm(); esc3.disarm(); esc4.disarm();
+      esc.disarm();
     }
 
     // ── 6. Write to shared state ────────────────────────────
@@ -286,11 +303,7 @@ void setup() {
   initLittleFS();
   initMPU();
   barometer.initialize();
-  esc1.init(4, RMT_CHANNEL_0); // M1 front-left
-  esc2.init(5, RMT_CHANNEL_1); // M2 front-right
-  esc3.init(6, RMT_CHANNEL_2); // M3 rear-left
-  esc4.init(7, RMT_CHANNEL_3); // M4 rear-right
-  Serial.println("[ESC] DShot600 ready on GPIO 4/5/6/7");
+  esc.initialize();
 
   sharedDataMutex = xSemaphoreCreateMutex();
 

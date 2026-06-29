@@ -1,117 +1,176 @@
-/*
-  Rui Santos
-  Complete project details at https://RandomNerdTutorials.com/esp32-mpu-6050-web-server/
-
-  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files.
-  The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-*/
+// ============================================================
+//  Map The Farm — Autonomous Flight Dashboard
+//  script.js
+// ============================================================
 
 let scene, camera, renderer, cube;
 
-function parentWidth(elem) {
-  return elem.parentElement.clientWidth;
-}
+const MAX_ALT_FT = 50; // matches ESP32 safety cap
 
-function parentHeight(elem) {
-  return elem.parentElement.clientHeight || 400;
-}
+// ── 3D Cube ──────────────────────────────────────────────────
 
-function init3D(){
+function parentWidth(elem)  { return elem.parentElement.clientWidth; }
+function parentHeight(elem) { return elem.parentElement.clientHeight || 400; }
+
+function init3D() {
+  const container = document.getElementById('3Dcube');
+
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xffffff);
+  scene.background = new THREE.Color(0x111318);
 
-  camera = new THREE.PerspectiveCamera(75, parentWidth(document.getElementById("3Dcube")) / parentHeight(document.getElementById("3Dcube")), 0.1, 1000);
+  camera = new THREE.PerspectiveCamera(
+    75,
+    parentWidth(container) / parentHeight(container),
+    0.1, 1000
+  );
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(parentWidth(document.getElementById("3Dcube")), parentHeight(document.getElementById("3Dcube")));
+  renderer.setSize(parentWidth(container), parentHeight(container));
+  container.appendChild(renderer.domElement);
 
-  document.getElementById('3Dcube').appendChild(renderer.domElement);
-
-  // Create a geometry
   const geometry = new THREE.BoxGeometry(5, 1, 4);
 
-  // Materials of each face
-  var cubeMaterials = [
-    new THREE.MeshBasicMaterial({color:0x03045e}),
-    new THREE.MeshBasicMaterial({color:0x023e8a}),
-    new THREE.MeshBasicMaterial({color:0x0077b6}),
-    new THREE.MeshBasicMaterial({color:0x03045e}),
-    new THREE.MeshBasicMaterial({color:0x023e8a}),
-    new THREE.MeshBasicMaterial({color:0x0077b6}),
+  const materials = [
+    new THREE.MeshBasicMaterial({ color: 0x00e5a0 }),
+    new THREE.MeshBasicMaterial({ color: 0x009966 }),
+    new THREE.MeshBasicMaterial({ color: 0x1a2a20 }),
+    new THREE.MeshBasicMaterial({ color: 0x0a0c0f }),
+    new THREE.MeshBasicMaterial({ color: 0x00c880 }),
+    new THREE.MeshBasicMaterial({ color: 0x007744 }),
   ];
 
-  // const material = new THREE.MeshFaceMaterial(cubeMaterials);
-  // cube = new THREE.Mesh(geometry, material);
-  cube = new THREE.Mesh(geometry, cubeMaterials); // pass array directly
-
+  cube = new THREE.Mesh(geometry, materials);
   scene.add(cube);
-  camera.position.z = 5;
+
+  // Subtle wireframe overlay
+  const wireframe = new THREE.LineSegments(
+    new THREE.EdgesGeometry(geometry),
+    new THREE.LineBasicMaterial({ color: 0x00e5a0, transparent: true, opacity: 0.15 })
+  );
+  cube.add(wireframe);
+
+  camera.position.z = 7;
   renderer.render(scene, camera);
 }
 
-// Resize the 3D object when the browser window changes size
-function onWindowResize(){
-  camera.aspect = parentWidth(document.getElementById("3Dcube")) / parentHeight(document.getElementById("3Dcube"));
-  //camera.aspect = window.innerWidth /  window.innerHeight;
+window.addEventListener('resize', () => {
+  const container = document.getElementById('3Dcube');
+  camera.aspect = parentWidth(container) / parentHeight(container);
   camera.updateProjectionMatrix();
-  //renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setSize(parentWidth(document.getElementById("3Dcube")), parentHeight(document.getElementById("3Dcube")));
+  renderer.setSize(parentWidth(container), parentHeight(container));
+}, false);
 
-}
-
-window.addEventListener('resize', onWindowResize, false);
-
-// Create the 3D representation
 init3D();
 
-// Create events for the sensor readings
+// ── Connection status ────────────────────────────────────────
+
+function setConnected(connected) {
+  const dot   = document.getElementById('connectionDot');
+  const label = document.getElementById('connectionLabel');
+  dot.className     = 'status-dot ' + (connected ? 'connected' : 'disconnected');
+  label.textContent = connected ? 'CONNECTED' : 'DISCONNECTED';
+}
+
+// ── SSE ──────────────────────────────────────────────────────
+
 if (!!window.EventSource) {
-  var source = new EventSource('/events');
+  const source = new EventSource('/events');
 
-  source.addEventListener('open', function(e) {
-    console.log("Events Connected");
+  source.addEventListener('open',  () => setConnected(true),  false);
+  source.addEventListener('error', (e) => {
+    if (e.target.readyState !== EventSource.OPEN) setConnected(false);
   }, false);
 
-  source.addEventListener('error', function(e) {
-    if (e.target.readyState != EventSource.OPEN) {
-      console.log("Events Disconnected");
-    }
-  }, false);
+  // Orientation → rotate cube
+  source.addEventListener('gyro_readings', (e) => {
+    const obj = JSON.parse(e.data);
+    const deg = Math.PI / 180;
 
-  source.addEventListener('gyro_readings', function(e) {
-    var obj = JSON.parse(e.data);
-    document.getElementById("gyroX").innerHTML = obj.gyroX;
-    document.getElementById("gyroY").innerHTML = obj.gyroY;
-    document.getElementById("gyroZ").innerHTML = obj.gyroZ;
+    document.getElementById('gyroX').textContent = parseFloat(obj.gyroX).toFixed(1);
+    document.getElementById('gyroY').textContent = parseFloat(obj.gyroY).toFixed(1);
+    document.getElementById('gyroZ').textContent = parseFloat(obj.gyroZ).toFixed(1);
 
-    // Convert degrees to radians for Three.js
-    const degToRad = Math.PI / 180;
+    cube.rotation.x = obj.gyroY * deg;
+    cube.rotation.z = obj.gyroX * deg;
+    cube.rotation.y = obj.gyroZ * deg;
 
-    // Apply the converted readings to the cube
-    cube.rotation.x = obj.gyroY * degToRad;
-    cube.rotation.z = obj.gyroX * degToRad;
-    cube.rotation.y = obj.gyroZ * degToRad;
-    
     renderer.render(scene, camera);
   }, false);
 
-  source.addEventListener('temperature_reading', function(e) {
-    console.log("temperature_reading", e.data);
-    document.getElementById("temp").innerHTML = e.data;
-  }, false);
+  // Flight data: altitude, motors, PID
+  source.addEventListener('flight_readings', (e) => {
+    const obj = JSON.parse(e.data);
 
-  source.addEventListener('accelerometer_readings', function(e) {
-    console.log("accelerometer_readings", e.data);
-    var obj = JSON.parse(e.data);
-    document.getElementById("accX").innerHTML = obj.accX;
-    document.getElementById("accY").innerHTML = obj.accY;
-    document.getElementById("accZ").innerHTML = obj.accZ;
+    // Altitude display
+    const actual = parseFloat(obj.altFt).toFixed(1);
+    const target = parseFloat(obj.targetFt).toFixed(1);
+    document.getElementById('actualAlt').textContent = actual;
+    document.getElementById('targetAlt').textContent = target;
+
+    // Altitude bar — actual (green fill) and target (amber marker)
+    const actualPct = Math.min((obj.altFt / MAX_ALT_FT) * 100, 100);
+    const targetPct = Math.min((obj.targetFt / MAX_ALT_FT) * 100, 100);
+    document.getElementById('altBar').style.width         = actualPct + '%';
+    document.getElementById('altBarTarget').style.left    = targetPct + '%';
+
+    // PID debug
+    document.getElementById('baseThrottle').textContent   = obj.baseThrottle;
+    document.getElementById('rollCorrection').textContent  = obj.rollCorrection;
+    document.getElementById('pitchCorrection').textContent = obj.pitchCorrection;
+
+    // Motors
+    updateMotor(1, obj.m1);
+    updateMotor(2, obj.m2);
+    updateMotor(3, obj.m3);
+    updateMotor(4, obj.m4);
+
+    // Flight badge
+    const badge = document.getElementById('flightBadge');
+    if (!obj.flightEnabled) {
+      badge.textContent = 'GROUNDED';
+      badge.className   = 'flight-badge';
+    } else if (obj.targetFt === 0) {
+      badge.textContent = 'LANDING';
+      badge.className   = 'flight-badge landing';
+    } else {
+      badge.textContent = 'FLYING';
+      badge.className   = 'flight-badge flying';
+    }
   }, false);
 }
 
-function resetPosition(element){
-  var xhr = new XMLHttpRequest();
-  xhr.open("GET", "/"+element.id, true);
-  console.log(element.id);
-  xhr.send();
+// ── Motor UI ─────────────────────────────────────────────────
+
+function updateMotor(index, pct) {
+  document.getElementById('bar'   + index).style.width  = pct + '%';
+  document.getElementById('pct'   + index).textContent  = pct + '%';
+  document.getElementById('motor' + index).classList.toggle('active', pct > 0);
+}
+
+// ── Flight commands ───────────────────────────────────────────
+
+function fly() {
+  const val = parseFloat(document.getElementById('altInput').value);
+  if (isNaN(val) || val <= 0) {
+    alert('Enter a target altitude greater than 0 ft.');
+    return;
+  }
+  if (val > MAX_ALT_FT) {
+    alert('Max altitude is ' + MAX_ALT_FT + ' ft.');
+    return;
+  }
+  fetch('/fly?ft=' + val);
+}
+
+function land() {
+  fetch('/land');
+}
+
+function stop() {
+  if (!confirm('Emergency stop will cut all motors immediately. Continue?')) return;
+  fetch('/stop');
+}
+
+function resetPosition(element) {
+  fetch('/' + element.id);
 }

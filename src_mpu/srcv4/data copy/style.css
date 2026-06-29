@@ -1,0 +1,368 @@
+/* ============================================================
+   Map The Farm — Flight Controller Dashboard
+   Dark instrument panel aesthetic
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap');
+
+:root {
+  --bg:         #0a0c0f;
+  --bg-panel:   #111318;
+  --bg-inset:   #0d0f13;
+  --border:     #1e2230;
+  --accent:     #00e5a0;       /* Map The Farm green */
+  --accent-dim: #00e5a022;
+  --warn:       #f59e0b;
+  --danger:     #ef4444;
+  --text-primary:   #e8eaf0;
+  --text-secondary: #6b7280;
+  --text-axis:      #9ca3af;
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-body: 'Inter', sans-serif;
+  --radius:    6px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ── Header ─────────────────────────────────────────────── */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.logo {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+}
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  letter-spacing: 0.08em;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  transition: background 0.3s;
+}
+
+.status-dot.connected    { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+.status-dot.disconnected { background: var(--danger); }
+
+/* ── Main grid ───────────────────────────────────────────── */
+main {
+  display: grid;
+  grid-template-columns: 1fr 220px 220px;
+  grid-template-rows: auto;
+  gap: 1px;
+  background: var(--border);
+  height: calc(100vh - 49px);
+}
+
+/* ── Panels ─────────────────────────────────────────────── */
+.panel {
+  background: var(--bg-panel);
+  padding: 20px;
+  overflow: hidden;
+  position: relative;
+}
+
+.panel__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+
+/* Cube panel */
+.panel--cube {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+#3Dcube {
+  width: 100%;
+  flex: 1;
+  min-height: 300px;
+}
+
+#3Dcube canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* IMU panel */
+.panel--imu {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  overflow-y: auto;
+}
+
+.data-group__title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.data-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+
+.axis {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--text-axis);
+  min-width: 40px;
+}
+
+.value {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: right;
+  flex: 1;
+}
+
+.unit {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-left: 4px;
+  min-width: 20px;
+}
+
+/* Altitude value highlight */
+#altitude {
+  color: var(--accent);
+}
+
+/* ── Motor panel ─────────────────────────────────────────── */
+.panel--motors {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.motor-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.motor {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+}
+
+.motor.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 8px var(--accent-dim);
+}
+
+.motor__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.motor__pos {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+.motor__bar {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.motor__fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.1s ease;
+}
+
+.motor__value {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: right;
+}
+
+/* Throttle slider */
+.throttle-control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.throttle-control__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--text-secondary);
+  display: flex;
+  justify-content: space-between;
+}
+
+#throttleSlider {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+#throttleSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  box-shadow: 0 0 6px var(--accent);
+}
+
+#throttleSlider:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* Arm controls */
+.arm-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.arm-status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-align: center;
+  padding: 6px;
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  transition: all 0.3s;
+}
+
+.arm-status.armed {
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 8px var(--accent-dim);
+}
+
+/* ── Buttons ─────────────────────────────────────────────── */
+.btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.15s;
+  background: var(--bg-inset);
+  color: var(--text-secondary);
+}
+
+.btn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.btn--ghost {
+  background: transparent;
+  border-color: var(--border);
+}
+
+.btn--arm {
+  background: transparent;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn--arm:hover {
+  background: var(--accent-dim);
+}
+
+.btn--disarm {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.btn--disarm:hover {
+  background: #ef444422;
+}
+
+/* ── Responsive ─────────────────────────────────────────── */
+@media (max-width: 768px) {
+  main {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    height: auto;
+  }
+
+  #3Dcube {
+    min-height: 260px;
+  }
+}
