@@ -40,6 +40,26 @@ public:
     return clamp(p + i + d, _outMin, _outMax);
   }
 
+  float computeWithError(float error, float dt) {
+    if (dt <= 0) return 0;
+
+    // P
+    float p = _kp * error;
+
+    // I
+    _integral += error * dt;
+    _integral = clamp(_integral, _outMin / _ki, _outMax / _ki);
+    float i = _ki * _integral;
+
+    // D
+    float derivative = (error - _lastError) / dt;
+    float d = _kd * derivative;
+
+    _lastError = error;
+
+    return clamp(p + i + d, _outMin, _outMax);
+  }
+
   void reset() {
     _integral  = 0;
     _lastError = 0;

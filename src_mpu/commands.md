@@ -51,3 +51,33 @@ Raw flash is just bytes — the chip has no concept of files or folders. LittleF
 `ESPAsyncWebServer` automatically looks for `.gz` versions of files first (e.g. `index.html.gz` before `index.html`). If it finds a `.gz` it serves it compressed, which is faster over WiFi. If you don't gzip, it logs errors looking for `.gz` files — the page still loads but you get noise in the serial monitor.
 
 Always `rm data/*.gz` before re-gzipping so stale compressed files don't get uploaded.
+
+
+----
+
+wokwi
+
+wokwi-cli init
+
+pio run                    # compile firmware
+
+cd simulate 
+wokwi-cli chip compile bme280.chip.c
+
+then 
+
+cd ..
+
+export WOKWI_CLI_TOKEN=wok_05I9anjYhSTdkgZSP5LgzSI6vmkhlQR4a0402da8
+wokwi-cli simulate         # simulate it
+ need diagram.json
+ and wokwi.toml
+
+
+
+ -------
+
+
+ pio run 
+ wokwi-cli simulate --scenario scenarios/wind_gust.yaml --timeout 60000 | tee simulate/logs/wind_gust_$(date +%Y%m%d_%H%M%S).log
+ wokwi-cli simulate --scenario scenarios/wind_gust.yaml --timeout 60000
