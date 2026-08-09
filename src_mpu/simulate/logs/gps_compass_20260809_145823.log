@@ -1,0 +1,350 @@
+Wokwi CLI v0.26.1 (9d71b975b7eb)
+Connected to Wokwi Simulation API 1.0.0-20260803-gf69c6c93
+Starting simulation...
+[chip-bme280] BME280 chip ready
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x1 (POWERON),boot:0x8 (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce3808,len:0x370
+load:0x403c9700,len:0x900
+load:0x403cc700,len:0x2364
+entry 0x403c98ac
+E (16) opi psram: PSRAM ID read error: 0x00000000, PSRAM chip not found or not supported, or wrong PSRAM line mode
+E (18) spiram: SPI RAM enabled but initialization failed. Bailing out.
+
+assert failed: xQueueSemaphoreTake queue.c:1545 (( pxQueue ))
+
+
+Backtrace: 0x4037772e:0x3fceba60 0x4037d0dd:0x3fceba80 0x403831e1:0x3fcebaa0 0x4037e0da:0x3fcebbd0 0x42003f23:0x3fcebc10 0x42005256:0x3fcebc30 0x42014f72:0x3fcebcb0
+
+
+
+
+ELF file SHA256: c6fac158a390acaa
+
+Rebooting...EESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce3808,len:0x370
+load:0x403c9700,len:0x900
+load:0x403cc700,len:0x2364
+entry 0x403c98ac
+E (342) opi psram: PSRAM ID read error: 0x00000000, PSRAM chip not found or not supported, or wrong PSRAM line mode
+E (344) spiram: SPI RAM enabled but initialization failed. Bailing out.
+
+assert failed: xQueueSemaphoreTake queue.c:1545 (( pxQueue ))
+
+
+Backtrace: 0x4037772e:0x3fceba60 0x4037d0dd:0x3fceba80 0x403831e1:0x3fcebaa0 0x4037e0da:0x3fcebbd0 0x42003f23:0x3fcebc10 0x42005256:0x3fcebc30 0x42014f72:0x3fcebcb0
+
+
+
+
+ELF file SHA256: c6fac158a390acaa
+
+Rebooting...EESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce3808,len:0x370
+load:0x403c9700,len:0x900
+load:0x403cc700,len:0x2364
+entry 0x403c98ac
+E (938) opi psram: PSRAM ID read error: 0x00000000, PSRAM chip not found or not supported, or wrong PSRAM line mode
+E (939) spiram: SPI RAM enabled but initialization failed. Bailing out.
+
+assert failed: xQueueSemaphoreTake queue.c:1545 (( pxQueue ))
+
+
+Backtrace: 0x4037772e:0x3fceba60 0x4037d0dd:0x3fceba80 0x403831e1:0x3fcebaa0 0x4037e0da:0x3fcebbd0 0x42003f23:0x3fcebc10 0x42005256:0x3fcebc30 0x42014f72:0x3fcebcb0
+
+
+
+
+ELF file SHA256: c6fac158a390acaa
+
+Rebooting...EESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce3808,len:0x370
+load:0x403c9700,len:0x900
+load:0x403cc700,len:0x2364
+entry 0x403c98ac
+E (1533) opi psram: PSRAM ID read error: 0x00000000, PSRAM chip not found or not supported, or wrong PSRAM line mode
+E (1534) spiram: SPI RAM enabled but initialization failed. Bailing out.
+
+assert failed: xQueueSemaphoreTake queue.c:1545 (( pxQueue ))
+
+
+Backtrace: 0x4037772e:0x3fceba60 0x4037d0dd:0x3fceba80 0x403831e1:0x3fcebaa0 0x4037e0da:0x3fcebbd0 0x42003f23:0x3fcebc10 0x42005256:0x3fcebc30 0x42014f72:0x3fcebcb0
+
+
+
+
+ELF file SHA256: c6fac158a390acaa
+
+Rebooting...EESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce3808,len:0x370
+load:0x403c9700,len:0x900
+load:0x403cc700,len:0x2364
+entry 0x403c98ac
+E (2128) opi psram: PSRAM ID read error: 0x00000000, PSRAM chip not found or not supported, or wrong PSRAM line mode
+E (2129) spiram: SPI RAM enabled but initialization failed. Bailing out.
+
+assert failed: xQueueSemaphoreTake queue.c:1545 (( pxQueue ))
+
+
+Backtrace: 0x4037772e:0x3fceba60 0x4037d0dd:0x3fceba80 0x403831e1:0x3fcebaa0 0x4037e0da:0x3fcebbd0 0x42003f23:0x3fcebc10 0x42005256:0x3fcebc30 0x42014f72:0x3fcebcb0
+
+
+
+
+ELF file SHA256: c6fac158a390acaa
+
+Rebooting...EESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce3808,len:0x370
+load:0x403c9700,len:0x900
+load:0x403cc700,len:0x2364
+entry 0x403c98ac
+E (2726) opi psram: PSRAM ID read error: 0x00000000, PSRAM chip not found or not supported, or wrong PSRAM line mode
+E (2727) spiram: SPI RAM enabled but initialization failed. Bailing out.
+
+assert failed: xQueueSemaphoreTake queue.c:1545 (( pxQueue ))
+
+
+Backtrace: 0x4037772e:0x3fceba60 0x4037d0dd:0x3fceba80 0x403831e1:0x3fcebaa0 0x4037e0da:0x3fcebbd0 0x42003f23:0x3fcebc10 0x42005256:0x3fcebc30 0x42014f72:0x3fcebcb0
+
+
+
+
+ELF file SHA256: c6fac158a390acaa
+
+Rebooting...EESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce3808,len:0x370
+load:0x403c9700,len:0x900
+load:0x403cc700,len:0x2364
+entry 0x403c98ac
+E (3323) opi psram: PSRAM ID read error: 0x00000000, PSRAM chip not found or not supported, or wrong PSRAM line mode
+E (3325) spiram: SPI RAM enabled but initialization failed. Bailing out.
+
+assert failed: xQueueSemaphoreTake queue.c:1545 (( pxQueue ))
+
+
+Backtrace: 0x4037772e:0x3fceba60 0x4037d0dd:0x3fceba80 0x403831e1:0x3fcebaa0 0x4037e0da:0x3fcebbd0 0x42003f23:0x3fcebc10 0x42005256:0x3fcebc30 0x42014f72:0x3fcebcb0
+
+
+
+
+ELF file SHA256: c6fac158a390acaa
+
+Rebooting...EESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce3808,len:0x370
+load:0x403c9700,len:0x900
+load:0x403cc700,len:0x2364
+entry 0x403c98ac
+E (3921) opi psram: PSRAM ID read error: 0x00000000, PSRAM chip not found or not supported, or wrong PSRAM line mode
+E (3923) spiram: SPI RAM enabled but initialization failed. Bailing out.
+
+assert failed: xQueueSemaphoreTake queue.c:1545 (( pxQueue ))
+
+
+Backtrace: 0x4037772e:0x3fceba60 0x4037d0dd:0x3fceba80 0x403831e1:0x3fcebaa0 0x4037e0da:0x3fcebbd0 0x42003f23:0x3fcebc10 0x42005256:0x3fcebc30 0x42014f72:0x3fcebcb0
+
+
+
+
+ELF file SHA256: c6fac158a390acaa
+
+Rebooting...EESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce3808,len:0x370
+load:0x403c9700,len:0x900
+load:0x403cc700,len:0x2364
+entry 0x403c98ac
+E (4518) opi psram: PSRAM ID read error: 0x00000000, PSRAM chip not found or not supported, or wrong PSRAM line mode
+E (4520) spiram: SPI RAM enabled but initialization failed. Bailing out.
+
+assert failed: xQueueSemaphoreTake queue.c:1545 (( pxQueue ))
+
+
+Backtrace: 0x4037772e:0x3fceba60 0x4037d0dd:0x3fceba80 0x403831e1:0x3fcebaa0 0x4037e0da:0x3fcebbd0 0x42003f23:0x3fcebc10 0x42005256:0x3fcebc30 0x42014f72:0x3fcebcb0
+
+
+
+
+ELF file SHA256: c6fac158a390acaa
+
+Rebooting...EESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce3808,len:0x370
+load:0x403c9700,len:0x900
+load:0x403cc700,len:0x2364
+entry 0x403c98ac
+E (5115) opi psram: PSRAM ID read error: 0x00000000, PSRAM chip not found or not supported, or wrong PSRAM line mode
+E (5117) spiram: SPI RAM enabled but initialization failed. Bailing out.
+
+assert failed: xQueueSemaphoreTake queue.c:1545 (( pxQueue ))
+
+
+Backtrace: 0x4037772e:0x3fceba60 0x4037d0dd:0x3fceba80 0x403831e1:0x3fcebaa0 0x4037e0da:0x3fcebbd0 0x42003f23:0x3fcebc10 0x42005256:0x3fcebc30 0x42014f72:0x3fcebcb0
+
+
+
+
+ELF file SHA256: c6fac158a390acaa
+
+Rebooting...EESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce3808,len:0x370
+load:0x403c9700,len:0x900
+load:0x403cc700,len:0x2364
+entry 0x403c98ac
+E (5712) opi psram: PSRAM ID read error: 0x00000000, PSRAM chip not found or not supported, or wrong PSRAM line mode
+E (5714) spiram: SPI RAM enabled but initialization failed. Bailing out.
+
+assert failed: xQueueSemaphoreTake queue.c:1545 (( pxQueue ))
+
+
+Backtrace: 0x4037772e:0x3fceba60 0x4037d0dd:0x3fceba80 0x403831e1:0x3fcebaa0 0x4037e0da:0x3fcebbd0 0x42003f23:0x3fcebc10 0x42005256:0x3fcebc30 0x42014f72:0x3fcebcb0
+
+
+
+
+ELF file SHA256: c6fac158a390acaa
+
+Rebooting...EESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce3808,len:0x370
+load:0x403c9700,len:0x900
+load:0x403cc700,len:0x2364
+entry 0x403c98ac
+E (6309) opi psram: PSRAM ID read error: 0x00000000, PSRAM chip not found or not supported, or wrong PSRAM line mode
+E (6310) spiram: SPI RAM enabled but initialization failed. Bailing out.
+
+assert failed: xQueueSemaphoreTake queue.c:1545 (( pxQueue ))
+
+
+Backtrace: 0x4037772e:0x3fceba60 0x4037d0dd:0x3fceba80 0x403831e1:0x3fcebaa0 0x4037e0da:0x3fcebbd0 0x42003f23:0x3fcebc10 0x42005256:0x3fcebc30 0x42014f72:0x3fcebcb0
+
+
+
+
+ELF file SHA256: c6fac158a390acaa
+
+Rebooting...EESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce3808,len:0x370
+load:0x403c9700,len:0x900
+load:0x403cc700,len:0x2364
+entry 0x403c98ac
+E (6905) opi psram: PSRAM ID read error: 0x00000000, PSRAM chip not found or not supported, or wrong PSRAM line mode
+E (6907) spiram: SPI RAM enabled but initialization failed. Bailing out.
+
+assert failed: xQueueSemaphoreTake queue.c:1545 (( pxQueue ))
+
+
+Backtrace: 0x4037772e:0x3fceba60 0x4037d0dd:0x3fceba80 0x403831e1:0x3fcebaa0 0x4037e0da:0x3fcebbd0 0x42003f23:0x3fcebc10 0x42005256:0x3fcebc30 0x42014f72:0x3fcebcb0
+
+
+
+
+ELF file SHA256: c6fac158a390acaa
+
+Rebooting...EESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce3808,len:0x370
+load:0x403c9700,len:0x900
+load:0x403cc700,len:0x2364
+entry 0x403c98ac
+E (7501) opi psram: PSRAM ID read error: 0x00000000, PSRAM chip not found or not supported, or wrong PSRAM line mode
+E (7503) spiram: SPI RAM enabled but initialization failed. Bailing out.
+
+assert failed: xQueueSemaphoreTake queue.c:1545 (( pxQueue ))
+
+
+Backtrace: 0x4037772e:0x3fceba60 0x4037d0dd:0x3fceba80 0x403831e1:0x3fcebaa0 0x4037e0da:0x3fcebbd0 0x42003f23:0x3fcebc10 0x42005256:0x3fcebc30 0x42014f72:0x3fcebcb0
+
+
+
+
+ELF file SHA256: c6fac158a390acaa
+
+Rebooting...EESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce3808,len:0x370
+load:0x403c9700,len:0x900
+load:0x403cc700,len:0x2364
+entry 0x403c98ac
+E (8097) opi psram: PSRAM ID read error: 0x00000000, PSRAM chip not found or not supported, or wrong PSRAM line mode
+E (8099) spiram: SPI RAM enabled but initialization failed. Bailing out.
+
+assert failed: xQueueSemaphoreTake queue.c:1545 (( pxQueue ))
+
+
+Backtrace: 0x4037772e:0x3fceba60 0x4037d0dd:0x3fceba80 0x403831e1:0x3fcebaa0 0x4037e0da:0x3fcebbd0 0x42003f23:0x3fcebc10 0x42005256:0x3fcebc30 0x42014f72:0x3fcebcb0
+
+
+
+
+ELF file SHA256: c6fac158a390acaa
+
+Rebooting...EESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce3808,len:0x370
+load:0x403c9700,len:0x900
+load:0x403cc700,len:0x2364
+entry 0x403c98ac
+E (8693) opi psram: PSRAM ID read error: 0x00000000, PSRAM chip not found or not supported, or wrong PSRAM line mode
+E (8695) spiram: SPI RAM enabled but initialization failed. Bailing out.
+
+assert failed: xQueueSemaphoreTake queue.c:1545 (( pxQueue ))
+
+
+Backtrace: 0x4037772e:0x3fc

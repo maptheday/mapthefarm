@@ -1,14 +1,14 @@
 [wokwi]
 version = 1
-firmware = "../.pio/build/esp32dev/firmware.bin"
-elf = "../.pio/build/esp32dev/firmware.elf"
+firmware = '../.pio/build/wokwi_sim/firmware.bin'
+elf = '../.pio/build/wokwi_sim/firmware.elf'
 
 [network]
 ssid = "Wokwi-GUEST"
 password = ""
 
 [flash]
-fs = "../.pio/build/esp32dev/littlefs.bin"
+fs = "../.pio/build/wokwi_sim/littlefs.bin"
 
 [[chip]]
 name = "bme280"

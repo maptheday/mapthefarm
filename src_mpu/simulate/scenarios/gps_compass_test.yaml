@@ -1,0 +1,90 @@
+name: 'GPS + Compass Injection Test'
+version: 1
+author: 'Zach'
+
+# ============================================================
+# Each waypoint leg is broken into several small GPS steps
+# instead of one big teleport. This lets us observe:
+#   - correction climbing as the nav target first appears
+#   - correction HOLDING STEADY while waiting between injections
+#     (the PID has converged on a constant setpoint, since GPS
+#     is frozen between write-serial commands)
+#   - correction easing off as later steps bring distance
+#     under WAYPOINT_ACCEPT_RADIUS_M and the mission advances
+#
+# This is still not real physics — position never updates on
+# its own, only when we inject it — but multi-step legs give
+# the PID an actual "steady state to hold" to test against,
+# rather than a single far->arrived jump.
+# ============================================================
+
+steps:
+  - wait-serial: '[Web] Server started.'
+  - delay: 2000ms
+
+  # ── Initial fix near waypoint A (WP0), facing east ──────────
+  - write-serial: "HDG:090.0\n"
+  - write-serial: "LAT:36.123456\n"
+  - write-serial: "LON:-80.123456\n"
+  - write-serial: "FIX:1\n"
+  - delay: 3000ms
+
+  - write-serial: "MISSION:1\n"
+  - delay: 2000ms
+
+  # ── Leg: WP0 -> WP1 (lat increases, lon fixed) ──────────────
+  # WP1 = (36.123789, -80.123456)
+  - write-serial: "LAT:36.123530\n"
+  - delay: 1500ms
+  - write-serial: "LAT:36.123610\n"
+  - delay: 1500ms
+  - write-serial: "LAT:36.123690\n"
+  - delay: 1500ms
+  - write-serial: "LAT:36.123760\n"
+  - delay: 1500ms
+  - write-serial: "LAT:36.123789\n"
+  - delay: 3000ms
+
+  # ── Temporary GPS loss mid-mission ──────────────────────────
+  - write-serial: "FIX:0\n"
+  - delay: 3000ms
+  - write-serial: "FIX:1\n"
+  - delay: 2000ms
+
+  # ── Wind pushes heading off target, then corrects ───────────
+  - write-serial: "HDG:045.0\n"
+  - delay: 5000ms
+  - write-serial: "HDG:000.0\n"
+  - delay: 2000ms
+
+  # ── Leg: WP1 -> WP2 (lon shifts west, lat fixed) ────────────
+  # WP2 = (36.123789, -80.123789)
+  - write-serial: "LON:-80.123530\n"
+  - delay: 1500ms
+  - write-serial: "LON:-80.123610\n"
+  - delay: 1500ms
+  - write-serial: "LON:-80.123690\n"
+  - delay: 1500ms
+  - write-serial: "LON:-80.123760\n"
+  - delay: 1500ms
+  - write-serial: "LON:-80.123789\n"
+  - delay: 3000ms
+
+  # ── Leg: WP2 -> WP3 (lat decreases, lon fixed) ──────────────
+  # WP3 = (36.123456, -80.123789)
+  - write-serial: "LAT:36.123710\n"
+  - delay: 1500ms
+  - write-serial: "LAT:36.123630\n"
+  - delay: 1500ms
+  - write-serial: "LAT:36.123550\n"
+  - delay: 1500ms
+  - write-serial: "LAT:36.123480\n"
+  - delay: 1500ms
+  - write-serial: "LAT:36.123456\n"
+  - delay: 3000ms
+
+  # ── Mission complete: hold at WP3, wait for /land or /stop ──
+  # Long enough for stopNavigation() to fire, targets to reset to 0,
+  # and the roll/pitch PIDs to actually unwind residual tilt back
+  # toward level before the scenario ends.
+  - delay: 6000ms

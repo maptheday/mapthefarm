@@ -78,6 +78,11 @@ wokwi-cli simulate         # simulate it
  -------
 
 
- pio run 
+ export WOKWI_CLI_TOKEN=wok_05I9anjYhSTdkgZSP5LgzSI6vmkhlQR4a0402da8
+
+ pio run -e esp32dev      # real hardware, compass/GPS/barometer talk to real chips
+pio run -e wokwi_sim      # sim build, #ifdef WOKWI_SIM blocks are active
+
  wokwi-cli simulate --scenario scenarios/wind_gust.yaml --timeout 60000 | tee simulate/logs/wind_gust_$(date +%Y%m%d_%H%M%S).log
- wokwi-cli simulate --scenario scenarios/wind_gust.yaml --timeout 60000
+
+ wokwi-cli simulate --scenario scenarios/gps_compass_test.yaml --timeout 60000 | tee simulate/logs/gps_compass_$(date +%Y%m%d_%H%M%S).log
