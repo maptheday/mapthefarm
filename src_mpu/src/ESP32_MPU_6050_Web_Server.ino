@@ -106,8 +106,7 @@ PID navNorthPID (0.5f,   0.0f,   0.1f,   -15.0f, 15.0f);
 PID navEastPID  (0.5f,   0.0f,   0.1f,   -15.0f, 15.0f); 
 
 // ==========================================
-// DATA STRUCTURES — SENSORS / ACTUATORS
-// These exist continuously, independent of flight phase.
+// FLIGHT PHASE ENUM
 // ==========================================
 enum FlightPhase {
   PHASE_IDLE,       
@@ -118,18 +117,38 @@ enum FlightPhase {
   PHASE_LANDED        
 };
 
+// Halt with a message on Serial — embedded equivalent of an unhandled exception.
+// Use anywhere a switch over FlightPhase hits a case that should be unreachable.
+// Motors will stop (physicsTask stalls), which is the safe failure mode.
+#define PANIC(msg) do { Serial.println(F("[PANIC] " msg " — halting")); while(1) { delay(10); } } while(0)
+
 const char* phaseName(FlightPhase p) {
   switch (p) {
     case PHASE_IDLE:         return "IDLE";
-    case PHASE_HOLD:        return "HOLD";
+    case PHASE_HOLD:         return "HOLD";
     case PHASE_MISSION:      return "MISSION";
     case PHASE_HOVER_SETTLE: return "HOVER_SETTLE";
     case PHASE_LANDING:      return "LANDING";
     case PHASE_LANDED:       return "LANDED";
   }
-  return "UNKNOWN";
+  PANIC("phaseName: unhandled FlightPhase");
+  return nullptr; // unreachable — suppresses compiler warning
 }
 
+// flightEnabled is not stored per-phase — it's a pure function of phase.
+// IDLE and LANDED always disarm; every other phase always arms.
+bool phaseFlightEnabled(FlightPhase phase) {
+  return phase != PHASE_IDLE && phase != PHASE_LANDED;
+}
+
+// ==========================================
+// DATA STRUCTURES — SENSORS (the gauges)
+// Raw/fused sensor inputs — what the hardware is physically telling us
+// right now. Nothing here is computed or commanded, only measured.
+// Think of it as the gauges on a dashboard: .gps is where the nav map
+// says you are, .imu is the tilt/altitude readout, .compassHeading is
+// the compass.
+// ==========================================
 struct GpsData {
   double lat = 0.0;
   double lon = 0.0;
@@ -150,157 +169,122 @@ struct ImuData {
   float altitudeFt = 0.0f;
 };
 
-struct CruiseControlState_MotorData {
-  float m1 = 0, m2 = 0, m3 = 0, m4 = 0;
-  float baseThrottle = 0;
-  float rollCorrection = 0;
-  float pitchCorrection = 0;
-};
-
-// Roll/pitch/yaw targets are read by physicsTask on every 200Hz tick
-// regardless of flight phase (e.g. yaw heading is deliberately held
-// through HOVER_SETTLE/LANDING, not reset) — so this stays continuous,
-// shared state rather than living inside a phase object.
-struct CruiseControlState_NavData {
-  float targetRollDeg = 0.0f;
-  float targetPitchDeg = 0.0f;
-  float distToWP = 0.0f;
-  float bearingToWP = 0.0f;
-  float yawTargetHeading = 0.0f;
-};
-
-// Raw/fused sensor inputs — what the hardware is physically telling us
-// right now. Nothing here is computed or commanded, only measured.
-// Think of it as the gauges on a dashboard: .gps is the GPS position
-// (where the odometer/nav map says you are), .imu is the tilt/altitude
-// gauge, .compassHeading is, well, the compass.
 struct CarDashboardState {
   GpsData gps;
   ImuData imu;
   float compassHeading = 0.0f;
-};
-
-// PID-computed guidance targets and the resulting actuator commands —
-// not sensed, but just as continuous and phase-independent as the
-// sensor readings above, which is why this still lives outside
-// RoadTripState rather than inside any one phase's object.
-// Think of it as cruise control: .cruiseControlState_nav is the target
-// speed/heading you dialed in (not what the speedometer currently
-// reads), .cruiseControlState_motors is how hard the engine is
-// actually working to get you there.
-struct CruiseControlState {
-  CruiseControlState_NavData cruiseControlState_nav;
-  CruiseControlState_MotorData cruiseControlState_motors;
+  float navDistToWP    = 0.0f;  // distance to active waypoint — computed by nav task, read-only telemetry
+  float navBearingToWP = 0.0f;  // bearing to active waypoint — computed by nav task, read-only telemetry
 };
 
 // ==========================================
-// DATA STRUCTURES — PER-PHASE STATE
+// DATA STRUCTURES — CRUISE CONTROL (the setpoints + actuator output)
+// PID-computed guidance targets and resulting actuator commands.
+// Not sensed — commanded. This is the dial you turned vs. what the
+// speedometer reads.
 //
-// This is the road trip itself: which leg you're on, and everything
-// that's only true for that leg.
-//   IDLE          — car's parked in the garage, engine off.
-//   HOLD          — pulled over on the shoulder. Engine running, but
-//                   you bailed on the route and you're just sitting.
-//   MISSION       — actually driving the route, waypoint to waypoint.
-//   HOVER_SETTLE  — pulled into the driveway, idling a moment before
-//                   you actually park.
-//   LANDING       — easing into the parking spot.
-//   LANDED        — parked, engine off.
+// targetAltFt lives here alongside targetRollDeg / targetPitchDeg —
+// all three are altitude/attitude setpoints the PIDs chase, set by
+// transitionTo() when phases change and updated by navigationTask
+// during MISSION (altitude per waypoint) and LANDING (ramp to zero).
 //
-// Every field the system tracks while flying lives inside the object
-// for the phase it belongs to. Nothing about "what's true during
-// MISSION" is split off into a shared top-level field, or set up in a
-// separate step before the phase transition — it's all right here in
-// MissionState, and transitionTo() populates all of it in one shot.
-// Only the struct matching the CURRENT phase is meaningful; the others
+// yawTargetHeading is also a setpoint: held across HOVER_SETTLE and
+// LANDING deliberately, not reset on phase transition.
+// ==========================================
+struct CruiseControlState_NavData {
+  float targetAltFt      = 10.0f;  // altitude setpoint — written by transitionTo() and nav task
+  float targetRollDeg    = 0.0f;
+  float targetPitchDeg   = 0.0f;
+  float yawTargetHeading = 0.0f;
+};
+
+struct CruiseControlState_MotorData {
+  float m1 = 0, m2 = 0, m3 = 0, m4 = 0;
+  float baseThrottle    = 0;
+  float rollCorrection  = 0;
+  float pitchCorrection = 0;
+};
+
+struct CruiseControlState {
+  CruiseControlState_NavData  nav;
+  CruiseControlState_MotorData motors;
+};
+
+// ==========================================
+// DATA STRUCTURES — FLIGHT PHASE STATE
+//
+// This is the road trip itself: which leg you're on, and the state
+// that is genuinely specific to that leg and varies within it.
+//
+// Rules for what lives here vs. in CruiseControlState:
+//   - Commanded setpoints (targetAltFt, targetRoll, targetPitch,
+//     yawTargetHeading) → CruiseControlState. They are PID inputs,
+//     not phase bookkeeping.
+//   - Motor arm/disarm gate (flightEnabled) → phaseFlightEnabled(),
+//     a pure function of the current phase enum. No per-struct field.
+//   - Safety clocks and counters that are specific to one or two
+//     phases and vary while active → here (armedAtMs, enteredAtMs,
+//     currentWP, etc.).
+//   - Mission-specific flags and captured launch position → MissionState.
+//
+// Only the struct matching the CURRENT phase is meaningful; others
 // hold stale data from the last time that phase ran.
-//
-// currentFlightEnabled() / currentTargetAltFt() / currentArmedAtMs()
-// below are the one place that knows how to pick the right struct —
-// nothing else in the file should reach into e.g. sharedTrip.landing.*
-// without going through sharedTrip.phase first.
 // ==========================================
 struct IdleState {
   // Disarmed, motors off. Nothing to track.
 };
 
 struct HoldState {
-  unsigned long armedAtMs = 0;   // start of the max-flight-time safety clock
-  bool flightEnabled = true;
-  float targetAltFt = 10.0f;     // holding this altitude
+  unsigned long armedAtMs = 0;   // safety clock — carries over from MISSION on abort
 };
 
 struct MissionState {
-  unsigned long armedAtMs = 0;
-  bool flightEnabled = true;
-  float targetAltFt = 10.0f;
-  int currentWP = 0;
-  int waypointCount = 0;
-  bool geofenceTripped = false;
-  bool gpsLossTripped = false;
-  bool active = false;           // horizontal waypoint guidance running
-  double launchLat = 0.0;        // captured from GPS the instant MISSION starts
-  double launchLon = 0.0;
-  bool launchPointSet = false;
+  unsigned long armedAtMs    = 0;
+  int  currentWP             = 0;
+  int  waypointCount         = 0;
+  bool geofenceTripped       = false;
+  bool gpsLossTripped        = false;
+  bool active                = false;  // horizontal waypoint guidance running
+  double launchLat           = 0.0;   // captured from GPS at MISSION start
+  double launchLon           = 0.0;
+  bool launchPointSet        = false;
 };
 
 struct HoverSettleState {
-  unsigned long enteredAtMs = 0;
-  bool flightEnabled = true;
-  float targetAltFt = 10.0f;     // holding the RTL altitude before landing
+  unsigned long enteredAtMs  = 0;      // used to time the settle dwell
 };
 
 struct LandingState {
-  bool flightEnabled = true;
-  float targetAltFt = 10.0f;     // ramps down toward 0 every nav tick
+  // targetAltFt ramp lives in CruiseControlState.nav.targetAltFt.
+  // Nothing phase-specific needed beyond the phase enum itself.
 };
 
 struct LandedState {
-  bool flightEnabled = false;
-  float targetAltFt = 0.0f;
+  // Disarmed. targetAltFt is 0 by convention (set in transitionTo).
+  // phaseFlightEnabled(PHASE_LANDED) == false.
 };
 
 struct RoadTripState {
-  FlightPhase phase = PHASE_IDLE;
-  IdleState idle;
-  HoldState hold;
-  MissionState mission;
+  FlightPhase    phase = PHASE_IDLE;
+  IdleState      idle;
+  HoldState      hold;
+  MissionState   mission;
   HoverSettleState hoverSettle;
-  LandingState landing;
-  LandedState landed;
+  LandingState   landing;
+  LandedState    landed;
 };
 
-// Single lookup point for "what's the live value of X right now" —
-// picks the field out of whichever phase struct is actually active.
-bool currentFlightEnabled(const RoadTripState& trip) {
-  switch (trip.phase) {
-    case PHASE_IDLE:         return false; // IdleState has no such field — always disarmed
-    case PHASE_HOLD:        return trip.hold.flightEnabled;
-    case PHASE_MISSION:      return trip.mission.flightEnabled;
-    case PHASE_HOVER_SETTLE: return trip.hoverSettle.flightEnabled;
-    case PHASE_LANDING:      return trip.landing.flightEnabled;
-    case PHASE_LANDED:       return trip.landed.flightEnabled;
-  }
-  return false;
-}
-
-float currentTargetAltFt(const RoadTripState& trip) {
-  switch (trip.phase) {
-    case PHASE_IDLE:         return 0.0f;
-    case PHASE_HOLD:        return trip.hold.targetAltFt;
-    case PHASE_MISSION:      return trip.mission.targetAltFt;
-    case PHASE_HOVER_SETTLE: return trip.hoverSettle.targetAltFt;
-    case PHASE_LANDING:      return trip.landing.targetAltFt;
-    case PHASE_LANDED:       return trip.landed.targetAltFt;
-  }
-  return 0.0f;
-}
-
+// Safety-clock lookup — the one place that knows which phase struct
+// holds armedAtMs. Nothing else should reach into hold.armedAtMs or
+// mission.armedAtMs directly.
+// Only valid during HOLD and MISSION — calling this from any other phase
+// is a bug. PANIC halts rather than returning a silent 0 that would
+// corrupt the flight-time safety clock.
 unsigned long currentArmedAtMs(const RoadTripState& trip) {
   switch (trip.phase) {
-    case PHASE_HOLD:   return trip.hold.armedAtMs;
+    case PHASE_HOLD:    return trip.hold.armedAtMs;
     case PHASE_MISSION: return trip.mission.armedAtMs;
-    default:             return 0;
+    default:            PANIC("currentArmedAtMs: called from non-armed phase"); return 0;
   }
 }
 
@@ -310,13 +294,11 @@ unsigned long currentArmedAtMs(const RoadTripState& trip) {
 SemaphoreHandle_t sharedDataMutex;
 SemaphoreHandle_t serialMutex;  
 
-// global find
 volatile CarDashboardState  sharedDashboard;
 volatile CruiseControlState sharedCruiseControl;
-volatile RoadTripState  sharedTrip;
+volatile RoadTripState      sharedTrip;
 
-// One-time calibration baseline measured at boot, not a live reading —
-// stays a plain global rather than living in ActiveSensorState.
+// One-time calibration baseline measured at boot — not a live reading.
 float groundAltitudeFt = 0;
 
 JsonDocument readings;
@@ -341,69 +323,79 @@ void logLine(const String& msg) {
 
 // ==========================================
 // PHASE TRANSITIONS
-// One function owns every jump between flight phases, INCLUDING
-// capturing anything the incoming phase needs from live sensor state
-// (e.g. MISSION grabs the launch point straight from sharedDashboard.gps here —
-// nothing needs to be pre-fetched by the caller and handed in).
-// Whatever needs to carry over from the outgoing phase into the
-// incoming one — the safety clock surviving MISSION -> HOLD on abort,
-// the landing ramp starting from wherever the drone actually was —
-// also happens here, explicitly, instead of being duplicated at every
-// callsite.
 //
-// NOTE: takes the mutex itself — never call this from inside another
-// withMutex(...) lambda, sharedDataMutex is not recursive.
+// One function owns every jump between flight phases.
+// Commanded setpoints (targetAltFt, yawTargetHeading) are written
+// directly into sharedCruiseControl here — no need for currentTargetAltFt()
+// dispatch helpers. Phase-specific bookkeeping (armedAtMs, currentWP,
+// launchLat/Lon, etc.) is initialized in the matching case.
+//
+// Carry-overs are explicit:
+//   MISSION -> HOLD:    armedAtMs carries so the flight-time clock
+//                       doesn't reset on abort.
+//   HOVER_SETTLE/LANDING: targetAltFt is read from cruise control
+//                       before phase flips so the drone doesn't jump.
+//
+// NOTE: takes the mutex itself — never call from inside withMutex().
+//       sharedDataMutex is not recursive.
 // ==========================================
 void transitionTo(FlightPhase next) {
   withMutex([&]() {
     switch (next) {
+      case PHASE_IDLE:
+        // Motors off; targetAltFt doesn't matter but zero it for clarity.
+        sharedCruiseControl.nav.targetAltFt    = 0.0f;
+        sharedCruiseControl.nav.targetRollDeg  = 0.0f;
+        sharedCruiseControl.nav.targetPitchDeg = 0.0f;
+        break;
+
       case PHASE_HOLD:
         // Only reached via /abort (MISSION -> HOLD). Carry the safety
-        // clock and current altitude target forward so aborting doesn't
-        // reset the flight timer or make the drone jump altitude.
-        sharedTrip.hold.armedAtMs   = sharedTrip.mission.armedAtMs;
-        sharedTrip.hold.flightEnabled = true;
-        sharedTrip.hold.targetAltFt = sharedTrip.mission.targetAltFt;
+        // clock forward so aborting doesn't reset the flight timer.
+        // targetAltFt is already set in cruise control — leave it alone
+        // so the drone doesn't jump altitude on abort.
+        sharedTrip.hold.armedAtMs = sharedTrip.mission.armedAtMs;
+        sharedCruiseControl.nav.targetRollDeg  = 0.0f;
+        sharedCruiseControl.nav.targetPitchDeg = 0.0f;
         break;
 
       case PHASE_MISSION:
-        sharedTrip.mission.armedAtMs = millis();
-        sharedTrip.mission.flightEnabled = true;
-        sharedTrip.mission.targetAltFt = WAYPOINTS[0].altFt;
-        sharedTrip.mission.currentWP = 0;
-        sharedTrip.mission.waypointCount = WAYPOINT_COUNT + 1; // +1 for the appended RTL leg
+        sharedTrip.mission.armedAtMs     = millis();
+        sharedTrip.mission.currentWP     = 0;
+        sharedTrip.mission.waypointCount = WAYPOINT_COUNT + 1; // +1 for RTL leg
         sharedTrip.mission.geofenceTripped = false;
-        sharedTrip.mission.gpsLossTripped = false;
-        sharedTrip.mission.active = true;
-        // Launch point + starting heading, captured straight off the
-        // current sensor state — this IS what "starting a mission" means.
-        sharedTrip.mission.launchLat = sharedDashboard.gps.lat;
-        sharedTrip.mission.launchLon = sharedDashboard.gps.lon;
+        sharedTrip.mission.gpsLossTripped  = false;
+        sharedTrip.mission.active          = true;
+        // Launch point + starting heading captured straight from live
+        // sensor state — this IS what "starting a mission" means.
+        sharedTrip.mission.launchLat     = sharedDashboard.gps.lat;
+        sharedTrip.mission.launchLon     = sharedDashboard.gps.lon;
         sharedTrip.mission.launchPointSet = true;
-        sharedCruiseControl.cruiseControlState_nav.yawTargetHeading = sharedDashboard.compassHeading;
+        sharedCruiseControl.nav.targetAltFt      = WAYPOINTS[0].altFt;
+        sharedCruiseControl.nav.yawTargetHeading = sharedDashboard.compassHeading;
         break;
 
       case PHASE_HOVER_SETTLE:
         sharedTrip.hoverSettle.enteredAtMs = millis();
-        sharedTrip.hoverSettle.flightEnabled = true;
-        sharedTrip.hoverSettle.targetAltFt = sharedTrip.mission.targetAltFt; // hold the RTL altitude
+        // Hold whatever altitude the mission left us at — read from
+        // cruise control before phase flips below.
+        // (targetAltFt unchanged — no write needed.)
+        sharedCruiseControl.nav.targetRollDeg  = 0.0f;
+        sharedCruiseControl.nav.targetPitchDeg = 0.0f;
         break;
 
       case PHASE_LANDING:
-        sharedTrip.landing.flightEnabled = true;
-        // Start the descent ramp from wherever the previous phase left
-        // the altitude target — read BEFORE sharedTrip.phase flips below.
-        sharedTrip.landing.targetAltFt = currentTargetAltFt(sharedTrip);
+        // Landing ramp starts from wherever cruise control currently
+        // has targetAltFt — read before phase flips below.
+        // (targetAltFt unchanged — nav task will ramp it down each tick.)
+        sharedCruiseControl.nav.targetRollDeg  = 0.0f;
+        sharedCruiseControl.nav.targetPitchDeg = 0.0f;
         break;
 
       case PHASE_LANDED:
-        sharedTrip.landed.flightEnabled = false;
-        sharedTrip.landed.targetAltFt = 0.0f;
-        break;
-
-      case PHASE_IDLE:
-        // IdleState has no fields — currentFlightEnabled()/currentTargetAltFt()
-        // hardcode false/0 for this phase.
+        sharedCruiseControl.nav.targetAltFt   = 0.0f;
+        sharedCruiseControl.nav.targetRollDeg  = 0.0f;
+        sharedCruiseControl.nav.targetPitchDeg = 0.0f;
         break;
     }
     sharedTrip.phase = next;
@@ -441,8 +433,8 @@ void bearingToNorthEast(float distM, float bearingDeg, float &northM, float &eas
 void stopNavigation() {
   withMutex([&]() {
     sharedTrip.mission.active = false;
-    sharedCruiseControl.cruiseControlState_nav.targetRollDeg = 0.0f;
-    sharedCruiseControl.cruiseControlState_nav.targetPitchDeg = 0.0f;
+    sharedCruiseControl.nav.targetRollDeg  = 0.0f;
+    sharedCruiseControl.nav.targetPitchDeg = 0.0f;
   });
 }
 
@@ -472,9 +464,8 @@ void parseSimInput() {
       } else if (buf.startsWith("FIX:")) {
         withMutex([&]() { sharedDashboard.gps.fix = (buf.substring(4).toInt() == 1); });
       } else if (buf.startsWith("MISSION:")) {
-        // Sim triggering mission directly. transitionTo() grabs the
-        // launch point/heading itself — nothing to prep here but the
-        // fix check.
+        // transitionTo(PHASE_MISSION) captures launch point and heading
+        // itself — nothing to pre-fetch here.
         bool fixNow;
         withMutex([&]() { fixNow = sharedDashboard.gps.fix; });
         if (fixNow) {
@@ -534,11 +525,12 @@ void navigationTask(void* parameter) {
     CruiseControlState_NavData currentCruiseNav;
 
     withMutex([&]() {
-      currentDashGps = sharedDashboard.gps;
-      currentTrip = sharedTrip;
-      currentCruiseNav = sharedCruiseControl.cruiseControlState_nav;
+      currentDashGps    = sharedDashboard.gps;
+      currentTrip       = sharedTrip;
+      currentCruiseNav  = sharedCruiseControl.nav;
     });
 
+    // ---- Safety checks (flight timer, geofence, GPS loss) ----
     if (currentTrip.phase == PHASE_MISSION || currentTrip.phase == PHASE_HOLD) {
       unsigned long armedAt = currentArmedAtMs(currentTrip);
       if (armedAt > 0 && (millis() - armedAt) >= MAX_FLIGHT_TIME_MS) {
@@ -575,6 +567,7 @@ void navigationTask(void* parameter) {
       }
     }
 
+    // ---- Waypoint guidance ----
     if (currentTrip.phase == PHASE_MISSION && currentTrip.mission.active && currentDashGps.fix) {
       if (currentTrip.mission.currentWP >= currentTrip.mission.waypointCount) {
         stopNavigation();
@@ -588,7 +581,7 @@ void navigationTask(void* parameter) {
       float distM   = gpsDistanceMeters(currentDashGps.lat, currentDashGps.lon, wp.lat, wp.lon);
       float bearing = gpsBearing(currentDashGps.lat, currentDashGps.lon, wp.lat, wp.lon);
 
-      withMutex([&]() { sharedCruiseControl.cruiseControlState_nav.yawTargetHeading = bearing; });
+      withMutex([&]() { sharedCruiseControl.nav.yawTargetHeading = bearing; });
 
       if (distM < WAYPOINT_ACCEPT_RADIUS_M) {
         bool isRTLLeg = (currentTrip.mission.currentWP == WAYPOINT_COUNT);
@@ -599,9 +592,11 @@ void navigationTask(void* parameter) {
 
         withMutex([&]() {
           sharedTrip.mission.currentWP++;
-          sharedTrip.mission.targetAltFt = (sharedTrip.mission.currentWP < sharedTrip.mission.waypointCount)
-                                          ? getMissionWaypoint(sharedTrip.mission.currentWP).altFt
-                                          : wp.altFt;
+          // Update altitude target in cruise control for the next leg.
+          int nextWP = sharedTrip.mission.currentWP;
+          sharedCruiseControl.nav.targetAltFt = (nextWP < sharedTrip.mission.waypointCount)
+              ? getMissionWaypoint(nextWP).altFt
+              : wp.altFt;
         });
 
         vTaskDelayUntil(&lastWakeTime, xFrequency);
@@ -615,19 +610,20 @@ void navigationTask(void* parameter) {
       float targetRoll  = navEastPID.computeWithError(eastM,  navDt);  
 
       withMutex([&]() {
-        sharedCruiseControl.cruiseControlState_nav.targetRollDeg  = targetRoll;
-        sharedCruiseControl.cruiseControlState_nav.targetPitchDeg = targetPitch;
-        sharedCruiseControl.cruiseControlState_nav.distToWP       = distM;
-        sharedCruiseControl.cruiseControlState_nav.bearingToWP    = bearing;
+        sharedCruiseControl.nav.targetRollDeg  = targetRoll;
+        sharedCruiseControl.nav.targetPitchDeg = targetPitch;
+        sharedDashboard.navDistToWP            = distM;
+        sharedDashboard.navBearingToWP         = bearing;
       });
 
     } else if (currentTrip.phase != PHASE_MISSION) {
       withMutex([&]() {
-        sharedCruiseControl.cruiseControlState_nav.targetRollDeg  = 0.0f;
-        sharedCruiseControl.cruiseControlState_nav.targetPitchDeg = 0.0f;
+        sharedCruiseControl.nav.targetRollDeg  = 0.0f;
+        sharedCruiseControl.nav.targetPitchDeg = 0.0f;
       });
     }
 
+    // ---- Hover settle dwell ----
     if (currentTrip.phase == PHASE_HOVER_SETTLE) {
       if (millis() - currentTrip.hoverSettle.enteredAtMs >= MISSION_COMPLETE_HOVER_MS) {
         transitionTo(PHASE_LANDING);
@@ -635,20 +631,21 @@ void navigationTask(void* parameter) {
       }
     }
 
+    // ---- Landing descent ramp ----
+    // targetAltFt lives in cruise control; nav task owns ramping it down.
     if (currentTrip.phase == PHASE_LANDING) {
       bool landed = false;
       withMutex([&]() {
-        float newTarget = sharedTrip.landing.targetAltFt - (LAND_DESCENT_RATE_FPS * navDt);
+        float newTarget = sharedCruiseControl.nav.targetAltFt - (LAND_DESCENT_RATE_FPS * navDt);
         if (newTarget <= 0.0f) {
-          sharedTrip.landing.targetAltFt = 0.0f;
+          sharedCruiseControl.nav.targetAltFt = 0.0f;
           landed = true;
         } else {
-          sharedTrip.landing.targetAltFt = newTarget;
+          sharedCruiseControl.nav.targetAltFt = newTarget;
         }
       });
       if (landed) {
-        // transitionTo() takes the mutex itself, so it has to happen
-        // outside the withMutex(...) block above — the lock isn't recursive.
+        // transitionTo() takes the mutex itself — must be outside withMutex().
         transitionTo(PHASE_LANDED);
         logLine("[NAV] Landed — motors disarmed.");
       }
@@ -688,23 +685,23 @@ void physicsTask(void* parameter) {
     float currentRoll  = filter.getRoll();
     float currentPitch = filter.getPitch();
     float currentYaw   = filter.getYaw();
-    float altitudeFt = ((float)barometer.readAltitudeMeters() * 3.28084f) - groundAltitudeFt;
+    float altitudeFt   = ((float)barometer.readAltitudeMeters() * 3.28084f) - groundAltitudeFt;
 
     CruiseControlState_NavData currentCruiseNav;
-    RoadTripState currentTrip;
+    FlightPhase currentPhase;
     float currentDashCompassHeading;
 
     withMutex([&]() {
-      currentCruiseNav = sharedCruiseControl.cruiseControlState_nav;
-      currentTrip = sharedTrip;
-      currentDashCompassHeading = sharedDashboard.compassHeading;
+      currentCruiseNav            = sharedCruiseControl.nav;
+      currentPhase                = sharedTrip.phase;
+      currentDashCompassHeading   = sharedDashboard.compassHeading;
     });
 
     CruiseControlState_MotorData cruiseMotorsOut;
-    bool flightEnabled = currentFlightEnabled(currentTrip);
+    bool flightEnabled = phaseFlightEnabled(currentPhase);
 
     if (flightEnabled) {
-      cruiseMotorsOut.baseThrottle = altitudePID.compute(currentTargetAltFt(currentTrip), altitudeFt, dt);
+      cruiseMotorsOut.baseThrottle   = altitudePID.compute(currentCruiseNav.targetAltFt, altitudeFt, dt);
       cruiseMotorsOut.rollCorrection = rollPID.compute(currentCruiseNav.targetRollDeg, currentRoll, dt);
       cruiseMotorsOut.pitchCorrection = pitchPID.compute(currentCruiseNav.targetPitchDeg, currentPitch, dt);
 
@@ -737,18 +734,18 @@ void physicsTask(void* parameter) {
     }
 
     ImuData dashImuOut;
-    dashImuOut.roll = currentRoll;
+    dashImuOut.roll  = currentRoll;
     dashImuOut.pitch = currentPitch;
-    dashImuOut.yaw = currentYaw;
-    dashImuOut.accX = a.acceleration.x;
-    dashImuOut.accY = a.acceleration.y;
-    dashImuOut.accZ = a.acceleration.z;
-    dashImuOut.temp = temp.temperature;
+    dashImuOut.yaw   = currentYaw;
+    dashImuOut.accX  = a.acceleration.x;
+    dashImuOut.accY  = a.acceleration.y;
+    dashImuOut.accZ  = a.acceleration.z;
+    dashImuOut.temp  = temp.temperature;
     dashImuOut.altitudeFt = altitudeFt;
 
     withMutex([&]() {
-      sharedDashboard.imu = dashImuOut;
-      sharedCruiseControl.cruiseControlState_motors = cruiseMotorsOut;
+      sharedDashboard.imu           = dashImuOut;
+      sharedCruiseControl.motors    = cruiseMotorsOut;
     });
 
     vTaskDelayUntil(&lastWakeTime, xFrequency);
@@ -786,25 +783,28 @@ String getFlightReadings() {
   RoadTripState trip;
   float dashCompassHeading;
 
+  float navDistToWP, navBearingToWP;
   withMutex([&]() {
-    dashImu = sharedDashboard.imu;
-    cruiseMotors = sharedCruiseControl.cruiseControlState_motors;
-    dashGps = sharedDashboard.gps;
-    cruiseNav = sharedCruiseControl.cruiseControlState_nav;
-    trip = sharedTrip;
+    dashImu            = sharedDashboard.imu;
+    cruiseMotors       = sharedCruiseControl.motors;
+    dashGps            = sharedDashboard.gps;
+    cruiseNav          = sharedCruiseControl.nav;
+    trip               = sharedTrip;
     dashCompassHeading = sharedDashboard.compassHeading;
+    navDistToWP        = sharedDashboard.navDistToWP;
+    navBearingToWP     = sharedDashboard.navBearingToWP;
   });
 
   readings["altFt"]           = dashImu.altitudeFt;
-  readings["targetFt"]        = currentTargetAltFt(trip);
+  readings["targetFt"]        = cruiseNav.targetAltFt;
   readings["m1"]              = (int)(cruiseMotors.m1 * 100);
   readings["m2"]              = (int)(cruiseMotors.m2 * 100);
   readings["m3"]              = (int)(cruiseMotors.m3 * 100);
   readings["m4"]              = (int)(cruiseMotors.m4 * 100);
-  readings["baseThrottle"]    = (int)(cruiseMotors.baseThrottle  * 100);
+  readings["baseThrottle"]    = (int)(cruiseMotors.baseThrottle   * 100);
   readings["rollCorrection"]  = (int)(cruiseMotors.rollCorrection  * 100);
   readings["pitchCorrection"] = (int)(cruiseMotors.pitchCorrection * 100);
-  readings["flightEnabled"]   = currentFlightEnabled(trip);
+  readings["flightEnabled"]   = phaseFlightEnabled(trip.phase);
   readings["gpsFix"]          = dashGps.fix;
   readings["gpsLat"]          = dashGps.lat;
   readings["gpsLon"]          = dashGps.lon;
@@ -813,13 +813,13 @@ String getFlightReadings() {
   readings["navActive"]       = (trip.phase == PHASE_MISSION) && trip.mission.active;
   readings["navWaypoint"]     = trip.mission.currentWP;
   readings["navWaypointCount"]= trip.mission.waypointCount;
-  readings["navDistM"]        = cruiseNav.distToWP;
-  readings["navBearing"]      = cruiseNav.bearingToWP;
+  readings["navDistM"]        = navDistToWP;
+  readings["navBearing"]      = navBearingToWP;
   readings["flightPhase"]     = phaseName(trip.phase);
 
-  unsigned long armedAt = currentArmedAtMs(trip);
-  readings["flightSecRemaining"] = armedAt > 0
-      ? max(0L, (long)((MAX_FLIGHT_TIME_MS - (millis() - armedAt)) / 1000))
+  bool hasArmedClock = (trip.phase == PHASE_HOLD || trip.phase == PHASE_MISSION);
+  readings["flightSecRemaining"] = hasArmedClock
+      ? max(0L, (long)((MAX_FLIGHT_TIME_MS - (millis() - currentArmedAtMs(trip))) / 1000))
       : (long)(MAX_FLIGHT_TIME_MS / 1000);
 
   String out; serializeJson(readings, out); return out;
@@ -976,10 +976,6 @@ void setup() {
 
   server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
 
-  // ==========================================
-  // SINGLE FIRE-AND-FORGET FLIGHT ENDPOINT
-  // Combines previous /fly and /mission actions
-  // ==========================================
   server.on("/start-waypoint-nav", HTTP_GET, [](AsyncWebServerRequest* r) {
     bool hasFix;
     withMutex([&]() { hasFix = sharedDashboard.gps.fix; });
@@ -989,16 +985,11 @@ void setup() {
       return;
     }
 
-    // transitionTo(PHASE_MISSION) captures the launch point and current
-    // heading itself, straight from sharedDashboard, and sets
-    // up the rest of MissionState — nothing to pre-fetch or set up here.
     transitionTo(PHASE_MISSION);
-
     logLine("[FLIGHT] Drone Armed & Mission Started. Launch point captured.");
     r->send(200, "text/plain", "WAYPOINT NAVIGATION STARTED");
   });
 
-  // Keep these strictly for testing or emergency API overrides
   server.on("/abort", HTTP_GET, [](AsyncWebServerRequest* r) {
     stopNavigation();
     FlightPhase currentPhase;
@@ -1026,7 +1017,7 @@ void setup() {
 
   server.on("/calibrate-compass", HTTP_GET, [](AsyncWebServerRequest* r) {
     bool enabled;
-    withMutex([&]() { enabled = currentFlightEnabled(sharedTrip); });
+    withMutex([&]() { enabled = phaseFlightEnabled(sharedTrip.phase); });
     
     if (enabled) {
       r->send(400, "text/plain", "REFUSED — disarm first");
