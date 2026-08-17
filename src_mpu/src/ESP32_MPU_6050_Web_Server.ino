@@ -9,6 +9,7 @@
 #include "LittleFS.h"
 #include <TinyGPSPlus.h>
 #include <QMC5883LCompass.h>
+#include <Preferences.h>
 
 #include "EspBarometer.hpp"
 #include "EspESC.hpp"
@@ -19,84 +20,60 @@ const char* password = "";
 
 // ==========================================
 // TIMING CONFIGURATION
-// Increase these values to slow down the loops.
 // ==========================================
-// change this back to 5ms for 200Hz physics loop once testing is done
-const unsigned long PHYSICS_LOOP_MS = 5;
-const float PHYSICS_LOOP_HZ = 1000.0f / PHYSICS_LOOP_MS;
-const unsigned long SSE_GYRO_MS    = 10;  // orientation updates
-const unsigned long SSE_ACC_MS     = 200; // accelerometer updates
-const unsigned long SSE_FLIGHT_MS  = 100; // flight/state updates
-const unsigned long NAV_LOOP_MS    = 100; // navigation updates at 10Hz
-                                          // GPS only updates at 1-10Hz anyway,
-                                          // no point running nav faster than that
+const unsigned long PHYSICS_LOOP_MS  = 5;
+const float         PHYSICS_LOOP_HZ  = 1000.0f / PHYSICS_LOOP_MS;
+const unsigned long SSE_GYRO_MS      = 10;
+const unsigned long SSE_ACC_MS       = 200;
+const unsigned long SSE_FLIGHT_MS    = 100;
+const unsigned long NAV_LOOP_MS      = 100;
+
+// ==========================================
+// SAFETY CONFIGURATION
+// ==========================================
+const unsigned long MAX_FLIGHT_TIME_MS  = 5UL * 60UL * 1000UL;
+const float         GEOFENCE_RADIUS_M   = 150.0f;
+const unsigned long GPS_LOSS_ABORT_MS   = 3000;
 
 // ==========================================
 // BN-880 WIRING
-//
-// The BN-880 is two devices in one module:
-//   GPS chip  — talks over UART (serial text, NMEA sentences)
-//   QMC5883L compass chip — talks over I2C (same bus as MPU6050)
-//
-// GPS UART:
-//   BN-880 TX → ESP32-S3 GPIO 17 (Serial2 RX)
-//   BN-880 RX → ESP32-S3 GPIO 18 (Serial2 TX)
-//   Baud rate: 9600 (BN-880 default)
-//
-// Compass I2C (shared bus with MPU6050 and BME280):
-//   BN-880 SDA → GPIO 16
-//   BN-880 SCL → GPIO 15
-//   I2C address: 0x0D (QMC5883L default)
-//
-// Power:
-//   BN-880 VCC → 3.3V
-//   BN-880 GND → GND
 // ==========================================
 #define GPS_RX_PIN 17
 #define GPS_TX_PIN 18
 #define GPS_BAUD   9600
 
 // ==========================================
+// COMPASS CALIBRATION
+// ==========================================
+const bool          CALIBRATE_COMPASS_ON_BOOT = false;
+const unsigned long COMPASS_CAL_DURATION_MS   = 30000;
+
+Preferences compassPrefs;
+float compassOffsetX = 0, compassOffsetY = 0, compassOffsetZ = 0;
+float compassScaleX  = 1, compassScaleY  = 1, compassScaleZ  = 1;
+
+// ==========================================
 // WAYPOINT SYSTEM
-//
-// A waypoint is a GPS coordinate the drone flies toward.
-// For Map The Farm, these are points along a fence line.
-//
-// The drone flies from waypoint to waypoint in order.
-// When it reaches the last waypoint, the mission is complete
-// and it holds position until told to land.
-//
-// To load a fence line mission, populate the WAYPOINTS array
-// with your GPS coordinates from Google Maps or a survey.
 // ==========================================
 struct Waypoint {
-  double lat;       // latitude in decimal degrees  (e.g. 36.123456)
-  double lon;       // longitude in decimal degrees (e.g. -80.123456)
-  float  altFt;     // target altitude in feet above ground
+  double lat;
+  double lon;
+  float  altFt;
 };
 
-// ── Fence line waypoints — replace with real GPS coords ──────────────
-// How to get these: stand at each fence corner with your phone,
-// open Google Maps, long-press to drop a pin, read the lat/lon.
-// The drone will fly these in order: wp[0] → wp[1] → wp[2] → ...
 const Waypoint WAYPOINTS[] = {
-  { 36.123456, -80.123456, 30.0f },  // fence corner A
-  { 36.123789, -80.123456, 30.0f },  // fence corner B
-  { 36.123789, -80.123789, 30.0f },  // fence corner C
-  { 36.123456, -80.123789, 30.0f },  // fence corner D (back to start)
+  { 36.123456, -80.123456, 30.0f },
+  { 36.123789, -80.123456, 30.0f },
+  { 36.123789, -80.123789, 30.0f },
+  { 36.123456, -80.123789, 30.0f },
 };
-const int WAYPOINT_COUNT = sizeof(WAYPOINTS) / sizeof(WAYPOINTS[0]);
-
-// How close (in meters) the drone needs to get to a waypoint
-// before it advances to the next one.
-// 2.0m is tight but achievable with good GPS fix.
-// Increase to 5.0f if it overshoots.
-const float WAYPOINT_ACCEPT_RADIUS_M = 5.0f;
+const int   WAYPOINT_COUNT              = sizeof(WAYPOINTS) / sizeof(WAYPOINTS[0]);
+const float WAYPOINT_ACCEPT_RADIUS_M    = 5.0f;
+const unsigned long MISSION_COMPLETE_HOVER_MS = 10000;
+const float LAND_DESCENT_RATE_FPS       = 1.5f;
 
 // ==========================================
 // WOKWI SIMULATION STATE
-// Only exists in the wokwi_sim build. Populated by parseSimInput()
-// reading commands sent over Serial from the scenario YAML's write-serial steps.
 // ==========================================
 #ifdef WOKWI_SIM
 volatile float  simCompassHeading = 0.0f;
@@ -110,207 +87,321 @@ volatile bool   simStartMission   = false;
 // HARDWARE
 // ==========================================
 Adafruit_MPU6050 mpu;
-Madgwick filter;
-EspBarometer barometer;
-TinyGPSPlus gps;           // parses NMEA sentences from BN-880 GPS
-QMC5883LCompass compass;   // reads heading from BN-880 QMC5883L chip
+Madgwick         filter;
+EspBarometer     barometer;
+TinyGPSPlus      gps;
+QMC5883LCompass  compass;
 
-AsyncWebServer server(80);          // ← add this
-AsyncEventSource events("/events"); // ← add this
-
-// One ESC instance per motor (GPIO 4/5/6/7 → RMT channels 0/1/2/3)
-// EspESC esc1, esc2, esc3, esc4;
+AsyncWebServer    server(80);
+AsyncEventSource  events("/events");
 
 // ==========================================
 // PID CONTROLLERS
-//
-// Altitude PID:
-//   error   = target altitude - actual altitude (feet)
-//   output  = base throttle for all 4 motors (0.0 - 1.0)
-//   Kp=0.08  — gentle push per foot of error
-//   Ki=0.01  — slowly corrects persistent hover drift
-//   Kd=0.05  — slows down as we approach target altitude
-//
-// Roll PID:
-//   error   = 0° - actual roll (degrees)
-//   output  = left/right motor trim (-0.3 to +0.3)
-//   Kp=0.01  — small correction per degree of tilt
-//   Ki=0.001 — corrects slow sideways drift
-//   Kd=0.005 — dampens oscillation
-//
-// Pitch PID:
-//   Same gains as roll, front/rear motor trim
-//
-// Yaw PID:
-//   For yaw, the correction is gentler than roll/pitch because
-//   spinning the whole drone is slower and more sluggish than tilting it.
-//   Now uses real compass heading instead of gyro yaw — no drift.
-//
-// Navigation PIDs:
-//   Two new PIDs that sit ABOVE the roll/pitch PIDs.
-//   They take GPS position error (how far from the waypoint)
-//   and convert it into a target tilt angle for roll/pitch to chase.
-//
-//   Think of it as nested loops:
-//     Navigation (10Hz): "I need to move north 10m" → tilt nose forward 5°
-//     Pitch PID (200Hz): "nose is at 0°, target is 5°" → spin rear motors
-//
-//   navNorthPID  — controls forward/backward movement (pitch axis)
-//   navEastPID   — controls left/right movement (roll axis)
-//
-//   Output is in degrees of tilt (-15° to +15°).
-//   Small Kp because GPS is noisy — aggressive gains cause oscillation.
 // ==========================================
-PID altitudePID (0.08f,  0.01f,  0.05f,  0.0f,   1.0f );
-PID rollPID     (0.01f,  0.001f, 0.005f, -0.3f,  0.3f );
-PID pitchPID    (0.01f,  0.001f, 0.005f, -0.3f,  0.3f );
-PID yawPID      (0.005f, 0.0001f,0.001f, -0.2f,  0.2f );
-PID navNorthPID (0.5f,   0.0f,   0.1f,   -15.0f, 15.0f); // output = target pitch degrees
-PID navEastPID  (0.5f,   0.0f,   0.1f,   -15.0f, 15.0f); // output = target roll degrees
+PID altitudePID (0.08f,   0.01f,   0.05f,  0.0f,   1.0f  );
+PID rollPID     (0.01f,   0.001f,  0.005f, -0.3f,  0.3f  );
+PID pitchPID    (0.01f,   0.001f,  0.005f, -0.3f,  0.3f  );
+PID yawPID      (0.005f,  0.0001f, 0.001f, -0.2f,  0.2f  );
+PID navNorthPID (0.5f,    0.0f,    0.1f,   -15.0f, 15.0f );
+PID navEastPID  (0.5f,    0.0f,    0.1f,   -15.0f, 15.0f );
 
 // ==========================================
-// SHARED STATE
-// Written by one core, read by the other.
-// Always use sharedDataMutex before touching these.
+// PANIC — embedded equivalent of an unhandled exception.
+// Prints to Serial and halts. physicsTask stalls → motors stop.
+// ==========================================
+#define PANIC(msg) do { Serial.println(F("[PANIC] " msg " — halting")); while(1) { delay(10); } } while(0)
+
+// Guard for any control-path code that reads dashboard motor outputs.
+// Zero across all four motors is physically impossible on an armed drone
+// (gravity demands throttle), so it reliably means the physics task hasn't
+// written this phase's dashboard yet.
+#define ASSERT_MOTORS_INITIALIZED(d) \
+  do { if ((d).m1 == 0.0f && (d).m2 == 0.0f && (d).m3 == 0.0f && (d).m4 == 0.0f) \
+    PANIC("control decision on uninitialized motor outputs"); } while(0)
+
+// ==========================================
+// FLIGHT PHASE ENUM
+// ==========================================
+enum FlightPhase {
+  PHASE_IDLE,
+  PHASE_HOLD,
+  PHASE_MISSION,
+  PHASE_HOVER_SETTLE,
+  PHASE_LANDING,
+  PHASE_LANDED
+};
+
+const char* phaseName(FlightPhase p) {
+  switch (p) {
+    case PHASE_IDLE:         return "IDLE";
+    case PHASE_HOLD:         return "HOLD";
+    case PHASE_MISSION:      return "MISSION";
+    case PHASE_HOVER_SETTLE: return "HOVER_SETTLE";
+    case PHASE_LANDING:      return "LANDING";
+    case PHASE_LANDED:       return "LANDED";
+  }
+  PANIC("phaseName: unhandled FlightPhase");
+  return nullptr;
+}
+
+bool phaseFlightEnabled(FlightPhase phase) {
+  return phase != PHASE_IDLE && phase != PHASE_LANDED;
+}
+
+// ==========================================
+// RAW SENSOR READS
+// What the hardware gives us every tick, before any phase logic
+// touches it. Both tasks read from here; only the sensor-polling
+// code writes to it.
+// ==========================================
+struct RawImuReading {
+  float accX = 0.0f, accY = 0.0f, accZ = 0.0f;
+  float gyroX = 0.0f, gyroY = 0.0f, gyroZ = 0.0f;
+  float temp = 0.0f;
+};
+
+struct RawGpsReading {
+  double lat = 0.0, lon = 0.0;
+  bool   fix = false;
+  int    sats = 0;
+  float  speedMps = 0.0f;
+  unsigned long lastFixMs = 0;
+};
+
+struct RawSensors {
+  RawImuReading imu;
+  RawGpsReading gps;
+  float compassHeadingDeg = 0.0f;
+  float baroAltitudeFt    = 0.0f; // baro read + ground-offset applied
+};
+
+// ==========================================
+// PER-PHASE STATE BLOCKS
+// Each phase owns three structs:
+//   Dashboard_*  — what the sensors + nav math currently observe
+//                  for this phase (read-only, written by tasks)
+//   Cruise_*     — setpoints this phase is commanding (written by
+//                  transitionTo and the nav/physics tick handlers)
+//   Trip_*       — bookkeeping specific to this phase (counters,
+//                  clocks, flags, captured positions)
+//
+// Only the structs for the CURRENT phase are meaningful at runtime.
+// The others hold stale data from the last time that phase ran.
+// ==========================================
+
+// ------------------------------------------
+// PHASE: IDLE
+// Motors off, drone parked. No guidance, no clocks.
+// ------------------------------------------
+struct Dashboard_Idle {
+  float altitudeFt  = 0.0f;
+  float roll        = 0.0f;
+  float pitch       = 0.0f;
+  float yaw         = 0.0f;
+};
+
+struct Cruise_Idle {
+  // No setpoints — motors are off.
+};
+
+struct Trip_Idle {
+  // Nothing to track while parked.
+};
+
+// ------------------------------------------
+// PHASE: HOLD
+// Hovering in place after a mission abort.
+// Maintains altitude and heading; no lateral guidance.
+// ------------------------------------------
+struct Dashboard_Hold {
+  float altitudeFt      = 0.0f;
+  float roll            = 0.0f;
+  float pitch           = 0.0f;
+  float yaw             = 0.0f;
+  float compassHeading  = 0.0f;
+  // Motor outputs — what the ESCs are currently commanded
+  float m1 = 0, m2 = 0, m3 = 0, m4 = 0;
+  float baseThrottle    = 0.0f;
+  float rollCorrection  = 0.0f;
+  float pitchCorrection = 0.0f;
+};
+
+struct Cruise_Hold {
+  float targetAltFt      = 10.0f;
+  float targetRollDeg    = 0.0f;
+  float targetPitchDeg   = 0.0f;
+  float yawTargetHeading = 0.0f;
+};
+
+struct Trip_Hold {
+  unsigned long armedAtMs = 0; // carries over from MISSION on abort
+};
+
+// ------------------------------------------
+// PHASE: MISSION
+// Autonomous waypoint navigation.
+// ------------------------------------------
+struct Dashboard_Mission {
+  float  altitudeFt      = 0.0f;
+  float  roll            = 0.0f;
+  float  pitch           = 0.0f;
+  float  yaw             = 0.0f;
+  float  compassHeading  = 0.0f;
+  double gpsLat          = 0.0;
+  double gpsLon          = 0.0;
+  bool   gpsFix          = false;
+  int    gpsSats         = 0;
+  float  distToWP        = 0.0f; // computed each nav tick — telemetry
+  float  bearingToWP     = 0.0f; // computed each nav tick — telemetry
+  // Motor outputs — what the ESCs are currently commanded
+  float m1 = 0, m2 = 0, m3 = 0, m4 = 0;
+  float baseThrottle    = 0.0f;
+  float rollCorrection  = 0.0f;
+  float pitchCorrection = 0.0f;
+};
+
+struct Cruise_Mission {
+  float targetAltFt      = 10.0f;
+  float targetRollDeg    = 0.0f;
+  float targetPitchDeg   = 0.0f;
+  float yawTargetHeading = 0.0f;
+};
+
+struct Trip_Mission {
+  unsigned long armedAtMs      = 0;
+  int  currentWP               = 0;
+  int  waypointCount           = 0;
+  bool geofenceTripped         = false;
+  bool gpsLossTripped          = false;
+  bool active                  = false; // horizontal guidance running
+  double launchLat             = 0.0;
+  double launchLon             = 0.0;
+  bool   launchPointSet        = false;
+};
+
+// ------------------------------------------
+// PHASE: HOVER_SETTLE
+// Brief level hover after mission complete, before landing.
+// Holds altitude and heading; no lateral guidance.
+// ------------------------------------------
+struct Dashboard_HoverSettle {
+  float altitudeFt     = 0.0f;
+  float roll           = 0.0f;
+  float pitch          = 0.0f;
+  float yaw            = 0.0f;
+  float compassHeading = 0.0f;
+  // Motor outputs — what the ESCs are currently commanded
+  float m1 = 0, m2 = 0, m3 = 0, m4 = 0;
+  float baseThrottle    = 0.0f;
+  float rollCorrection  = 0.0f;
+  float pitchCorrection = 0.0f;
+};
+
+struct Cruise_HoverSettle {
+  float targetAltFt      = 10.0f;
+  float targetRollDeg    = 0.0f;
+  float targetPitchDeg   = 0.0f;
+  float yawTargetHeading = 0.0f;
+};
+
+struct Trip_HoverSettle {
+  unsigned long enteredAtMs = 0; // times the settle dwell
+};
+
+// ------------------------------------------
+// PHASE: LANDING
+// Controlled descent to the ground.
+// targetAltFt ramps down each nav tick until zero.
+// ------------------------------------------
+struct Dashboard_Landing {
+  float altitudeFt     = 0.0f;
+  float roll           = 0.0f;
+  float pitch          = 0.0f;
+  float yaw            = 0.0f;
+  float compassHeading = 0.0f;
+  // Motor outputs — what the ESCs are currently commanded
+  float m1 = 0, m2 = 0, m3 = 0, m4 = 0;
+  float baseThrottle    = 0.0f;
+  float rollCorrection  = 0.0f;
+  float pitchCorrection = 0.0f;
+};
+
+struct Cruise_Landing {
+  float targetAltFt      = 0.0f; // ramped down by nav tick
+  float targetRollDeg    = 0.0f;
+  float targetPitchDeg   = 0.0f;
+  float yawTargetHeading = 0.0f;
+};
+
+struct Trip_Landing {
+  // No extra bookkeeping — the ramp lives in Cruise_Landing.targetAltFt.
+};
+
+// ------------------------------------------
+// PHASE: LANDED
+// On the ground, motors disarmed.
+// ------------------------------------------
+struct Dashboard_Landed {
+  float altitudeFt = 0.0f;
+};
+
+struct Cruise_Landed {
+  // Motors off — no setpoints.
+};
+
+struct Trip_Landed {
+  // Nothing to track.
+};
+
+// ==========================================
+// AGGREGATE SHARED STATE
+// One instance of every per-phase triple lives here.
+// The active phase determines which triple is live.
+// ==========================================
+struct SharedState {
+  FlightPhase phase = PHASE_IDLE;
+
+  // Raw hardware reads — always live, phase-agnostic
+  RawSensors raw;
+
+  // Per-phase triples
+  Dashboard_Idle        dashboard_idle;
+  Cruise_Idle           cruise_idle;
+  Trip_Idle             trip_idle;
+
+  Dashboard_Hold        dashboard_hold;
+  Cruise_Hold           cruise_hold;
+  Trip_Hold             trip_hold;
+
+  Dashboard_Mission     dashboard_mission;
+  Cruise_Mission        cruise_mission;
+  Trip_Mission          trip_mission;
+
+  Dashboard_HoverSettle dashboard_hoverSettle;
+  Cruise_HoverSettle    cruise_hoverSettle;
+  Trip_HoverSettle      trip_hoverSettle;
+
+  Dashboard_Landing     dashboard_landing;
+  Cruise_Landing        cruise_landing;
+  Trip_Landing          trip_landing;
+
+  Dashboard_Landed      dashboard_landed;
+  Cruise_Landed         cruise_landed;
+  Trip_Landed           trip_landed;
+};
+
+// ==========================================
+// SHARED STATE INSTANCE + SYNCHRONISATION
 // ==========================================
 SemaphoreHandle_t sharedDataMutex;
-SemaphoreHandle_t serialMutex;  // protects Serial.print* calls from interleaving
+SemaphoreHandle_t serialMutex;
 
-// IMU (written by Core 1 physics task)
-float sharedRoll  = 0, sharedPitch = 0, sharedYaw = 0;
-float sharedAccX  = 0, sharedAccY  = 0, sharedAccZ = 0;
-float sharedTemp  = 0;
+volatile SharedState shared;
 
-// Barometer (written by Core 1 physics task)
-float groundAltitudeFt = 0; // measured at startup, used to compute relative altitude
-float sharedAltitudeFt = 0;
+float groundAltitudeFt = 0;
 
-// Motors (written by Core 1, sent as 0-100 to UI)
-float sharedM1 = 0, sharedM2 = 0, sharedM3 = 0, sharedM4 = 0;
-
-// PID debug (written by Core 1, read by web formatter)
-float sharedBaseThrottle    = 0;
-float sharedRollCorrection  = 0;
-float sharedPitchCorrection = 0;
-
-// GPS (written by Core 0 nav task, read by Core 1 for logging/UI)
-volatile double gpsLat       = 0.0;   // current latitude
-volatile double gpsLon       = 0.0;   // current longitude
-volatile bool   gpsFix       = false; // true = GPS has satellite lock
-volatile int    gpsSats      = 0;     // number of satellites in view
-volatile float  gpsSpeedMps  = 0.0f;  // ground speed in m/s
-
-// Compass (written by Core 0 nav task, read by Core 1 physics task for yaw PID)
-// This replaces the gyro-based yaw which drifts over time.
-// The compass always knows true heading regardless of how long we've been flying.
-volatile float compassHeading = 0.0f; // 0-360 degrees, 0 = north
-
-// Navigation (written by Core 0 nav task, read by Core 1 physics task)
-// When navActive is true, the physics task uses these target angles
-// instead of 0.0f for roll and pitch — the drone tilts toward the waypoint.
-volatile bool  navActive        = false; // true = flying a waypoint mission
-volatile float navTargetRollDeg = 0.0f;  // target roll angle from nav PID
-volatile float navTargetPitchDeg= 0.0f;  // target pitch angle from nav PID
-volatile int   navCurrentWP     = 0;     // which waypoint we're flying toward
-volatile float navDistToWP      = 0.0f;  // meters to current waypoint (for UI)
-volatile float navBearingToWP   = 0.0f;  // degrees to current waypoint (for UI)
-
-// Flags / commands (written by Core 0 web handlers, consumed by Core 1)
-volatile bool  flightEnabled = true;
-volatile float targetAltFt   = 10.0f;
-
-// for the endpoints
 JsonDocument readings;
 
-// ==========================================
-// GPS / NAVIGATION HELPERS
-// ==========================================
-
-// Haversine formula — calculates straight-line distance between two
-// GPS coordinates in meters. Used to check if we've reached a waypoint.
-// Named after the haversine trig function it uses internally.
-float gpsDistanceMeters(double lat1, double lon1, double lat2, double lon2) {
-  const float R = 6371000.0f; // Earth radius in meters
-  float dLat = radians(lat2 - lat1);
-  float dLon = radians(lon2 - lon1);
-  float a = sin(dLat/2)*sin(dLat/2) +
-            cos(radians(lat1))*cos(radians(lat2))*
-            sin(dLon/2)*sin(dLon/2);
-  return R * 2.0f * atan2(sqrt(a), sqrt(1.0f-a));
-}
-
-// Bearing from point A to point B in degrees (0=north, 90=east, 180=south, 270=west).
-// The nav PID uses this to figure out which way to tilt the drone.
-float gpsBearing(double lat1, double lon1, double lat2, double lon2) {
-  float dLon = radians(lon2 - lon1);
-  float y = sin(dLon) * cos(radians(lat2));
-  float x = cos(radians(lat1)) * sin(radians(lat2)) -
-            sin(radians(lat1)) * cos(radians(lat2)) * cos(dLon);
-  float bearing = degrees(atan2(y, x));
-  return fmod(bearing + 360.0f, 360.0f); // normalize to 0-360
-}
-
-// Decompose a distance+bearing into north/east components.
-// "I need to go 10m at bearing 045°" → "7.07m north, 7.07m east"
-// This lets us feed two separate PIDs (north and east) instead of
-// one combined bearing PID which is harder to tune.
-void bearingToNorthEast(float distM, float bearingDeg, float &northM, float &eastM) {
-  float bearingRad = radians(bearingDeg);
-  northM = distM * cos(bearingRad);
-  eastM  = distM * sin(bearingRad);
-}
-
-#ifdef WOKWI_SIM
-// Reads lines like:
-//   HDG:090.0   → simCompassHeading
-//   LAT:36.1234 → simGpsLat
-//   LON:-80.1234→ simGpsLon
-//   FIX:1       → simGpsFix
-//   MISSION:1   → triggers the same start-mission logic as the /mission endpoint
-// sent from the Wokwi scenario's write-serial steps over the main Serial line.
-void parseSimInput() {
-  static String buf = "";
-  while (Serial.available()) {
-    char c = Serial.read();
-    if (c == '\n') {
-      if (buf.startsWith("HDG:")) {
-        withMutex([&]() { simCompassHeading = buf.substring(4).toFloat(); });
-      } else if (buf.startsWith("LAT:")) {
-        withMutex([&]() { simGpsLat = buf.substring(4).toDouble(); });
-      } else if (buf.startsWith("LON:")) {
-        withMutex([&]() { simGpsLon = buf.substring(4).toDouble(); });
-      } else if (buf.startsWith("FIX:")) {
-        withMutex([&]() { simGpsFix = (buf.substring(4).toInt() == 1); });
-      } else if (buf.startsWith("MISSION:")) {
-        if (buf.substring(8).toInt() == 1) {
-          withMutex([&]() {
-            navCurrentWP = 0;
-            navActive    = true;
-            targetAltFt  = WAYPOINTS[0].altFt;
-          });
-          logLine("[SIM] Mission started via serial injection.");
-        }
-      }
-      buf = "";
-    } else if (c != '\r') {
-      buf += c;
-    }
-  }
-}
-#endif
-
-// ==========================================
-// MUTEX HELPER
-//
-// Wraps the FreeRTOS mutex grab/release pattern so you don't
-// repeat the same 4-line ceremony everywhere.
-//
-// Usage:
-//   withMutex([&]() {
-//     gpsLat = gps.location.lat();
-//     gpsFix = true;
-//   });
-// ==========================================
 template<typename Fn>
 void withMutex(Fn fn) {
   if (xSemaphoreTake(sharedDataMutex, portMAX_DELAY) == pdTRUE) {
@@ -319,12 +410,6 @@ void withMutex(Fn fn) {
   }
 }
 
-// ==========================================
-// LOGGING HELPER
-//
-// Thread-safe Serial logging. Wraps println with serialMutex
-// so log lines never interleave across Core 0/1 boundaries.
-// ==========================================
 void logLine(const String& msg) {
   if (xSemaphoreTake(serialMutex, portMAX_DELAY) == pdTRUE) {
     Serial.println(msg);
@@ -333,182 +418,528 @@ void logLine(const String& msg) {
 }
 
 // ==========================================
-// NAVIGATION HELPERS
+// GPS / NAVIGATION MATH HELPERS
+// Pure functions — no shared state access.
 // ==========================================
+float gpsDistanceMeters(double lat1, double lon1, double lat2, double lon2) {
+  const float R = 6371000.0f;
+  float dLat = radians(lat2 - lat1);
+  float dLon = radians(lon2 - lon1);
+  float a = sin(dLat/2)*sin(dLat/2) +
+            cos(radians(lat1))*cos(radians(lat2))*
+            sin(dLon/2)*sin(dLon/2);
+  return R * 2.0f * atan2(sqrt(a), sqrt(1.0f - a));
+}
 
-// Zero out all navigation state and targets.
-// Call this whenever you want the drone to stop chasing waypoints
-// and return to level hover: mission abort, GPS loss, mission complete.
-void stopNavigation() {
+float gpsBearing(double lat1, double lon1, double lat2, double lon2) {
+  float dLon = radians(lon2 - lon1);
+  float y    = sin(dLon) * cos(radians(lat2));
+  float x    = cos(radians(lat1)) * sin(radians(lat2)) -
+               sin(radians(lat1)) * cos(radians(lat2)) * cos(dLon);
+  return fmod(degrees(atan2(y, x)) + 360.0f, 360.0f);
+}
+
+void bearingToNorthEast(float distM, float bearingDeg, float& northM, float& eastM) {
+  float rad = radians(bearingDeg);
+  northM = distM * cos(rad);
+  eastM  = distM * sin(rad);
+}
+
+Waypoint getMissionWaypoint(int index, double launchLat, double launchLon) {
+  if (index < WAYPOINT_COUNT) return WAYPOINTS[index];
+  float holdAlt = WAYPOINT_COUNT > 0 ? WAYPOINTS[WAYPOINT_COUNT - 1].altFt : 10.0f;
+  return { launchLat, launchLon, holdAlt };
+}
+
+// ==========================================
+// MOTOR MIX HELPER
+// Same mixing law for every armed phase.
+// ==========================================
+struct MotorMix {
+  float m1, m2, m3, m4;
+  float baseThrottle, rollCorrection, pitchCorrection;
+};
+
+MotorMix computeMotorMix(float targetAltFt, float targetRollDeg, float targetPitchDeg,
+                          float yawTargetHeading,
+                          float altFt, float roll, float pitch, float compassHeading,
+                          float dt) {
+  MotorMix out;
+  out.baseThrottle    = altitudePID.compute(targetAltFt,    altFt,         dt);
+  out.rollCorrection  = rollPID.compute    (targetRollDeg,  roll,          dt);
+  out.pitchCorrection = pitchPID.compute   (targetPitchDeg, pitch,         dt);
+
+  float yawError = yawTargetHeading - compassHeading;
+  if (yawError >  180.0f) yawError -= 360.0f;
+  if (yawError < -180.0f) yawError += 360.0f;
+  float yawCorr = yawPID.computeWithError(yawError, dt);
+
+  out.m1 = constrain(out.baseThrottle + out.pitchCorrection + out.rollCorrection - yawCorr, 0.0f, 1.0f);
+  out.m2 = constrain(out.baseThrottle + out.pitchCorrection - out.rollCorrection + yawCorr, 0.0f, 1.0f);
+  out.m3 = constrain(out.baseThrottle - out.pitchCorrection + out.rollCorrection + yawCorr, 0.0f, 1.0f);
+  out.m4 = constrain(out.baseThrottle - out.pitchCorrection - out.rollCorrection - yawCorr, 0.0f, 1.0f);
+  return out;
+}
+
+// ==========================================
+// PHASE TRANSITIONS
+// One function owns every phase jump. Initialises the incoming
+// phase's Trip_* bookkeeping and Cruise_* setpoints. Carry-overs
+// between phases are explicit here.
+//
+// NOTE: takes the mutex itself — never call from inside withMutex().
+// ==========================================
+void transitionTo(FlightPhase next) {
   withMutex([&]() {
-    navActive         = false;
-    navTargetRollDeg  = 0.0f;
-    navTargetPitchDeg = 0.0f;
+    switch (next) {
+
+      case PHASE_IDLE:
+        // No setpoints — motors will be off.
+        break;
+
+      case PHASE_HOLD:
+        // Only entered via /abort from MISSION.
+        // Carry armedAtMs so the flight-time clock doesn't reset.
+        // Keep targetAltFt from wherever MISSION left it so altitude
+        // doesn't jump on abort.
+        shared.trip_hold.armedAtMs          = shared.trip_mission.armedAtMs;
+        shared.cruise_hold.targetAltFt      = shared.cruise_mission.targetAltFt;
+        shared.cruise_hold.yawTargetHeading = shared.cruise_mission.yawTargetHeading;
+        shared.cruise_hold.targetRollDeg    = 0.0f;
+        shared.cruise_hold.targetPitchDeg   = 0.0f;
+        // Zero motor outputs — physics task hasn't run for this phase yet.
+        // Any control-path read before the first physics tick will PANIC via
+        // ASSERT_MOTORS_INITIALIZED.
+        shared.dashboard_hold.m1 = shared.dashboard_hold.m2 = 0.0f;
+        shared.dashboard_hold.m3 = shared.dashboard_hold.m4 = 0.0f;
+        shared.dashboard_hold.baseThrottle = shared.dashboard_hold.rollCorrection = 0.0f;
+        shared.dashboard_hold.pitchCorrection = 0.0f;
+        break;
+
+      case PHASE_MISSION:
+        shared.trip_mission.armedAtMs       = millis();
+        shared.trip_mission.currentWP       = 0;
+        shared.trip_mission.waypointCount   = WAYPOINT_COUNT + 1; // +1 for RTL leg
+        shared.trip_mission.geofenceTripped = false;
+        shared.trip_mission.gpsLossTripped  = false;
+        shared.trip_mission.active          = true;
+        shared.trip_mission.launchLat       = shared.raw.gps.lat;
+        shared.trip_mission.launchLon       = shared.raw.gps.lon;
+        shared.trip_mission.launchPointSet  = true;
+        shared.cruise_mission.targetAltFt      = WAYPOINTS[0].altFt;
+        shared.cruise_mission.yawTargetHeading = shared.raw.compassHeadingDeg;
+        shared.cruise_mission.targetRollDeg    = 0.0f;
+        shared.cruise_mission.targetPitchDeg   = 0.0f;
+        // Zero motor outputs — physics task hasn't run for this phase yet.
+        shared.dashboard_mission.m1 = shared.dashboard_mission.m2 = 0.0f;
+        shared.dashboard_mission.m3 = shared.dashboard_mission.m4 = 0.0f;
+        shared.dashboard_mission.baseThrottle = shared.dashboard_mission.rollCorrection = 0.0f;
+        shared.dashboard_mission.pitchCorrection = 0.0f;
+        break;
+
+      case PHASE_HOVER_SETTLE:
+        shared.trip_hoverSettle.enteredAtMs        = millis();
+        // Hold the altitude and heading MISSION left us at.
+        shared.cruise_hoverSettle.targetAltFt      = shared.cruise_mission.targetAltFt;
+        shared.cruise_hoverSettle.yawTargetHeading = shared.cruise_mission.yawTargetHeading;
+        shared.cruise_hoverSettle.targetRollDeg    = 0.0f;
+        shared.cruise_hoverSettle.targetPitchDeg   = 0.0f;
+        // Zero motor outputs — physics task hasn't run for this phase yet.
+        shared.dashboard_hoverSettle.m1 = shared.dashboard_hoverSettle.m2 = 0.0f;
+        shared.dashboard_hoverSettle.m3 = shared.dashboard_hoverSettle.m4 = 0.0f;
+        shared.dashboard_hoverSettle.baseThrottle = shared.dashboard_hoverSettle.rollCorrection = 0.0f;
+        shared.dashboard_hoverSettle.pitchCorrection = 0.0f;
+        break;
+
+      case PHASE_LANDING:
+        // Descent ramp starts from the altitude the previous phase held.
+        // We don't know which phase is outgoing here, so read the raw
+        // sensor altitude rather than guessing which Cruise_* to copy.
+        shared.cruise_landing.targetAltFt      = shared.raw.baroAltitudeFt;
+        shared.cruise_landing.yawTargetHeading = shared.cruise_hoverSettle.yawTargetHeading;
+        shared.cruise_landing.targetRollDeg    = 0.0f;
+        shared.cruise_landing.targetPitchDeg   = 0.0f;
+        // Zero motor outputs — physics task hasn't run for this phase yet.
+        shared.dashboard_landing.m1 = shared.dashboard_landing.m2 = 0.0f;
+        shared.dashboard_landing.m3 = shared.dashboard_landing.m4 = 0.0f;
+        shared.dashboard_landing.baseThrottle = shared.dashboard_landing.rollCorrection = 0.0f;
+        shared.dashboard_landing.pitchCorrection = 0.0f;
+        break;
+
+      case PHASE_LANDED:
+        // No setpoints — motors off.
+        break;
+    }
+    shared.phase = next;
   });
 }
 
 // ==========================================
-// CORE 0: NAVIGATION TASK (~10Hz)
-//
-// This task runs on Core 0 alongside the web server and WiFi.
-// It does three things every loop:
-//   1. Reads GPS NMEA sentences from BN-880 over Serial2
-//   2. Reads compass heading from QMC5883L over I2C
-//   3. If a mission is active, runs the navigation PIDs
-//      to compute how much to tilt the drone toward the next waypoint
-//
-// The output (navTargetRollDeg, navTargetPitchDeg) is picked up
-// by the physics task on Core 1 every 5ms.
+// PER-PHASE NAV TICK HANDLERS (~10 Hz)
+// Each function runs for exactly one phase. The nav loop dispatches
+// here after updating raw sensor state. Reads from raw.*, writes to
+// the matching dashboard_*/cruise_*/trip_* structs.
+// ==========================================
+
+void navTick_Idle(float /*navDt*/) {
+  withMutex([&]() {
+    shared.dashboard_idle.altitudeFt = shared.raw.baroAltitudeFt;
+    shared.dashboard_idle.roll       = shared.raw.imu.gyroX; // fused by physics
+    shared.dashboard_idle.pitch      = shared.raw.imu.gyroY;
+    shared.dashboard_idle.yaw        = shared.raw.imu.gyroZ;
+  });
+}
+
+void navTick_Hold(float /*navDt*/) {
+  withMutex([&]() {
+    shared.dashboard_hold.altitudeFt     = shared.raw.baroAltitudeFt;
+    shared.dashboard_hold.compassHeading = shared.raw.compassHeadingDeg;
+    // roll/pitch/yaw come from physics task; read them back from cruise output
+    shared.dashboard_hold.roll  = shared.raw.imu.gyroX;
+    shared.dashboard_hold.pitch = shared.raw.imu.gyroY;
+    shared.dashboard_hold.yaw   = shared.raw.imu.gyroZ;
+  });
+
+  // Safety: max flight time
+  unsigned long armedAt;
+  withMutex([&]() { armedAt = shared.trip_hold.armedAtMs; });
+  if (armedAt > 0 && (millis() - armedAt) >= MAX_FLIGHT_TIME_MS) {
+    logLine("[SAFETY] Max flight time reached in HOLD — forcing landing.");
+    transitionTo(PHASE_LANDING);
+  }
+}
+
+void navTick_Mission(float navDt) {
+  // Snapshot raw sensors
+  RawGpsReading  gps;
+  Trip_Mission   trip;
+  float compass;
+  withMutex([&]() {
+    gps     = shared.raw.gps;
+    trip    = shared.trip_mission;
+    compass = shared.raw.compassHeadingDeg;
+  });
+
+  // Update mission dashboard
+  withMutex([&]() {
+    shared.dashboard_mission.altitudeFt     = shared.raw.baroAltitudeFt;
+    shared.dashboard_mission.compassHeading = compass;
+    shared.dashboard_mission.gpsLat         = gps.lat;
+    shared.dashboard_mission.gpsLon         = gps.lon;
+    shared.dashboard_mission.gpsFix         = gps.fix;
+    shared.dashboard_mission.gpsSats        = gps.sats;
+    shared.dashboard_mission.roll           = shared.raw.imu.gyroX;
+    shared.dashboard_mission.pitch          = shared.raw.imu.gyroY;
+    shared.dashboard_mission.yaw            = shared.raw.imu.gyroZ;
+  });
+
+  // Safety: max flight time
+  if (trip.armedAtMs > 0 && (millis() - trip.armedAtMs) >= MAX_FLIGHT_TIME_MS) {
+    logLine("[SAFETY] Max flight time reached in MISSION — forcing landing.");
+    withMutex([&]() {
+      shared.trip_mission.active           = false;
+      shared.cruise_mission.targetRollDeg  = 0.0f;
+      shared.cruise_mission.targetPitchDeg = 0.0f;
+    });
+    transitionTo(PHASE_LANDING);
+    return;
+  }
+
+  // Safety: geofence
+  if (gps.fix && trip.launchPointSet) {
+    float distFromLaunch = gpsDistanceMeters(gps.lat, gps.lon, trip.launchLat, trip.launchLon);
+    if (distFromLaunch > GEOFENCE_RADIUS_M) {
+      if (!trip.geofenceTripped) {
+        withMutex([&]() { shared.trip_mission.geofenceTripped = true; });
+        logLine("[SAFETY] Geofence exceeded — aborting mission.");
+      }
+      withMutex([&]() {
+        shared.trip_mission.active           = false;
+        shared.cruise_mission.targetRollDeg  = 0.0f;
+        shared.cruise_mission.targetPitchDeg = 0.0f;
+      });
+      transitionTo(PHASE_LANDING);
+      return;
+    }
+  }
+
+  // Safety: GPS loss
+  if (!gps.fix) {
+    if (gps.lastFixMs > 0 && (millis() - gps.lastFixMs) >= GPS_LOSS_ABORT_MS) {
+      if (!trip.gpsLossTripped) {
+        withMutex([&]() { shared.trip_mission.gpsLossTripped = true; });
+        logLine("[SAFETY] GPS fix lost — aborting mission.");
+      }
+      withMutex([&]() {
+        shared.trip_mission.active           = false;
+        shared.cruise_mission.targetRollDeg  = 0.0f;
+        shared.cruise_mission.targetPitchDeg = 0.0f;
+      });
+      transitionTo(PHASE_LANDING);
+      return;
+    }
+    // GPS not yet lost long enough — hold current setpoints
+    return;
+  }
+
+  if (!trip.active) return;
+
+  // All waypoints done (including RTL leg)
+  if (trip.currentWP >= trip.waypointCount) {
+    withMutex([&]() { shared.trip_mission.active = false; });
+    transitionTo(PHASE_HOVER_SETTLE);
+    logLine("[NAV] Mission complete (incl. RTL) — hovering before landing.");
+    return;
+  }
+
+  Waypoint wp = getMissionWaypoint(trip.currentWP, trip.launchLat, trip.launchLon);
+  float distM   = gpsDistanceMeters(gps.lat, gps.lon, wp.lat, wp.lon);
+  float bearing = gpsBearing(gps.lat, gps.lon, wp.lat, wp.lon);
+
+  withMutex([&]() {
+    shared.cruise_mission.yawTargetHeading   = bearing;
+    shared.dashboard_mission.distToWP        = distM;
+    shared.dashboard_mission.bearingToWP     = bearing;
+  });
+
+  if (distM < WAYPOINT_ACCEPT_RADIUS_M) {
+    bool isRTL = (trip.currentWP == WAYPOINT_COUNT);
+    logLine(String("[NAV] Reached ") +
+            (isRTL ? "RTL / launch point" : (String("waypoint ") + String(trip.currentWP))) +
+            " — advancing to index " + String(trip.currentWP + 1));
+    withMutex([&]() {
+      shared.trip_mission.currentWP++;
+      int next = shared.trip_mission.currentWP;
+      shared.cruise_mission.targetAltFt = (next < shared.trip_mission.waypointCount)
+          ? getMissionWaypoint(next, trip.launchLat, trip.launchLon).altFt
+          : wp.altFt;
+    });
+    return;
+  }
+
+  float northM, eastM;
+  bearingToNorthEast(distM, bearing, northM, eastM);
+  float targetPitch = navNorthPID.computeWithError(northM, navDt);
+  float targetRoll  = navEastPID.computeWithError(eastM,  navDt);
+
+  withMutex([&]() {
+    shared.cruise_mission.targetRollDeg  = targetRoll;
+    shared.cruise_mission.targetPitchDeg = targetPitch;
+  });
+}
+
+void navTick_HoverSettle(float /*navDt*/) {
+  withMutex([&]() {
+    shared.dashboard_hoverSettle.altitudeFt     = shared.raw.baroAltitudeFt;
+    shared.dashboard_hoverSettle.compassHeading = shared.raw.compassHeadingDeg;
+    shared.dashboard_hoverSettle.roll           = shared.raw.imu.gyroX;
+    shared.dashboard_hoverSettle.pitch          = shared.raw.imu.gyroY;
+    shared.dashboard_hoverSettle.yaw            = shared.raw.imu.gyroZ;
+  });
+
+  unsigned long enteredAt;
+  withMutex([&]() { enteredAt = shared.trip_hoverSettle.enteredAtMs; });
+  if (millis() - enteredAt >= MISSION_COMPLETE_HOVER_MS) {
+    transitionTo(PHASE_LANDING);
+    logLine("[NAV] Hover complete — beginning automatic landing.");
+  }
+}
+
+void navTick_Landing(float navDt) {
+  withMutex([&]() {
+    shared.dashboard_landing.altitudeFt     = shared.raw.baroAltitudeFt;
+    shared.dashboard_landing.compassHeading = shared.raw.compassHeadingDeg;
+    shared.dashboard_landing.roll           = shared.raw.imu.gyroX;
+    shared.dashboard_landing.pitch          = shared.raw.imu.gyroY;
+    shared.dashboard_landing.yaw            = shared.raw.imu.gyroZ;
+  });
+
+  bool landed = false;
+  withMutex([&]() {
+    float newTarget = shared.cruise_landing.targetAltFt - (LAND_DESCENT_RATE_FPS * navDt);
+    if (newTarget <= 0.0f) {
+      shared.cruise_landing.targetAltFt = 0.0f;
+      landed = true;
+    } else {
+      shared.cruise_landing.targetAltFt = newTarget;
+    }
+  });
+
+  if (landed) {
+    transitionTo(PHASE_LANDED);
+    logLine("[NAV] Landed — motors disarmed.");
+  }
+}
+
+void navTick_Landed(float /*navDt*/) {
+  withMutex([&]() {
+    shared.dashboard_landed.altitudeFt = shared.raw.baroAltitudeFt;
+  });
+}
+
+// ==========================================
+// PER-PHASE PHYSICS TICK HANDLERS (~200 Hz)
+// Each function runs for exactly one phase. Reads from raw.* and the
+// phase's Cruise_* setpoints; writes the motor mix into Dashboard_*.
+// ==========================================
+
+void physicsTick_Idle(float dt) {
+  (void)dt;
+  altitudePID.reset();
+  rollPID.reset();
+  pitchPID.reset();
+  yawPID.reset();
+  navNorthPID.reset();
+  navEastPID.reset();
+  // esc1.disarm(); esc2.disarm(); esc3.disarm(); esc4.disarm();
+}
+
+void physicsTick_Hold(float dt) {
+  Cruise_Hold c;
+  RawSensors  r;
+  withMutex([&]() { c = shared.cruise_hold; r = shared.raw; });
+
+  MotorMix mix = computeMotorMix(
+    c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
+    r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, dt);
+
+  withMutex([&]() {
+    shared.dashboard_hold.m1             = mix.m1;
+    shared.dashboard_hold.m2             = mix.m2;
+    shared.dashboard_hold.m3             = mix.m3;
+    shared.dashboard_hold.m4             = mix.m4;
+    shared.dashboard_hold.baseThrottle   = mix.baseThrottle;
+    shared.dashboard_hold.rollCorrection  = mix.rollCorrection;
+    shared.dashboard_hold.pitchCorrection = mix.pitchCorrection;
+  });
+  // esc1.write(mix.m1); esc2.write(mix.m2); esc3.write(mix.m3); esc4.write(mix.m4);
+}
+
+void physicsTick_Mission(float dt) {
+  Cruise_Mission c;
+  RawSensors     r;
+  withMutex([&]() { c = shared.cruise_mission; r = shared.raw; });
+
+  MotorMix mix = computeMotorMix(
+    c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
+    r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, dt);
+
+  withMutex([&]() {
+    shared.dashboard_mission.m1             = mix.m1;
+    shared.dashboard_mission.m2             = mix.m2;
+    shared.dashboard_mission.m3             = mix.m3;
+    shared.dashboard_mission.m4             = mix.m4;
+    shared.dashboard_mission.baseThrottle   = mix.baseThrottle;
+    shared.dashboard_mission.rollCorrection  = mix.rollCorrection;
+    shared.dashboard_mission.pitchCorrection = mix.pitchCorrection;
+  });
+  // esc1.write(mix.m1); esc2.write(mix.m2); esc3.write(mix.m3); esc4.write(mix.m4);
+}
+
+void physicsTick_HoverSettle(float dt) {
+  Cruise_HoverSettle c;
+  RawSensors         r;
+  withMutex([&]() { c = shared.cruise_hoverSettle; r = shared.raw; });
+
+  MotorMix mix = computeMotorMix(
+    c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
+    r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, dt);
+
+  withMutex([&]() {
+    shared.dashboard_hoverSettle.m1             = mix.m1;
+    shared.dashboard_hoverSettle.m2             = mix.m2;
+    shared.dashboard_hoverSettle.m3             = mix.m3;
+    shared.dashboard_hoverSettle.m4             = mix.m4;
+    shared.dashboard_hoverSettle.baseThrottle   = mix.baseThrottle;
+    shared.dashboard_hoverSettle.rollCorrection  = mix.rollCorrection;
+    shared.dashboard_hoverSettle.pitchCorrection = mix.pitchCorrection;
+  });
+  // esc1.write(mix.m1); esc2.write(mix.m2); esc3.write(mix.m3); esc4.write(mix.m4);
+}
+
+void physicsTick_Landing(float dt) {
+  Cruise_Landing c;
+  RawSensors     r;
+  withMutex([&]() { c = shared.cruise_landing; r = shared.raw; });
+
+  MotorMix mix = computeMotorMix(
+    c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
+    r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, dt);
+
+  withMutex([&]() {
+    shared.dashboard_landing.m1             = mix.m1;
+    shared.dashboard_landing.m2             = mix.m2;
+    shared.dashboard_landing.m3             = mix.m3;
+    shared.dashboard_landing.m4             = mix.m4;
+    shared.dashboard_landing.baseThrottle   = mix.baseThrottle;
+    shared.dashboard_landing.rollCorrection  = mix.rollCorrection;
+    shared.dashboard_landing.pitchCorrection = mix.pitchCorrection;
+  });
+  // esc1.write(mix.m1); esc2.write(mix.m2); esc3.write(mix.m3); esc4.write(mix.m4);
+}
+
+void physicsTick_Landed(float dt) {
+  (void)dt;
+  altitudePID.reset();
+  rollPID.reset();
+  pitchPID.reset();
+  yawPID.reset();
+  navNorthPID.reset();
+  navEastPID.reset();
+  // esc1.disarm(); esc2.disarm(); esc3.disarm(); esc4.disarm();
+}
+
+// ==========================================
+// CORE 0: NAVIGATION TASK (~10 Hz)
+// Polls GPS + compass, updates raw sensors, dispatches to the
+// per-phase nav tick handler for the current phase.
 // ==========================================
 void navigationTask(void* parameter) {
-
-  const TickType_t xFrequency = pdMS_TO_TICKS(NAV_LOOP_MS);
-  TickType_t lastWakeTime = xTaskGetTickCount();
-
-  float navDt = NAV_LOOP_MS / 1000.0f; // fixed dt for nav PIDs (0.1s at 10Hz)
+  const TickType_t xFrequency  = pdMS_TO_TICKS(NAV_LOOP_MS);
+  TickType_t       lastWakeTime = xTaskGetTickCount();
+  const float      navDt        = NAV_LOOP_MS / 1000.0f;
 
   for (;;) {
-
-    // ── 1. Feed GPS serial data to TinyGPSPlus ─────────────
-    // TinyGPSPlus parses NMEA sentences one character at a time.
-    // We drain the serial buffer every loop so we don't fall behind.
-    // A full GPS fix sentence arrives once per second at 9600 baud.
+    // ---- Poll GPS ----
 #ifdef WOKWI_SIM
     withMutex([&]() {
-      gpsLat      = simGpsLat;
-      gpsLon      = simGpsLon;
-      gpsFix      = simGpsFix;
-      gpsSats     = simGpsFix ? 8 : 0;
-      gpsSpeedMps = 0.0f;
+      if (shared.raw.gps.fix) shared.raw.gps.lastFixMs = millis();
+      shared.raw.gps.sats = shared.raw.gps.fix ? 8 : 0;
     });
 #else
-    while (Serial2.available() > 0) {
-      gps.encode(Serial2.read());
-    }
+    while (Serial2.available() > 0) gps.encode(Serial2.read());
 
     if (gps.location.isValid() && gps.location.age() < 2000) {
-      withMutex([&]() {
-        gpsLat      = gps.location.lat();
-        gpsLon      = gps.location.lng();
-        gpsFix      = true;
-        gpsSats     = gps.satellites.value();
-        gpsSpeedMps = gps.speed.mps();
-      });
+      RawGpsReading g;
+      g.lat       = gps.location.lat();
+      g.lon       = gps.location.lng();
+      g.fix       = true;
+      g.sats      = gps.satellites.value();
+      g.speedMps  = gps.speed.mps();
+      g.lastFixMs = millis();
+      withMutex([&]() { shared.raw.gps = g; });
     } else {
-      withMutex([&]() {
-        gpsFix = false;
-      });
+      withMutex([&]() { shared.raw.gps.fix = false; });
     }
-#endif
 
-    // ── 2. Read compass heading ─────────────────────────────
-    // QMC5883L returns raw X/Y/Z magnetic field values.
-    // The library converts those to a 0-360 degree heading.
-    // 0 = magnetic north (close enough to true north for fence line flying).
-    //
-    // Important: the compass needs calibration for your specific location
-    // due to magnetic declination and hard/soft iron distortion from
-    // the drone frame. For now we use raw values — add calibration offsets later.
-#ifdef WOKWI_SIM
-    float heading;
-    withMutex([&]() { heading = simCompassHeading; });
-#else
+    // ---- Poll compass ----
     compass.read();
     float heading = compass.getAzimuth();
+    withMutex([&]() { shared.raw.compassHeadingDeg = heading; });
 #endif
 
-    withMutex([&]() {
-      compassHeading = heading;
-    });
+    // ---- Dispatch to per-phase nav handler ----
+    FlightPhase phase;
+    withMutex([&]() { phase = shared.phase; });
 
-    // ── 3. Navigation PID ───────────────────────────────────
-    // Only runs if a mission is active AND we have GPS lock.
-    // If we lose GPS mid-flight, navActive goes false and the drone
-    // falls back to holding position with attitude PIDs only.
-    if (navActive && gpsFix) {
-
-      // Grab current position under mutex
-      double currentLat, currentLon;
-      int currentWP;
-
-      withMutex([&]() {
-        currentLat = gpsLat;
-        currentLon = gpsLon;
-        currentWP  = navCurrentWP;    
-      });
-
-      // Safety check — don't fly if waypoints are exhausted
-      if (currentWP >= WAYPOINT_COUNT) {
-
-        // Mission complete — hold position, wait for land command
-        stopNavigation();
-        logLine("[NAV] Mission complete — leveling out.");
-
-        vTaskDelayUntil(&lastWakeTime, xFrequency);
-
-        continue;
-      }
-
-      // Get current target waypoint
-      Waypoint wp = WAYPOINTS[currentWP];
-
-      // How far and in what direction is the waypoint?
-      float distM   = gpsDistanceMeters(currentLat, currentLon, wp.lat, wp.lon);
-      float bearing = gpsBearing(currentLat, currentLon, wp.lat, wp.lon);
-
-      // Have we arrived? Advance to next waypoint.
-      if (distM < WAYPOINT_ACCEPT_RADIUS_M) {
-        String wpReachedLog = String("[NAV] Reached waypoint ") + String(currentWP) +
-                              " — advancing to waypoint " + String(currentWP + 1);
-        logLine(wpReachedLog);
-
-        withMutex([&]() {
-            navCurrentWP++;
-            targetAltFt = (navCurrentWP < WAYPOINT_COUNT)
-                          ? WAYPOINTS[navCurrentWP].altFt
-                          : wp.altFt; // hold last altitude when mission complete
-        });
-
-        vTaskDelayUntil(&lastWakeTime, xFrequency);
-
-        continue;
-      }
-
-      // Decompose distance into north/east components
-      // North = forward/backward tilt (pitch axis)
-      // East  = left/right tilt (roll axis)
-      float northM, eastM;
-      bearingToNorthEast(distM, bearing, northM, eastM);
-
-      // Run navigation PIDs
-      // Error is how far we need to go in each direction.
-      // Output is how many degrees to tilt in that direction.
-      // The physics task's roll/pitch PIDs then chase that tilt angle.
-      float targetPitch = navNorthPID.computeWithError(northM, navDt); // nose forward = positive
-      float targetRoll  = navEastPID.computeWithError(eastM,  navDt);  // right = positive
-
-      // Write navigation outputs to shared state for physics task
-        withMutex([&]() {
-          navTargetRollDeg  = targetRoll;
-          navTargetPitchDeg = targetPitch;
-          navDistToWP       = distM;
-          navBearingToWP    = bearing;
-        });
-
-      String navWPLog = String("[NAV] WP=") + String(currentWP) +
-                        " dist=" + String(distM, 1) +
-                        "m bearing=" + String(bearing, 1) +
-                        "° → pitchTarget=" + String(targetPitch, 2) +
-                        "° rollTarget=" + String(targetRoll, 2);
-      logLine(navWPLog);
-
-    } else {
-      // No mission active — zero out navigation targets
-      // Physics task will use 0.0f (hover level) for roll/pitch
-      withMutex([&]() {
-        navTargetRollDeg  = 0.0f;
-        navTargetPitchDeg = 0.0f;
-      });
+    switch (phase) {
+      case PHASE_IDLE:         navTick_Idle(navDt);        break;
+      case PHASE_HOLD:         navTick_Hold(navDt);        break;
+      case PHASE_MISSION:      navTick_Mission(navDt);     break;
+      case PHASE_HOVER_SETTLE: navTick_HoverSettle(navDt); break;
+      case PHASE_LANDING:      navTick_Landing(navDt);     break;
+      case PHASE_LANDED:       navTick_Landed(navDt);      break;
+      default: PANIC("navigationTask: unhandled FlightPhase");
     }
 
     vTaskDelayUntil(&lastWakeTime, xFrequency);
@@ -516,194 +947,61 @@ void navigationTask(void* parameter) {
 }
 
 // ==========================================
-// CORE 1: PHYSICS + FLIGHT TASK (~200Hz)
+// CORE 1: PHYSICS + FLIGHT TASK (~200 Hz)
+// Reads IMU + baro, updates raw sensors, dispatches to the
+// per-phase physics tick handler for the current phase.
 // ==========================================
 unsigned long lastGyroMicros = 0;
 
 void physicsTask(void* parameter) {
-
-  // get the current time in microseconds for delta time calculations
   lastGyroMicros = micros();
-
-  // At 10000ms (0.1Hz):
-  // - The filter expects one tap every 10 seconds. So each time you call updateIMU, it thinks "okay, 10 seconds passed, let me integrate the gyroscope over 10 seconds to get the new angle." Slow and sluggish but correct for that rate.
-  // At 5ms (200Hz):
-  // - The filter expects 200 taps per second. So each updateIMU it thinks "okay, 5 milliseconds passed, tiny integration step." Very responsive and smooth.
-  // The key thing is — the filter doesn't actually know what time it is. It's blind. All it knows is "each tap = 1/HZ seconds passed." So if you lie to it by saying 200Hz but only actually call it once every 10 seconds, it thinks tiny sips of time are passing when actually huge gulps are. Your angles will barely move even if you spin the drone around.
-  // That's why keeping PHYSICS_LOOP_MS and PHYSICS_LOOP_HZ in sync matters — you're just making sure the filter's internal clock matches reality.
   filter.begin(PHYSICS_LOOP_HZ);
-  const TickType_t xFrequency = pdMS_TO_TICKS(PHYSICS_LOOP_MS);
-
-  TickType_t lastWakeTime = xTaskGetTickCount();
+  const TickType_t xFrequency  = pdMS_TO_TICKS(PHYSICS_LOOP_MS);
+  TickType_t       lastWakeTime = xTaskGetTickCount();
 
   for (;;) {
-
-    // at the end of each loop, we have a determinsitic delay to maintain a fixed loop frequency
-    // but, we also want to measure the actual time between loops for physics calculations, so we use micros() to get the actual delta time
     unsigned long now = micros();
-
-    // measure actual delta that passed since last loop, in seconds
     float dt = (now - lastGyroMicros) / 1000000.0f;
     lastGyroMicros = now;
 
-    // so an MPU can get the current acceleration, spin rate, and temperature
+    // ---- Read IMU ----
     sensors_event_t a, g, temp;
     mpu.getEvent(&a, &g, &temp);
 
-    // convert gyro readings from rad/s → deg/s for Madgwick filter
     float gx = g.gyro.x * 57.2958f;
     float gy = g.gyro.y * 57.2958f;
     float gz = g.gyro.z * 57.2958f;
 
-    // If the delta time is reasonable, update the Madgwick filter with the new gyro and accelerometer readings.
-    // If the delta time is too large (e.g., due to a long delay), we skip the update to avoid instability in the filter.
-    // In practice the jitter is tiny. Your FreeRTOS task is running on a deterministic scheduler — vTaskDelayUntil is specifically designed to keep the loop as close to exactly 10ms as possible. You might get 10.001ms one loop, 9.998ms the next. That's so small that the error in angle = spin_rate × time is basically invisible.
-    // The only time it becomes a real problem is if the loop freezes for a long time — like half a second or more. That's what the dt < 1.0f guard is catching. Not jitter, just catastrophic stalls.
-    // So the mental model is:
-    // Tiny timing variations → Madgwick handles it fine, don't worry
-    // Complete stall → skip that reading entirely with the guard
-    // If you were running on bare metal with no scheduler and loops that could swing wildly between 5ms and 50ms, then yeah you'd need to feed the real dt in somehow. But with FreeRTOS keeping you pinned to a fixed rate, just telling the filter "expect 100Hz" is accurate enough.
-    if (dt > 0 && dt < 1.0f)
-    {
+    if (dt > 0 && dt < 1.0f) {
       filter.updateIMU(gx, gy, gz, a.acceleration.x, a.acceleration.y, a.acceleration.z);
     }
 
-    float currentRoll  = filter.getRoll();
-    float currentPitch = filter.getPitch();
-    float currentYaw   = filter.getYaw();
-
-    // ── 3. Read altitude (meters → feet) ───────────────────
-    float altitudeFt = ((float)barometer.readAltitudeMeters() * 3.28084f) - groundAltitudeFt;
-
-    // ── 4. Get navigation targets from shared state ─────────
-    // If a waypoint mission is running, the nav task on Core 0
-    // has computed how much to tilt the drone toward the next waypoint.
-    // We use those target angles instead of 0.0f (level hover).
-    // If no mission is active, these are 0.0f and the drone just hovers level.
-    float targetRollDeg, targetPitchDeg, currentCompassHeading;
-    bool  missionActive;
+    float baroAlt = ((float)barometer.readAltitudeMeters() * 3.28084f) - groundAltitudeFt;
 
     withMutex([&]() {
-      targetRollDeg         = navTargetRollDeg;
-      targetPitchDeg        = navTargetPitchDeg;
-      missionActive         = navActive;
-      currentCompassHeading = compassHeading;
+      shared.raw.imu.gyroX  = filter.getRoll();
+      shared.raw.imu.gyroY  = filter.getPitch();
+      shared.raw.imu.gyroZ  = filter.getYaw();
+      shared.raw.imu.accX   = a.acceleration.x;
+      shared.raw.imu.accY   = a.acceleration.y;
+      shared.raw.imu.accZ   = a.acceleration.z;
+      shared.raw.imu.temp   = temp.temperature;
+      shared.raw.baroAltitudeFt = baroAlt;
     });
 
-    // ── 5. Flight control ───────────────────────────────────
-    float m1 = 0, m2 = 0, m3 = 0, m4 = 0;
-    float baseThrottle    = 0;
-    float rollCorrection  = 0;
-    float pitchCorrection = 0;
-    float yawCorrection   = 0;
+    // ---- Dispatch to per-phase physics handler ----
+    FlightPhase phase;
+    withMutex([&]() { phase = shared.phase; });
 
-    if (flightEnabled) {
-
-      // Altitude PID → base throttle for all motors
-      // "How far from target? Spin all motors faster/slower."
-      baseThrottle = altitudePID.compute(targetAltFt, altitudeFt, dt);
-
-      // Roll PID → left/right motor trim
-      // When hovering: target = 0° (level)
-      // When navigating: target = navTargetRollDeg (tilt toward waypoint)
-      rollCorrection = rollPID.compute(targetRollDeg, currentRoll, dt);
-
-      // Pitch PID → front/rear motor trim
-      // When hovering: target = 0° (level)
-      // When navigating: target = navTargetPitchDeg (tilt toward waypoint)
-      pitchCorrection = pitchPID.compute(targetPitchDeg, currentPitch, dt);
-
-      // Yaw PID → diagonal motor trim to rotate drone back to target heading
-      //
-      // Previously this used filter.getYaw() which drifts over time because
-      // the gyroscope accumulates small errors. Now we use the compass heading
-      // from the BN-880 which always knows true magnetic north — no drift ever.
-      //
-      // The compass needle analogy:
-      //   Think of a slim piece of paper standing vertical on a table,
-      //   spine pointing straight up. The Z-axis compass lies flat at the top.
-      //   When the drone yaws (spins left or right), that flat compass needle
-      //   rotates. The gyroscope measures how fast the needle is moving.
-      //   The compass tells us where it actually points.
-      //
-      // P — how far from north right now?
-      //     "90 degrees off → spin hard"
-      // I — _integral accumulates (error × dt) every loop
-      //     grows larger the longer we stay off heading
-      //     "been drifting west for a while, probably wind → spin a bit harder"
-      // D — how fast is the error shrinking?
-      //     "already rotating back to north fast → ease off before we overshoot east"
-      //
-      // output: single float fed into motor mixer to spin the drone left or right
-      float targetHeading = 0.0f; // true north — replace with desired fence line heading
-      float yawError = targetHeading - currentCompassHeading;
-      // Wraparound fix — compass goes 0-360, so crossing north (359→1) would
-      // give a huge error without this. We always take the shortest path.
-      if (yawError > 180.0f)  yawError -= 360.0f;
-      if (yawError < -180.0f) yawError += 360.0f;
-      yawCorrection = yawPID.computeWithError(yawError, dt);
-
-      // Motor mixer: combine base throttle + stabilization corrections
-      //
-      //      FRONT
-      //  M1 (FL)   M2 (FR)
-      //  M3 (RL)   M4 (RR)
-      //      REAR
-      //
-      // Roll +  → tilt right → left motors need more power
-      // Pitch + → nose up    → front motors need more power
-      // Yaw +   → spin CW   → diagonal pair (FL+RR) spin faster, (FR+RL) slower
-      m1 = baseThrottle + pitchCorrection + rollCorrection - yawCorrection;  // FL
-      m2 = baseThrottle + pitchCorrection - rollCorrection + yawCorrection;  // FR
-      m3 = baseThrottle - pitchCorrection + rollCorrection + yawCorrection;  // RL
-      m4 = baseThrottle - pitchCorrection - rollCorrection - yawCorrection;  // RR
-
-      // Clamp all motors to valid range
-      m1 = constrain(m1, 0.0f, 1.0f);
-      m2 = constrain(m2, 0.0f, 1.0f);
-      m3 = constrain(m3, 0.0f, 1.0f);
-      m4 = constrain(m4, 0.0f, 1.0f);
-
-      // esc1.write(m1);
-      // esc2.write(m2);
-      // esc3.write(m3);
-      // esc4.write(m4);
-    } else {
-      // Flight disabled — all motors off
-      altitudePID.reset();
-      rollPID.reset();
-      pitchPID.reset();
-      navNorthPID.reset();
-      navEastPID.reset();
-      // esc1.disarm(); esc2.disarm(); esc3.disarm(); esc4.disarm();
+    switch (phase) {
+      case PHASE_IDLE:         physicsTick_Idle(dt);        break;
+      case PHASE_HOLD:         physicsTick_Hold(dt);        break;
+      case PHASE_MISSION:      physicsTick_Mission(dt);     break;
+      case PHASE_HOVER_SETTLE: physicsTick_HoverSettle(dt); break;
+      case PHASE_LANDING:      physicsTick_Landing(dt);     break;
+      case PHASE_LANDED:       physicsTick_Landed(dt);      break;
+      default: PANIC("physicsTask: unhandled FlightPhase");
     }
-
-    String physicsLog = String("[PHYSICS] pitch=") + String(currentPitch, 2) +
-                        " deg, altFt=" + String(altitudeFt, 2) +
-                        " ft, dt=" + String(dt, 4) +
-                        " s, rollCorr=" + String(rollCorrection, 3) +
-                        " pitchCorr=" + String(pitchCorrection, 3) +
-                        " m1=" + String(m1, 2) +
-                        " m2=" + String(m2, 2) +
-                        " m3=" + String(m3, 2) +
-                        " m4=" + String(m4, 2);
-    logLine(physicsLog);
-
-    // ── 6. Write to shared state ────────────────────────────
-    withMutex([&]() {
-      sharedRoll  = currentRoll;
-      sharedPitch = currentPitch;
-      sharedYaw   = currentYaw;
-      sharedAccX  = a.acceleration.x;
-      sharedAccY  = a.acceleration.y;
-      sharedAccZ  = a.acceleration.z;
-      sharedTemp  = temp.temperature;
-      sharedAltitudeFt      = altitudeFt;
-      sharedM1 = m1; sharedM2 = m2; sharedM3 = m3; sharedM4 = m4;
-      sharedBaseThrottle    = baseThrottle;
-      sharedRollCorrection  = rollCorrection;
-      sharedPitchCorrection = pitchCorrection;
-    }); 
 
     vTaskDelayUntil(&lastWakeTime, xFrequency);
   }
@@ -711,69 +1009,178 @@ void physicsTask(void* parameter) {
 
 // ==========================================
 // WEB FORMATTERS
+// Grab a snapshot of whichever phase structs the front-end needs.
 // ==========================================
 String getGyroReadings() {
-  float r, p, y;
+  float roll, pitch, yaw;
   withMutex([&]() {
-    r = sharedRoll; p = sharedPitch; y = sharedYaw;
+    roll  = shared.raw.imu.gyroX;
+    pitch = shared.raw.imu.gyroY;
+    yaw   = shared.raw.imu.gyroZ;
   });
-  readings["gyroX"] = r;
-  readings["gyroY"] = p;
-  readings["gyroZ"] = y;
+  readings["gyroX"] = roll;
+  readings["gyroY"] = pitch;
+  readings["gyroZ"] = yaw;
   String out; serializeJson(readings, out); return out;
 }
 
 String getAccReadings() {
   float ax, ay, az;
   withMutex([&]() {
-    ax = sharedAccX; ay = sharedAccY; az = sharedAccZ;
+    ax = shared.raw.imu.accX;
+    ay = shared.raw.imu.accY;
+    az = shared.raw.imu.accZ;
   });
-  readings["accX"] = ax; readings["accY"] = ay; readings["accZ"] = az;
+  readings["accX"] = ax;
+  readings["accY"] = ay;
+  readings["accZ"] = az;
   String out; serializeJson(readings, out); return out;
 }
 
 String getFlightReadings() {
-  float alt, m1, m2, m3, m4, base, roll, pitch;
-  bool  fix;
-  double lat, lon;
-  float  heading, dist, bearing;
-  int    wp, sats;
+  FlightPhase phase;
+  withMutex([&]() { phase = shared.phase; });
 
-  withMutex([&]() {
-    alt     = sharedAltitudeFt;
-    m1      = sharedM1; m2 = sharedM2; m3 = sharedM3; m4 = sharedM4;
-    base    = sharedBaseThrottle;
-    roll    = sharedRollCorrection;
-    pitch   = sharedPitchCorrection;
-    fix     = gpsFix;
-    lat     = gpsLat;
-    lon     = gpsLon;
-    sats    = gpsSats;
-    heading = compassHeading;
-    dist    = navDistToWP;
-    bearing = navBearingToWP;
-    wp      = navCurrentWP;
-  });
+  // Fields common to all phases
+  readings["flightPhase"]   = phaseName(phase);
+  readings["flightEnabled"] = phaseFlightEnabled(phase);
+  readings["altFt"]         = shared.raw.baroAltitudeFt;
 
-  readings["altFt"]          = alt;
-  readings["targetFt"]       = targetAltFt;
-  readings["m1"]             = (int)(m1 * 100);
-  readings["m2"]             = (int)(m2 * 100);
-  readings["m3"]             = (int)(m3 * 100);
-  readings["m4"]             = (int)(m4 * 100);
-  readings["baseThrottle"]   = (int)(base  * 100);
-  readings["rollCorrection"]  = (int)(roll  * 100);
-  readings["pitchCorrection"] = (int)(pitch * 100);
-  readings["flightEnabled"]  = flightEnabled;
-  readings["gpsFix"]         = fix;
-  readings["gpsLat"]         = lat;
-  readings["gpsLon"]         = lon;
-  readings["gpsSats"]        = sats;
-  readings["compassHeading"] = heading;
-  readings["navActive"]      = navActive;
-  readings["navWaypoint"]    = wp;
-  readings["navDistM"]       = dist;
-  readings["navBearing"]     = bearing;
+  // Phase-specific snapshot
+  switch (phase) {
+    case PHASE_IDLE: {
+      withMutex([&]() {
+        readings["targetFt"] = 0.0f;
+        readings["m1"] = 0; readings["m2"] = 0; readings["m3"] = 0; readings["m4"] = 0;
+        readings["baseThrottle"] = 0; readings["rollCorrection"] = 0; readings["pitchCorrection"] = 0;
+        readings["gpsFix"] = false; readings["gpsLat"] = 0.0; readings["gpsLon"] = 0.0;
+        readings["gpsSats"] = 0; readings["compassHeading"] = 0.0;
+        readings["navActive"] = false; readings["navWaypoint"] = 0; readings["navWaypointCount"] = 0;
+        readings["navDistM"] = 0.0; readings["navBearing"] = 0.0;
+        readings["flightSecRemaining"] = (long)(MAX_FLIGHT_TIME_MS / 1000);
+      });
+      break;
+    }
+    case PHASE_HOLD: {
+      Cruise_Hold    c;
+      Dashboard_Hold db;
+      Trip_Hold      t;
+      RawGpsReading  g;
+      withMutex([&]() { c = shared.cruise_hold; db = shared.dashboard_hold; t = shared.trip_hold; g = shared.raw.gps; });
+      readings["targetFt"]        = c.targetAltFt;
+      readings["m1"]              = (int)(db.m1 * 100);
+      readings["m2"]              = (int)(db.m2 * 100);
+      readings["m3"]              = (int)(db.m3 * 100);
+      readings["m4"]              = (int)(db.m4 * 100);
+      readings["baseThrottle"]    = (int)(db.baseThrottle   * 100);
+      readings["rollCorrection"]  = (int)(db.rollCorrection  * 100);
+      readings["pitchCorrection"] = (int)(db.pitchCorrection * 100);
+      readings["compassHeading"]  = shared.raw.compassHeadingDeg;
+      readings["gpsFix"]          = g.fix;
+      readings["gpsLat"]          = g.lat;
+      readings["gpsLon"]          = g.lon;
+      readings["gpsSats"]         = g.sats;
+      readings["navActive"]       = false;
+      readings["navWaypoint"]     = 0; readings["navWaypointCount"] = 0;
+      readings["navDistM"]        = 0.0; readings["navBearing"] = 0.0;
+      readings["flightSecRemaining"] = t.armedAtMs > 0
+          ? max(0L, (long)((MAX_FLIGHT_TIME_MS - (millis() - t.armedAtMs)) / 1000))
+          : (long)(MAX_FLIGHT_TIME_MS / 1000);
+      break;
+    }
+    case PHASE_MISSION: {
+      Dashboard_Mission d;
+      Cruise_Mission    c;
+      Trip_Mission      t;
+      withMutex([&]() { d = shared.dashboard_mission; c = shared.cruise_mission; t = shared.trip_mission; });
+      readings["targetFt"]        = c.targetAltFt;
+      readings["m1"]              = (int)(d.m1 * 100);
+      readings["m2"]              = (int)(d.m2 * 100);
+      readings["m3"]              = (int)(d.m3 * 100);
+      readings["m4"]              = (int)(d.m4 * 100);
+      readings["baseThrottle"]    = (int)(d.baseThrottle   * 100);
+      readings["rollCorrection"]  = (int)(d.rollCorrection  * 100);
+      readings["pitchCorrection"] = (int)(d.pitchCorrection * 100);
+      readings["compassHeading"]  = d.compassHeading;
+      readings["gpsFix"]          = d.gpsFix;
+      readings["gpsLat"]          = d.gpsLat;
+      readings["gpsLon"]          = d.gpsLon;
+      readings["gpsSats"]         = d.gpsSats;
+      readings["navActive"]       = t.active;
+      readings["navWaypoint"]     = t.currentWP;
+      readings["navWaypointCount"]= t.waypointCount;
+      readings["navDistM"]        = d.distToWP;
+      readings["navBearing"]      = d.bearingToWP;
+      readings["flightSecRemaining"] = t.armedAtMs > 0
+          ? max(0L, (long)((MAX_FLIGHT_TIME_MS - (millis() - t.armedAtMs)) / 1000))
+          : (long)(MAX_FLIGHT_TIME_MS / 1000);
+      break;
+    }
+    case PHASE_HOVER_SETTLE: {
+      Cruise_HoverSettle    c;
+      Dashboard_HoverSettle db;
+      withMutex([&]() { c = shared.cruise_hoverSettle; db = shared.dashboard_hoverSettle; });
+      readings["targetFt"]        = c.targetAltFt;
+      readings["m1"]              = (int)(db.m1 * 100);
+      readings["m2"]              = (int)(db.m2 * 100);
+      readings["m3"]              = (int)(db.m3 * 100);
+      readings["m4"]              = (int)(db.m4 * 100);
+      readings["baseThrottle"]    = (int)(db.baseThrottle   * 100);
+      readings["rollCorrection"]  = (int)(db.rollCorrection  * 100);
+      readings["pitchCorrection"] = (int)(db.pitchCorrection * 100);
+      readings["compassHeading"]  = shared.raw.compassHeadingDeg;
+      readings["gpsFix"]          = shared.raw.gps.fix;
+      readings["gpsLat"]          = shared.raw.gps.lat;
+      readings["gpsLon"]          = shared.raw.gps.lon;
+      readings["gpsSats"]         = shared.raw.gps.sats;
+      readings["navActive"]       = false;
+      readings["navWaypoint"]     = 0; readings["navWaypointCount"] = 0;
+      readings["navDistM"]        = 0.0; readings["navBearing"] = 0.0;
+      readings["flightSecRemaining"] = (long)(MAX_FLIGHT_TIME_MS / 1000);
+      break;
+    }
+    case PHASE_LANDING: {
+      Cruise_Landing    c;
+      Dashboard_Landing db;
+      withMutex([&]() { c = shared.cruise_landing; db = shared.dashboard_landing; });
+      readings["targetFt"]        = c.targetAltFt;
+      readings["m1"]              = (int)(db.m1 * 100);
+      readings["m2"]              = (int)(db.m2 * 100);
+      readings["m3"]              = (int)(db.m3 * 100);
+      readings["m4"]              = (int)(db.m4 * 100);
+      readings["baseThrottle"]    = (int)(db.baseThrottle   * 100);
+      readings["rollCorrection"]  = (int)(db.rollCorrection  * 100);
+      readings["pitchCorrection"] = (int)(db.pitchCorrection * 100);
+      readings["compassHeading"]  = shared.raw.compassHeadingDeg;
+      readings["gpsFix"]          = shared.raw.gps.fix;
+      readings["gpsLat"]          = shared.raw.gps.lat;
+      readings["gpsLon"]          = shared.raw.gps.lon;
+      readings["gpsSats"]         = shared.raw.gps.sats;
+      readings["navActive"]       = false;
+      readings["navWaypoint"]     = 0; readings["navWaypointCount"] = 0;
+      readings["navDistM"]        = 0.0; readings["navBearing"] = 0.0;
+      readings["flightSecRemaining"] = (long)(MAX_FLIGHT_TIME_MS / 1000);
+      break;
+    }
+    case PHASE_LANDED: {
+      withMutex([&]() {
+        readings["targetFt"] = 0.0f;
+        readings["m1"] = 0; readings["m2"] = 0; readings["m3"] = 0; readings["m4"] = 0;
+        readings["baseThrottle"] = 0; readings["rollCorrection"] = 0; readings["pitchCorrection"] = 0;
+        readings["gpsFix"] = shared.raw.gps.fix;
+        readings["gpsLat"] = shared.raw.gps.lat;
+        readings["gpsLon"] = shared.raw.gps.lon;
+        readings["gpsSats"] = shared.raw.gps.sats;
+        readings["compassHeading"] = shared.raw.compassHeadingDeg;
+        readings["navActive"] = false;
+        readings["navWaypoint"] = 0; readings["navWaypointCount"] = 0;
+        readings["navDistM"] = 0.0; readings["navBearing"] = 0.0;
+        readings["flightSecRemaining"] = (long)(MAX_FLIGHT_TIME_MS / 1000);
+      });
+      break;
+    }
+    default: PANIC("getFlightReadings: unhandled FlightPhase");
+  }
 
   String out; serializeJson(readings, out); return out;
 }
@@ -790,21 +1197,70 @@ void initMPU() {
   logLine("[IMU] MPU6050 ready.");
 }
 
+void loadCompassCalibration() {
+  compassPrefs.begin("compass", true);
+  bool hasCal = compassPrefs.isKey("offX");
+  if (hasCal) {
+    compassOffsetX = compassPrefs.getFloat("offX", 0);
+    compassOffsetY = compassPrefs.getFloat("offY", 0);
+    compassOffsetZ = compassPrefs.getFloat("offZ", 0);
+    compassScaleX  = compassPrefs.getFloat("sclX", 1);
+    compassScaleY  = compassPrefs.getFloat("sclY", 1);
+    compassScaleZ  = compassPrefs.getFloat("sclZ", 1);
+  }
+  compassPrefs.end();
+  if (hasCal) logLine("[COMPASS] Loaded saved calibration from flash.");
+  else         logLine("[COMPASS] WARNING: no saved calibration found.");
+  compass.setCalibration(compassOffsetX, compassOffsetY, compassOffsetZ,
+                          compassScaleX,  compassScaleY,  compassScaleZ);
+}
+
+void runCompassCalibration() {
+  logLine("[COMPASS] Calibration starting — rotate drone slowly through all axes now...");
+  int16_t minX = 32767, maxX = -32768;
+  int16_t minY = 32767, maxY = -32768;
+  int16_t minZ = 32767, maxZ = -32768;
+  unsigned long start = millis();
+  while (millis() - start < COMPASS_CAL_DURATION_MS) {
+    compass.read();
+    int16_t x = compass.getX(), y = compass.getY(), z = compass.getZ();
+    minX = min(minX, x); maxX = max(maxX, x);
+    minY = min(minY, y); maxY = max(maxY, y);
+    minZ = min(minZ, z); maxZ = max(maxZ, z);
+    delay(50);
+  }
+  compassOffsetX = (minX + maxX) / 2.0f;
+  compassOffsetY = (minY + maxY) / 2.0f;
+  compassOffsetZ = (minZ + maxZ) / 2.0f;
+  float rangeX = (maxX - minX) / 2.0f;
+  float rangeY = (maxY - minY) / 2.0f;
+  float rangeZ = (maxZ - minZ) / 2.0f;
+  float avg    = (rangeX + rangeY + rangeZ) / 3.0f;
+  compassScaleX = (rangeX > 0) ? (avg / rangeX) : 1.0f;
+  compassScaleY = (rangeY > 0) ? (avg / rangeY) : 1.0f;
+  compassScaleZ = (rangeZ > 0) ? (avg / rangeZ) : 1.0f;
+  compass.setCalibration(compassOffsetX, compassOffsetY, compassOffsetZ,
+                          compassScaleX,  compassScaleY,  compassScaleZ);
+  compassPrefs.begin("compass", false);
+  compassPrefs.putFloat("offX", compassOffsetX); compassPrefs.putFloat("offY", compassOffsetY);
+  compassPrefs.putFloat("offZ", compassOffsetZ); compassPrefs.putFloat("sclX", compassScaleX);
+  compassPrefs.putFloat("sclY", compassScaleY);  compassPrefs.putFloat("sclZ", compassScaleZ);
+  compassPrefs.end();
+  logLine("[COMPASS] Calibration saved.");
+}
+
 void initCompass() {
-  // QMC5883L compass inside the BN-880
-  // Shares the I2C bus already started with Wire.begin(16, 15)
   logLine("[COMPASS] Initializing QMC5883L...");
   compass.init();
-  compass.setMode(0x01, 0x0C, 0x10, 0xC0); // continuous, 200Hz, 8G, 512 OSR
+  compass.setMode(0x01, 0x0C, 0x10, 0xC0);
+  if (CALIBRATE_COMPASS_ON_BOOT) runCompassCalibration();
+  else                            loadCompassCalibration();
   logLine("[COMPASS] QMC5883L ready.");
 }
 
 void initGPS() {
-  // BN-880 GPS talks over Serial2 (UART2 on ESP32-S3)
-  // NMEA sentences at 9600 baud by default
   logLine("[GPS] Initializing BN-880 GPS on Serial2...");
   Serial2.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
-  logLine("[GPS] Waiting for satellite fix \u2014 this can take 30-90 seconds outdoors.");
 }
 
 void initLittleFS() {
@@ -818,112 +1274,134 @@ void initWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   logLine("[WiFi] Connecting...");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
-  }
+  while (WiFi.status() != WL_CONNECTED) { delay(1000); }
   logLine(String("[WiFi] ") + WiFi.localIP().toString());
 }
+
+// ==========================================
+// WOKWI SIM INPUT PARSER
+// ==========================================
+#ifdef WOKWI_SIM
+void parseSimInput() {
+  static String buf = "";
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\n') {
+      if (buf.startsWith("HDG:")) {
+        withMutex([&]() { shared.raw.compassHeadingDeg = buf.substring(4).toFloat(); });
+      } else if (buf.startsWith("LAT:")) {
+        withMutex([&]() { shared.raw.gps.lat = buf.substring(4).toDouble(); });
+      } else if (buf.startsWith("LON:")) {
+        withMutex([&]() { shared.raw.gps.lon = buf.substring(4).toDouble(); });
+      } else if (buf.startsWith("FIX:")) {
+        withMutex([&]() { shared.raw.gps.fix = (buf.substring(4).toInt() == 1); });
+      } else if (buf.startsWith("MISSION:")) {
+        bool fixNow;
+        withMutex([&]() { fixNow = shared.raw.gps.fix; });
+        if (fixNow) transitionTo(PHASE_MISSION);
+      }
+      buf = "";
+    } else if (c != '\r') {
+      buf += c;
+    }
+  }
+}
+#endif
 
 // ==========================================
 // SETUP
 // ==========================================
 void setup() {
-
   sharedDataMutex = xSemaphoreCreateMutex();
   serialMutex     = xSemaphoreCreateMutex();
 
   Serial.begin(115200);
-  Wire.begin(16, 15); // SDA=16, SCL=15 — shared I2C bus for MPU6050 + BME280 + QMC5883L
+  Wire.begin(16, 15);
 
   logLine("=== BOOT START ===");
 
   initWiFi();
   initLittleFS();
   initMPU();
-  #ifndef WOKWI_SIM
-    initCompass();
-    initGPS();
-  #endif
+#ifndef WOKWI_SIM
+  initCompass();
+  initGPS();
+#endif
   barometer.initialize();
-  // esc1.init(4, RMT_CHANNEL_0); // M1 front-left
-  // esc2.init(5, RMT_CHANNEL_1); // M2 front-right
-  // esc3.init(6, RMT_CHANNEL_2); // M3 rear-left
-  // esc4.init(7, RMT_CHANNEL_3); // M4 rear-right
+  // esc1.init(4, RMT_CHANNEL_0); esc2.init(5, RMT_CHANNEL_1);
+  // esc3.init(6, RMT_CHANNEL_2); esc4.init(7, RMT_CHANNEL_3);
   logLine("[ESC] DShot600 ready on GPIO 4/5/6/7");
 
   groundAltitudeFt = (float)barometer.readAltitudeMeters() * 3.28084f;
 
-  // Navigation task on Core 0 — alongside WiFi and web server
-  // Priority 1 (lower than physics) — GPS parsing can slip a few ms without consequence
   xTaskCreatePinnedToCore(navigationTask, "NavTask",     8192, NULL, 1, NULL, 0);
-
-  // Physics task on Core 1 — isolated real-time math, nothing else on this core
-  // Priority 2 (higher than nav) — motors must never miss a beat
   xTaskCreatePinnedToCore(physicsTask,    "PhysicsTask", 8192, NULL, 2, NULL, 1);
-
-  // ── Routes ──────────────────────────────────────────────
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest* r) {
     r->send(LittleFS, "/index.html", "text/html");
   });
-
   server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
 
-  // Enable autonomous flight with target altitude in feet
-  // e.g. /fly?ft=10
-  server.on("/fly", HTTP_GET, [](AsyncWebServerRequest* r) {
-    if (r->hasParam("ft")) {
-      float ft = r->getParam("ft")->value().toFloat();
-      if (ft < 0)    ft = 0;
-      if (ft > 50)   ft = 50; // safety cap at 50ft
-      targetAltFt   = ft;
-      flightEnabled = true;
-      logLine(String("[FLIGHT] Target: ") + String(ft) + " ft");
-    }
-    r->send(200, "text/plain", "OK");
-  });
-
-  // Start autonomous fence line mission
-  // Drone must already be flying (/fly first), then /mission starts waypoint following
-  // e.g. /mission
-  server.on("/mission", HTTP_GET, [](AsyncWebServerRequest* r) {
-    if (!gpsFix) {
+  server.on("/start-waypoint-nav", HTTP_GET, [](AsyncWebServerRequest* r) {
+    bool hasFix;
+    withMutex([&]() { hasFix = shared.raw.gps.fix; });
+    if (!hasFix) {
       r->send(400, "text/plain", "NO GPS FIX — wait for satellite lock before starting mission");
       return;
     }
-    navCurrentWP = 0;
-    navActive    = true;
-    targetAltFt  = WAYPOINTS[0].altFt;
-    logLine("[MISSION] Fence line mission started.");
-    r->send(200, "text/plain", "MISSION STARTED");
+    transitionTo(PHASE_MISSION);
+    logLine("[FLIGHT] Drone Armed & Mission Started. Launch point captured.");
+    r->send(200, "text/plain", "WAYPOINT NAVIGATION STARTED");
   });
 
-  // Abort mission — drone holds position at current altitude
   server.on("/abort", HTTP_GET, [](AsyncWebServerRequest* r) {
-    stopNavigation();
+    FlightPhase currentPhase;
+    withMutex([&]() { currentPhase = shared.phase; });
+    if (currentPhase == PHASE_MISSION) {
+      withMutex([&]() {
+        shared.trip_mission.active           = false;
+        shared.cruise_mission.targetRollDeg  = 0.0f;
+        shared.cruise_mission.targetPitchDeg = 0.0f;
+      });
+      transitionTo(PHASE_HOLD);
+    }
     logLine("[MISSION] Mission aborted — holding position.");
-    r->send(200, "text/plain", "MISSION ABORTED");
+    r->send(200, "text/plain", "MISSION ABORTED — HOLDING");
   });
 
-  // Land: target drops to 0, flight stays enabled so PID descends gently
   server.on("/land", HTTP_GET, [](AsyncWebServerRequest* r) {
-    stopNavigation();
-    targetAltFt   = 0.0f;  // ← this went missing
-    flightEnabled = true;
+    FlightPhase currentPhase;
+    withMutex([&]() { currentPhase = shared.phase; });
+    if (currentPhase == PHASE_MISSION) {
+      withMutex([&]() {
+        shared.trip_mission.active           = false;
+        shared.cruise_mission.targetRollDeg  = 0.0f;
+        shared.cruise_mission.targetPitchDeg = 0.0f;
+      });
+    }
+    transitionTo(PHASE_LANDING);
+    logLine("[FLIGHT] Manual landing requested.");
     r->send(200, "text/plain", "LANDING");
   });
 
-  // Emergency stop — cuts motors immediately
   server.on("/stop", HTTP_GET, [](AsyncWebServerRequest* r) {
-    stopNavigation();       // zeros navActive + roll/pitch targets
-    flightEnabled = false;
-    targetAltFt   = 0.0f;
+    transitionTo(PHASE_IDLE);
+    logLine("[FLIGHT] EMERGENCY STOP — motors cut.");
     r->send(200, "text/plain", "STOPPED");
   });
 
-  events.onConnect([](AsyncEventSourceClient* c) {
-    c->send("hello!", NULL, millis(), 10000);
+  server.on("/calibrate-compass", HTTP_GET, [](AsyncWebServerRequest* r) {
+    bool enabled;
+    withMutex([&]() { enabled = phaseFlightEnabled(shared.phase); });
+    if (enabled) {
+      r->send(400, "text/plain", "REFUSED — disarm first");
+      return;
+    }
+    r->send(200, "text/plain", "CALIBRATING — rotate the drone slowly for 30 seconds");
+    runCompassCalibration();
   });
+
+  events.onConnect([](AsyncEventSourceClient* c) { c->send("hello!", NULL, millis(), 10000); });
   server.addHandler(&events);
   server.begin();
 
@@ -938,22 +1416,17 @@ unsigned long lastAccSend    = 0;
 unsigned long lastFlightSend = 0;
 
 void loop() {
-
-  #ifdef WOKWI_SIM
+#ifdef WOKWI_SIM
   parseSimInput();
-  #endif
-
-  // Orientation → cube rotation
+#endif
   if (millis() - lastGyroSend > SSE_GYRO_MS) {
     events.send(getGyroReadings().c_str(), "gyro_readings", millis());
     lastGyroSend = millis();
   }
-  // Accelerometer
   if (millis() - lastAccSend > SSE_ACC_MS) {
     events.send(getAccReadings().c_str(), "accelerometer_readings", millis());
     lastAccSend = millis();
   }
-  // Flight data: altitude, motors, PID debug, GPS, nav status
   if (millis() - lastFlightSend > SSE_FLIGHT_MS) {
     events.send(getFlightReadings().c_str(), "flight_readings", millis());
     lastFlightSend = millis();
