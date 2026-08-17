@@ -123,9 +123,9 @@ PID navEastPID  (0.5f,    0.0f,    0.1f,   -15.0f, 15.0f );
 // FLIGHT PHASE ENUM
 // ==========================================
 enum FlightPhase {
-  PHASE_IDLE,
-  PHASE_HOLD,
+  PHASE_PARKED,
   PHASE_MISSION,
+  PHASE_HOLD,
   PHASE_HOVER_SETTLE,
   PHASE_LANDING,
   PHASE_LANDED
@@ -133,9 +133,9 @@ enum FlightPhase {
 
 const char* phaseName(FlightPhase p) {
   switch (p) {
-    case PHASE_IDLE:         return "IDLE";
-    case PHASE_HOLD:         return "HOLD";
+    case PHASE_PARKED:       return "PARKED";
     case PHASE_MISSION:      return "MISSION";
+    case PHASE_HOLD:         return "HOLD";
     case PHASE_HOVER_SETTLE: return "HOVER_SETTLE";
     case PHASE_LANDING:      return "LANDING";
     case PHASE_LANDED:       return "LANDED";
@@ -145,7 +145,7 @@ const char* phaseName(FlightPhase p) {
 }
 
 bool phaseFlightEnabled(FlightPhase phase) {
-  return phase != PHASE_IDLE && phase != PHASE_LANDED;
+  return phase != PHASE_PARKED && phase != PHASE_LANDED;
 }
 
 // ==========================================
@@ -190,21 +190,21 @@ struct RawSensors {
 // ==========================================
 
 // ------------------------------------------
-// PHASE: IDLE
-// Motors off, drone parked. No guidance, no clocks.
+// PHASE: PARKED
+// Motors off, drone on the ground. No guidance, no clocks.
 // ------------------------------------------
-struct Dashboard_Idle {
+struct Dashboard_Parked {
   float altitudeFt  = 0.0f;
   float roll        = 0.0f;
   float pitch       = 0.0f;
   float yaw         = 0.0f;
 };
 
-struct Cruise_Idle {
+struct Cruise_Parked {
   // No setpoints — motors are off.
 };
 
-struct Trip_Idle {
+struct Trip_Parked {
   // Nothing to track while parked.
 };
 
@@ -359,15 +359,15 @@ struct Trip_Landed {
 // The active phase determines which triple is live.
 // ==========================================
 struct SharedState {
-  FlightPhase phase = PHASE_IDLE;
+  FlightPhase phase = PHASE_PARKED;
 
   // Raw hardware reads — always live, phase-agnostic
   RawSensors raw;
 
   // Per-phase triples
-  Dashboard_Idle        dashboard_idle;
-  Cruise_Idle           cruise_idle;
-  Trip_Idle             trip_idle;
+  Dashboard_Parked      dashboard_parked;
+  Cruise_Parked         cruise_parked;
+  Trip_Parked           trip_parked;
 
   Dashboard_Hold        dashboard_hold;
   Cruise_Hold           cruise_hold;
@@ -493,7 +493,7 @@ void transitionTo(FlightPhase next) {
   withMutex([&]() {
     switch (next) {
 
-      case PHASE_IDLE:
+      case PHASE_PARKED:
         // No setpoints — motors will be off.
         break;
 
@@ -581,12 +581,12 @@ void transitionTo(FlightPhase next) {
 // the matching dashboard_*/cruise_*/trip_* structs.
 // ==========================================
 
-void navTick_Idle(float /*navDt*/) {
+void navTick_Parked(float /*navDt*/) {
   withMutex([&]() {
-    shared.dashboard_idle.altitudeFt = shared.raw.baroAltitudeFt;
-    shared.dashboard_idle.roll       = shared.raw.imu.gyroX; // fused by physics
-    shared.dashboard_idle.pitch      = shared.raw.imu.gyroY;
-    shared.dashboard_idle.yaw        = shared.raw.imu.gyroZ;
+    shared.dashboard_parked.altitudeFt = shared.raw.baroAltitudeFt;
+    shared.dashboard_parked.roll       = shared.raw.imu.gyroX; // fused by physics
+    shared.dashboard_parked.pitch      = shared.raw.imu.gyroY;
+    shared.dashboard_parked.yaw        = shared.raw.imu.gyroZ;
   });
 }
 
@@ -783,7 +783,7 @@ void navTick_Landed(float /*navDt*/) {
 // phase's Cruise_* setpoints; writes the motor mix into Dashboard_*.
 // ==========================================
 
-void physicsTick_Idle(float dt) {
+void physicsTick_Parked(float dt) {
   (void)dt;
   altitudePID.reset();
   rollPID.reset();
@@ -933,9 +933,9 @@ void navigationTask(void* parameter) {
     withMutex([&]() { phase = shared.phase; });
 
     switch (phase) {
-      case PHASE_IDLE:         navTick_Idle(navDt);        break;
-      case PHASE_HOLD:         navTick_Hold(navDt);        break;
+      case PHASE_PARKED:       navTick_Parked(navDt);      break;
       case PHASE_MISSION:      navTick_Mission(navDt);     break;
+      case PHASE_HOLD:         navTick_Hold(navDt);        break;
       case PHASE_HOVER_SETTLE: navTick_HoverSettle(navDt); break;
       case PHASE_LANDING:      navTick_Landing(navDt);     break;
       case PHASE_LANDED:       navTick_Landed(navDt);      break;
@@ -994,9 +994,9 @@ void physicsTask(void* parameter) {
     withMutex([&]() { phase = shared.phase; });
 
     switch (phase) {
-      case PHASE_IDLE:         physicsTick_Idle(dt);        break;
-      case PHASE_HOLD:         physicsTick_Hold(dt);        break;
+      case PHASE_PARKED:       physicsTick_Parked(dt);      break;
       case PHASE_MISSION:      physicsTick_Mission(dt);     break;
+      case PHASE_HOLD:         physicsTick_Hold(dt);        break;
       case PHASE_HOVER_SETTLE: physicsTick_HoverSettle(dt); break;
       case PHASE_LANDING:      physicsTick_Landing(dt);     break;
       case PHASE_LANDED:       physicsTick_Landed(dt);      break;
@@ -1048,7 +1048,7 @@ String getFlightReadings() {
 
   // Phase-specific snapshot
   switch (phase) {
-    case PHASE_IDLE: {
+    case PHASE_PARKED: {
       withMutex([&]() {
         readings["targetFt"] = 0.0f;
         readings["m1"] = 0; readings["m2"] = 0; readings["m3"] = 0; readings["m4"] = 0;
@@ -1385,7 +1385,7 @@ void setup() {
   });
 
   server.on("/stop", HTTP_GET, [](AsyncWebServerRequest* r) {
-    transitionTo(PHASE_IDLE);
+    transitionTo(PHASE_PARKED);
     logLine("[FLIGHT] EMERGENCY STOP — motors cut.");
     r->send(200, "text/plain", "STOPPED");
   });
