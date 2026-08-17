@@ -111,6 +111,14 @@ PID navEastPID  (0.5f,    0.0f,    0.1f,   -15.0f, 15.0f );
 // ==========================================
 #define PANIC(msg) do { Serial.println(F("[PANIC] " msg " — halting")); while(1) { delay(10); } } while(0)
 
+// Guard for any control-path code that reads dashboard motor outputs.
+// Zero across all four motors is physically impossible on an armed drone
+// (gravity demands throttle), so it reliably means the physics task hasn't
+// written this phase's dashboard yet.
+#define ASSERT_MOTORS_INITIALIZED(d) \
+  do { if ((d).m1 == 0.0f && (d).m2 == 0.0f && (d).m3 == 0.0f && (d).m4 == 0.0f) \
+    PANIC("control decision on uninitialized motor outputs"); } while(0)
+
 // ==========================================
 // FLIGHT PHASE ENUM
 // ==========================================
@@ -211,6 +219,11 @@ struct Dashboard_Hold {
   float pitch           = 0.0f;
   float yaw             = 0.0f;
   float compassHeading  = 0.0f;
+  // Motor outputs — what the ESCs are currently commanded
+  float m1 = 0, m2 = 0, m3 = 0, m4 = 0;
+  float baseThrottle    = 0.0f;
+  float rollCorrection  = 0.0f;
+  float pitchCorrection = 0.0f;
 };
 
 struct Cruise_Hold {
@@ -218,11 +231,6 @@ struct Cruise_Hold {
   float targetRollDeg    = 0.0f;
   float targetPitchDeg   = 0.0f;
   float yawTargetHeading = 0.0f;
-  // Motor mix output
-  float m1 = 0, m2 = 0, m3 = 0, m4 = 0;
-  float baseThrottle    = 0.0f;
-  float rollCorrection  = 0.0f;
-  float pitchCorrection = 0.0f;
 };
 
 struct Trip_Hold {
@@ -245,6 +253,11 @@ struct Dashboard_Mission {
   int    gpsSats         = 0;
   float  distToWP        = 0.0f; // computed each nav tick — telemetry
   float  bearingToWP     = 0.0f; // computed each nav tick — telemetry
+  // Motor outputs — what the ESCs are currently commanded
+  float m1 = 0, m2 = 0, m3 = 0, m4 = 0;
+  float baseThrottle    = 0.0f;
+  float rollCorrection  = 0.0f;
+  float pitchCorrection = 0.0f;
 };
 
 struct Cruise_Mission {
@@ -252,11 +265,6 @@ struct Cruise_Mission {
   float targetRollDeg    = 0.0f;
   float targetPitchDeg   = 0.0f;
   float yawTargetHeading = 0.0f;
-  // Motor mix output
-  float m1 = 0, m2 = 0, m3 = 0, m4 = 0;
-  float baseThrottle    = 0.0f;
-  float rollCorrection  = 0.0f;
-  float pitchCorrection = 0.0f;
 };
 
 struct Trip_Mission {
@@ -282,6 +290,11 @@ struct Dashboard_HoverSettle {
   float pitch          = 0.0f;
   float yaw            = 0.0f;
   float compassHeading = 0.0f;
+  // Motor outputs — what the ESCs are currently commanded
+  float m1 = 0, m2 = 0, m3 = 0, m4 = 0;
+  float baseThrottle    = 0.0f;
+  float rollCorrection  = 0.0f;
+  float pitchCorrection = 0.0f;
 };
 
 struct Cruise_HoverSettle {
@@ -289,11 +302,6 @@ struct Cruise_HoverSettle {
   float targetRollDeg    = 0.0f;
   float targetPitchDeg   = 0.0f;
   float yawTargetHeading = 0.0f;
-  // Motor mix output
-  float m1 = 0, m2 = 0, m3 = 0, m4 = 0;
-  float baseThrottle    = 0.0f;
-  float rollCorrection  = 0.0f;
-  float pitchCorrection = 0.0f;
 };
 
 struct Trip_HoverSettle {
@@ -311,6 +319,11 @@ struct Dashboard_Landing {
   float pitch          = 0.0f;
   float yaw            = 0.0f;
   float compassHeading = 0.0f;
+  // Motor outputs — what the ESCs are currently commanded
+  float m1 = 0, m2 = 0, m3 = 0, m4 = 0;
+  float baseThrottle    = 0.0f;
+  float rollCorrection  = 0.0f;
+  float pitchCorrection = 0.0f;
 };
 
 struct Cruise_Landing {
@@ -318,11 +331,6 @@ struct Cruise_Landing {
   float targetRollDeg    = 0.0f;
   float targetPitchDeg   = 0.0f;
   float yawTargetHeading = 0.0f;
-  // Motor mix output
-  float m1 = 0, m2 = 0, m3 = 0, m4 = 0;
-  float baseThrottle    = 0.0f;
-  float rollCorrection  = 0.0f;
-  float pitchCorrection = 0.0f;
 };
 
 struct Trip_Landing {
@@ -494,46 +502,68 @@ void transitionTo(FlightPhase next) {
         // Carry armedAtMs so the flight-time clock doesn't reset.
         // Keep targetAltFt from wherever MISSION left it so altitude
         // doesn't jump on abort.
-        shared.trip_hold.armedAtMs         = shared.trip_mission.armedAtMs;
-        shared.cruise_hold.targetAltFt     = shared.cruise_mission.targetAltFt;
+        shared.trip_hold.armedAtMs          = shared.trip_mission.armedAtMs;
+        shared.cruise_hold.targetAltFt      = shared.cruise_mission.targetAltFt;
         shared.cruise_hold.yawTargetHeading = shared.cruise_mission.yawTargetHeading;
-        shared.cruise_hold.targetRollDeg   = 0.0f;
-        shared.cruise_hold.targetPitchDeg  = 0.0f;
+        shared.cruise_hold.targetRollDeg    = 0.0f;
+        shared.cruise_hold.targetPitchDeg   = 0.0f;
+        // Zero motor outputs — physics task hasn't run for this phase yet.
+        // Any control-path read before the first physics tick will PANIC via
+        // ASSERT_MOTORS_INITIALIZED.
+        shared.dashboard_hold.m1 = shared.dashboard_hold.m2 = 0.0f;
+        shared.dashboard_hold.m3 = shared.dashboard_hold.m4 = 0.0f;
+        shared.dashboard_hold.baseThrottle = shared.dashboard_hold.rollCorrection = 0.0f;
+        shared.dashboard_hold.pitchCorrection = 0.0f;
         break;
 
       case PHASE_MISSION:
-        shared.trip_mission.armedAtMs      = millis();
-        shared.trip_mission.currentWP      = 0;
-        shared.trip_mission.waypointCount  = WAYPOINT_COUNT + 1; // +1 for RTL leg
+        shared.trip_mission.armedAtMs       = millis();
+        shared.trip_mission.currentWP       = 0;
+        shared.trip_mission.waypointCount   = WAYPOINT_COUNT + 1; // +1 for RTL leg
         shared.trip_mission.geofenceTripped = false;
         shared.trip_mission.gpsLossTripped  = false;
         shared.trip_mission.active          = true;
         shared.trip_mission.launchLat       = shared.raw.gps.lat;
         shared.trip_mission.launchLon       = shared.raw.gps.lon;
         shared.trip_mission.launchPointSet  = true;
-        shared.cruise_mission.targetAltFt       = WAYPOINTS[0].altFt;
-        shared.cruise_mission.yawTargetHeading  = shared.raw.compassHeadingDeg;
-        shared.cruise_mission.targetRollDeg     = 0.0f;
-        shared.cruise_mission.targetPitchDeg    = 0.0f;
+        shared.cruise_mission.targetAltFt      = WAYPOINTS[0].altFt;
+        shared.cruise_mission.yawTargetHeading = shared.raw.compassHeadingDeg;
+        shared.cruise_mission.targetRollDeg    = 0.0f;
+        shared.cruise_mission.targetPitchDeg   = 0.0f;
+        // Zero motor outputs — physics task hasn't run for this phase yet.
+        shared.dashboard_mission.m1 = shared.dashboard_mission.m2 = 0.0f;
+        shared.dashboard_mission.m3 = shared.dashboard_mission.m4 = 0.0f;
+        shared.dashboard_mission.baseThrottle = shared.dashboard_mission.rollCorrection = 0.0f;
+        shared.dashboard_mission.pitchCorrection = 0.0f;
         break;
 
       case PHASE_HOVER_SETTLE:
-        shared.trip_hoverSettle.enteredAtMs       = millis();
+        shared.trip_hoverSettle.enteredAtMs        = millis();
         // Hold the altitude and heading MISSION left us at.
-        shared.cruise_hoverSettle.targetAltFt     = shared.cruise_mission.targetAltFt;
+        shared.cruise_hoverSettle.targetAltFt      = shared.cruise_mission.targetAltFt;
         shared.cruise_hoverSettle.yawTargetHeading = shared.cruise_mission.yawTargetHeading;
-        shared.cruise_hoverSettle.targetRollDeg   = 0.0f;
-        shared.cruise_hoverSettle.targetPitchDeg  = 0.0f;
+        shared.cruise_hoverSettle.targetRollDeg    = 0.0f;
+        shared.cruise_hoverSettle.targetPitchDeg   = 0.0f;
+        // Zero motor outputs — physics task hasn't run for this phase yet.
+        shared.dashboard_hoverSettle.m1 = shared.dashboard_hoverSettle.m2 = 0.0f;
+        shared.dashboard_hoverSettle.m3 = shared.dashboard_hoverSettle.m4 = 0.0f;
+        shared.dashboard_hoverSettle.baseThrottle = shared.dashboard_hoverSettle.rollCorrection = 0.0f;
+        shared.dashboard_hoverSettle.pitchCorrection = 0.0f;
         break;
 
       case PHASE_LANDING:
         // Descent ramp starts from the altitude the previous phase held.
         // We don't know which phase is outgoing here, so read the raw
         // sensor altitude rather than guessing which Cruise_* to copy.
-        shared.cruise_landing.targetAltFt     = shared.raw.baroAltitudeFt;
+        shared.cruise_landing.targetAltFt      = shared.raw.baroAltitudeFt;
         shared.cruise_landing.yawTargetHeading = shared.cruise_hoverSettle.yawTargetHeading;
-        shared.cruise_landing.targetRollDeg   = 0.0f;
-        shared.cruise_landing.targetPitchDeg  = 0.0f;
+        shared.cruise_landing.targetRollDeg    = 0.0f;
+        shared.cruise_landing.targetPitchDeg   = 0.0f;
+        // Zero motor outputs — physics task hasn't run for this phase yet.
+        shared.dashboard_landing.m1 = shared.dashboard_landing.m2 = 0.0f;
+        shared.dashboard_landing.m3 = shared.dashboard_landing.m4 = 0.0f;
+        shared.dashboard_landing.baseThrottle = shared.dashboard_landing.rollCorrection = 0.0f;
+        shared.dashboard_landing.pitchCorrection = 0.0f;
         break;
 
       case PHASE_LANDED:
@@ -750,7 +780,7 @@ void navTick_Landed(float /*navDt*/) {
 // ==========================================
 // PER-PHASE PHYSICS TICK HANDLERS (~200 Hz)
 // Each function runs for exactly one phase. Reads from raw.* and the
-// phase's Cruise_* setpoints; writes the motor mix back into Cruise_*.
+// phase's Cruise_* setpoints; writes the motor mix into Dashboard_*.
 // ==========================================
 
 void physicsTick_Idle(float dt) {
@@ -774,13 +804,13 @@ void physicsTick_Hold(float dt) {
     r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, dt);
 
   withMutex([&]() {
-    shared.cruise_hold.m1             = mix.m1;
-    shared.cruise_hold.m2             = mix.m2;
-    shared.cruise_hold.m3             = mix.m3;
-    shared.cruise_hold.m4             = mix.m4;
-    shared.cruise_hold.baseThrottle   = mix.baseThrottle;
-    shared.cruise_hold.rollCorrection  = mix.rollCorrection;
-    shared.cruise_hold.pitchCorrection = mix.pitchCorrection;
+    shared.dashboard_hold.m1             = mix.m1;
+    shared.dashboard_hold.m2             = mix.m2;
+    shared.dashboard_hold.m3             = mix.m3;
+    shared.dashboard_hold.m4             = mix.m4;
+    shared.dashboard_hold.baseThrottle   = mix.baseThrottle;
+    shared.dashboard_hold.rollCorrection  = mix.rollCorrection;
+    shared.dashboard_hold.pitchCorrection = mix.pitchCorrection;
   });
   // esc1.write(mix.m1); esc2.write(mix.m2); esc3.write(mix.m3); esc4.write(mix.m4);
 }
@@ -795,13 +825,13 @@ void physicsTick_Mission(float dt) {
     r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, dt);
 
   withMutex([&]() {
-    shared.cruise_mission.m1             = mix.m1;
-    shared.cruise_mission.m2             = mix.m2;
-    shared.cruise_mission.m3             = mix.m3;
-    shared.cruise_mission.m4             = mix.m4;
-    shared.cruise_mission.baseThrottle   = mix.baseThrottle;
-    shared.cruise_mission.rollCorrection  = mix.rollCorrection;
-    shared.cruise_mission.pitchCorrection = mix.pitchCorrection;
+    shared.dashboard_mission.m1             = mix.m1;
+    shared.dashboard_mission.m2             = mix.m2;
+    shared.dashboard_mission.m3             = mix.m3;
+    shared.dashboard_mission.m4             = mix.m4;
+    shared.dashboard_mission.baseThrottle   = mix.baseThrottle;
+    shared.dashboard_mission.rollCorrection  = mix.rollCorrection;
+    shared.dashboard_mission.pitchCorrection = mix.pitchCorrection;
   });
   // esc1.write(mix.m1); esc2.write(mix.m2); esc3.write(mix.m3); esc4.write(mix.m4);
 }
@@ -816,13 +846,13 @@ void physicsTick_HoverSettle(float dt) {
     r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, dt);
 
   withMutex([&]() {
-    shared.cruise_hoverSettle.m1             = mix.m1;
-    shared.cruise_hoverSettle.m2             = mix.m2;
-    shared.cruise_hoverSettle.m3             = mix.m3;
-    shared.cruise_hoverSettle.m4             = mix.m4;
-    shared.cruise_hoverSettle.baseThrottle   = mix.baseThrottle;
-    shared.cruise_hoverSettle.rollCorrection  = mix.rollCorrection;
-    shared.cruise_hoverSettle.pitchCorrection = mix.pitchCorrection;
+    shared.dashboard_hoverSettle.m1             = mix.m1;
+    shared.dashboard_hoverSettle.m2             = mix.m2;
+    shared.dashboard_hoverSettle.m3             = mix.m3;
+    shared.dashboard_hoverSettle.m4             = mix.m4;
+    shared.dashboard_hoverSettle.baseThrottle   = mix.baseThrottle;
+    shared.dashboard_hoverSettle.rollCorrection  = mix.rollCorrection;
+    shared.dashboard_hoverSettle.pitchCorrection = mix.pitchCorrection;
   });
   // esc1.write(mix.m1); esc2.write(mix.m2); esc3.write(mix.m3); esc4.write(mix.m4);
 }
@@ -837,13 +867,13 @@ void physicsTick_Landing(float dt) {
     r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, dt);
 
   withMutex([&]() {
-    shared.cruise_landing.m1             = mix.m1;
-    shared.cruise_landing.m2             = mix.m2;
-    shared.cruise_landing.m3             = mix.m3;
-    shared.cruise_landing.m4             = mix.m4;
-    shared.cruise_landing.baseThrottle   = mix.baseThrottle;
-    shared.cruise_landing.rollCorrection  = mix.rollCorrection;
-    shared.cruise_landing.pitchCorrection = mix.pitchCorrection;
+    shared.dashboard_landing.m1             = mix.m1;
+    shared.dashboard_landing.m2             = mix.m2;
+    shared.dashboard_landing.m3             = mix.m3;
+    shared.dashboard_landing.m4             = mix.m4;
+    shared.dashboard_landing.baseThrottle   = mix.baseThrottle;
+    shared.dashboard_landing.rollCorrection  = mix.rollCorrection;
+    shared.dashboard_landing.pitchCorrection = mix.pitchCorrection;
   });
   // esc1.write(mix.m1); esc2.write(mix.m2); esc3.write(mix.m3); esc4.write(mix.m4);
 }
@@ -1033,17 +1063,18 @@ String getFlightReadings() {
     }
     case PHASE_HOLD: {
       Cruise_Hold    c;
+      Dashboard_Hold db;
       Trip_Hold      t;
       RawGpsReading  g;
-      withMutex([&]() { c = shared.cruise_hold; t = shared.trip_hold; g = shared.raw.gps; });
+      withMutex([&]() { c = shared.cruise_hold; db = shared.dashboard_hold; t = shared.trip_hold; g = shared.raw.gps; });
       readings["targetFt"]        = c.targetAltFt;
-      readings["m1"]              = (int)(c.m1 * 100);
-      readings["m2"]              = (int)(c.m2 * 100);
-      readings["m3"]              = (int)(c.m3 * 100);
-      readings["m4"]              = (int)(c.m4 * 100);
-      readings["baseThrottle"]    = (int)(c.baseThrottle   * 100);
-      readings["rollCorrection"]  = (int)(c.rollCorrection  * 100);
-      readings["pitchCorrection"] = (int)(c.pitchCorrection * 100);
+      readings["m1"]              = (int)(db.m1 * 100);
+      readings["m2"]              = (int)(db.m2 * 100);
+      readings["m3"]              = (int)(db.m3 * 100);
+      readings["m4"]              = (int)(db.m4 * 100);
+      readings["baseThrottle"]    = (int)(db.baseThrottle   * 100);
+      readings["rollCorrection"]  = (int)(db.rollCorrection  * 100);
+      readings["pitchCorrection"] = (int)(db.pitchCorrection * 100);
       readings["compassHeading"]  = shared.raw.compassHeadingDeg;
       readings["gpsFix"]          = g.fix;
       readings["gpsLat"]          = g.lat;
@@ -1063,13 +1094,13 @@ String getFlightReadings() {
       Trip_Mission      t;
       withMutex([&]() { d = shared.dashboard_mission; c = shared.cruise_mission; t = shared.trip_mission; });
       readings["targetFt"]        = c.targetAltFt;
-      readings["m1"]              = (int)(c.m1 * 100);
-      readings["m2"]              = (int)(c.m2 * 100);
-      readings["m3"]              = (int)(c.m3 * 100);
-      readings["m4"]              = (int)(c.m4 * 100);
-      readings["baseThrottle"]    = (int)(c.baseThrottle   * 100);
-      readings["rollCorrection"]  = (int)(c.rollCorrection  * 100);
-      readings["pitchCorrection"] = (int)(c.pitchCorrection * 100);
+      readings["m1"]              = (int)(d.m1 * 100);
+      readings["m2"]              = (int)(d.m2 * 100);
+      readings["m3"]              = (int)(d.m3 * 100);
+      readings["m4"]              = (int)(d.m4 * 100);
+      readings["baseThrottle"]    = (int)(d.baseThrottle   * 100);
+      readings["rollCorrection"]  = (int)(d.rollCorrection  * 100);
+      readings["pitchCorrection"] = (int)(d.pitchCorrection * 100);
       readings["compassHeading"]  = d.compassHeading;
       readings["gpsFix"]          = d.gpsFix;
       readings["gpsLat"]          = d.gpsLat;
@@ -1086,16 +1117,17 @@ String getFlightReadings() {
       break;
     }
     case PHASE_HOVER_SETTLE: {
-      Cruise_HoverSettle c;
-      withMutex([&]() { c = shared.cruise_hoverSettle; });
+      Cruise_HoverSettle    c;
+      Dashboard_HoverSettle db;
+      withMutex([&]() { c = shared.cruise_hoverSettle; db = shared.dashboard_hoverSettle; });
       readings["targetFt"]        = c.targetAltFt;
-      readings["m1"]              = (int)(c.m1 * 100);
-      readings["m2"]              = (int)(c.m2 * 100);
-      readings["m3"]              = (int)(c.m3 * 100);
-      readings["m4"]              = (int)(c.m4 * 100);
-      readings["baseThrottle"]    = (int)(c.baseThrottle   * 100);
-      readings["rollCorrection"]  = (int)(c.rollCorrection  * 100);
-      readings["pitchCorrection"] = (int)(c.pitchCorrection * 100);
+      readings["m1"]              = (int)(db.m1 * 100);
+      readings["m2"]              = (int)(db.m2 * 100);
+      readings["m3"]              = (int)(db.m3 * 100);
+      readings["m4"]              = (int)(db.m4 * 100);
+      readings["baseThrottle"]    = (int)(db.baseThrottle   * 100);
+      readings["rollCorrection"]  = (int)(db.rollCorrection  * 100);
+      readings["pitchCorrection"] = (int)(db.pitchCorrection * 100);
       readings["compassHeading"]  = shared.raw.compassHeadingDeg;
       readings["gpsFix"]          = shared.raw.gps.fix;
       readings["gpsLat"]          = shared.raw.gps.lat;
@@ -1108,16 +1140,17 @@ String getFlightReadings() {
       break;
     }
     case PHASE_LANDING: {
-      Cruise_Landing c;
-      withMutex([&]() { c = shared.cruise_landing; });
+      Cruise_Landing    c;
+      Dashboard_Landing db;
+      withMutex([&]() { c = shared.cruise_landing; db = shared.dashboard_landing; });
       readings["targetFt"]        = c.targetAltFt;
-      readings["m1"]              = (int)(c.m1 * 100);
-      readings["m2"]              = (int)(c.m2 * 100);
-      readings["m3"]              = (int)(c.m3 * 100);
-      readings["m4"]              = (int)(c.m4 * 100);
-      readings["baseThrottle"]    = (int)(c.baseThrottle   * 100);
-      readings["rollCorrection"]  = (int)(c.rollCorrection  * 100);
-      readings["pitchCorrection"] = (int)(c.pitchCorrection * 100);
+      readings["m1"]              = (int)(db.m1 * 100);
+      readings["m2"]              = (int)(db.m2 * 100);
+      readings["m3"]              = (int)(db.m3 * 100);
+      readings["m4"]              = (int)(db.m4 * 100);
+      readings["baseThrottle"]    = (int)(db.baseThrottle   * 100);
+      readings["rollCorrection"]  = (int)(db.rollCorrection  * 100);
+      readings["pitchCorrection"] = (int)(db.pitchCorrection * 100);
       readings["compassHeading"]  = shared.raw.compassHeadingDeg;
       readings["gpsFix"]          = shared.raw.gps.fix;
       readings["gpsLat"]          = shared.raw.gps.lat;
