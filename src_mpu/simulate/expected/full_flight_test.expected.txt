@@ -1,0 +1,32 @@
+# Format read by check_log.py:
+#   MUST:<substring>   -- must appear, in order, after the previous MUST match
+#   FORBID:<substring> -- must never appear anywhere in the log
+# Lines starting with # and blank lines are ignored.
+
+MUST:[WEB] Server started.
+MUST:[CRSF] START ignored -- no GPS fix.
+MUST:[CRSF] START switch -- arming and taking off.
+MUST:[CRSF] START ignored -- already flying/busy (phase: RAISE)
+MUST:[NAV] Takeoff altitude reached, transitioning to HOLD.
+MUST:[CRSF] START switch -- starting waypoint mission.
+MUST:[NAV] Reached waypoint 0 — advancing.
+MUST:[CRSF] STOP switch -- emergency stop.
+MUST:[CRSF] START switch -- arming and taking off.
+MUST:[NAV] Takeoff altitude reached, transitioning to HOLD.
+MUST:[CRSF] START switch -- starting waypoint mission.
+MUST:[NAV] Reached waypoint 0 — advancing.
+MUST:[NAV] Reached waypoint 1 — advancing.
+MUST:[NAV] Reached waypoint 2 — advancing.
+MUST:[NAV] Reached waypoint 3 — advancing.
+MUST:[NAV] Mission complete — hovering before landing.
+MUST:[NAV] Hover complete — beginning automatic landing.
+MUST:[NAV] Landed — motors disarmed.
+
+# The e-stop mid-mission must never let the mission complete on
+# the FIRST pass -- "Mission complete" should only appear once,
+# after the SECOND arm. If it shows up twice, the e-stop didn't
+# actually interrupt anything.
+FORBID_COUNT_GT_1:[NAV] Mission complete — hovering before landing.
+
+# No PANIC halt should ever fire in a nominal run.
+FORBID:[PANIC]

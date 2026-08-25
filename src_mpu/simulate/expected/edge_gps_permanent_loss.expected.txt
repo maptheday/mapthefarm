@@ -1,0 +1,9 @@
+MUST:[WEB] Server started.
+MUST:[NAV] Takeoff altitude reached, transitioning to HOLD.
+MUST:[SAFETY] GPS fix lost — aborting directly to LANDING.
+MUST:[NAV] Landed — motors disarmed.
+
+# The whole point of this test: permanent GPS loss must go straight
+# to LANDING, never through RTL (you can't navigate home without GPS).
+FORBID:[RTL]
+FORBID:[PANIC]

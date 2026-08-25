@@ -1,0 +1,25 @@
+name: 'API Endpoint Test Keepalive'
+version: 1
+author: 'Zach'
+
+# ============================================================
+# This scenario doesn't test anything by itself -- it just keeps
+# the simulation (and the wokwi.toml net.forward HTTP tunnel to
+# localhost:8180) alive on a known timeline so api_endpoint_test.sh
+# can fire curl requests at the right moments. See that script for
+# the actual assertions and the exact t=... timings it relies on.
+# ============================================================
+
+steps:
+  - wait-serial: '[WEB] Server started.'
+  # t=0 from here. api_endpoint_test.sh's "no fix yet" checks run
+  # in this window (roughly t=0s to t=6s).
+  - delay: 6000ms
+
+  - write-serial: "LAT:36.123456\n"
+  - write-serial: "LON:-80.123456\n"
+  - write-serial: "FIX:1\n"
+  # t=6s: fix now set. api_endpoint_test.sh's "with fix" flow
+  # (takeoff -> wait for HOLD -> start-waypoint-nav -> abort -> rtl
+  # -> land -> stop -> motor-test) runs from here to the end.
+  - delay: 90000ms

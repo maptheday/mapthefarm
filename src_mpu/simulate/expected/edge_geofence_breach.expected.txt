@@ -1,0 +1,12 @@
+MUST:[WEB] Server started.
+MUST:[NAV] Takeoff altitude reached, transitioning to HOLD.
+MUST:[SAFETY] Geofence exceeded — forcing RTL.
+MUST:[RTL] Climb complete. Returning to launch.
+MUST:[RTL] Arrived over launch pad. Settling.
+MUST:[RTL] Settle complete. Beginning landing.
+MUST:[NAV] Landed — motors disarmed.
+
+# The mission was never started in this scenario -- if a waypoint
+# mission log shows up, something else triggered it unexpectedly.
+FORBID:[NAV] Reached waypoint
+FORBID:[PANIC]

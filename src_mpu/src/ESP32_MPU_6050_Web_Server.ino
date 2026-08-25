@@ -32,7 +32,11 @@ const unsigned long SSE_FLIGHT_MS   = 100;
 // ==========================================
 // SAFETY CONFIGURATION
 // ==========================================
+#ifdef WOKWI_SIM
+const unsigned long MAX_FLIGHT_TIME_MS  = 20UL * 1000UL;   // shortened for sim test runtime
+#else
 const unsigned long MAX_FLIGHT_TIME_MS  = 5UL * 60UL * 1000UL;
+#endif
 const float         GEOFENCE_RADIUS_M   = 150.0f;
 const unsigned long GPS_LOSS_ABORT_MS   = 3000;
 const float         RTL_ALTITUDE_FT     = 60.0f;
@@ -60,14 +64,18 @@ float compassScaleY  = 1;
 float compassScaleZ  = 1;
 
 // ==========================================
-// ESC CALIBRATION
+// ESC (DShot600, via EspESC.hpp)
 // ==========================================
-// Runs every boot: full-throttle → min-throttle → arm.
-// ESCs save the throttle range to their own EEPROM each time.
-// PWM pulse widths (microseconds) — adjust to match your ESC spec.
-const int   ESC_PULSE_MAX_US = 2000;
-const int   ESC_PULSE_MIN_US = 1000;
-const int   ESC_PULSE_ARM_US = 1000; // Arm signal = min throttle
+// EspESC.hpp is DShot600 (digital, no calibration step, no PWM pulse
+// width concept). ESC_PULSE_MAX_US/MIN_US/ARM_US below were written for
+// analog/OneShot PWM ESCs and don't apply -- kept only so nothing else
+// in this file that might still reference them breaks; DShot's real
+// throttle range (48-2047) is handled internally by EspESC::write().
+// "Disarmed" is motors[i].disarm() (DShot command 0), not a min-throttle
+// float constant -- there's no PWM-style minimum to hold in DShot.
+const int   ESC_PULSE_MAX_US = 2000;  // unused -- DShot has no PWM pulse width
+const int   ESC_PULSE_MIN_US = 1000;  // unused -- DShot has no PWM pulse width
+const int   ESC_PULSE_ARM_US = 1000;  // unused -- DShot has no arm-pulse step
 
 // ==========================================
 // WAYPOINT SYSTEM
@@ -111,7 +119,17 @@ const float RAISE_CLIMB_RATE_FPS      = 3.0f;
 // holding the switch up does not repeatedly re-arm or re-trigger.
 // STOP is level-triggered: any frame with Ch6 below threshold kills motors.
 //
-#define CRSF_RX_PIN         16
+// PLACEHOLDER pin -- moved off GPIO16 because it collided with
+// Wire.begin(16, 15) (I2C SDA). GPIO4 is clear of every pin this file
+// knows about (I2C: 16/15, GPS: 17/18), but EspESC.hpp's pin usage is
+// NOT visible from this file -- confirm GPIO4 is actually free on your
+// board before wiring the receiver. See the boot-time warning below.
+// GPIO8 is confirmed clear of every pin this project defines: I2C
+// (16/15), GPS (17/18), and ESC M1-M4 (4/5/6/7, per EspESC.hpp). Still
+// worth a final visual check against your actual board silkscreen --
+// GPIO8 is unused on most ESP32-S3 DevKitC-1 boards but isn't a
+// hardware-enforced guarantee the way the others above are.
+#define CRSF_RX_PIN         8
 #define CRSF_BAUD           420000
 #define CRSF_START_CH       4     // Zero-indexed (Ch5 on radio)
 #define CRSF_STOP_CH        5     // Zero-indexed (Ch6 on radio)
@@ -139,6 +157,28 @@ TinyGPSPlus      gps;
 QMC5883LCompass  compass;
 
 AsyncWebServer    server(80);
+// SSE endpoint for live telemetry -- was never declared, so getGyroReadings()/
+// getAccReadings()/getFlightReadings() had no way to reach the frontend.
+// NOTE: event names below ("gyro","acc","flight") are a best guess from the
+// formatter function names -- verify against your frontend's EventSource
+// listener names (data/*.js) before relying on this.
+AsyncEventSource  events("/events");
+
+// Forward declaration -- full definition is further down with computeMotorMix().
+// Needed here because the Arduino .ino converter hoists writeMotorMix()'s
+// prototype to the top of the file before MotorMix is defined.
+struct MotorMix;
+
+// EspESC.hpp is instance-based (one object per motor), not static calls --
+// the previous EspESC::begin()/writeAllMicroseconds()/writeMotor() calls
+// throughout this file don't exist on that class and wouldn't have compiled.
+// Pins and M1-M4 ordering are exactly what EspESC.hpp's own header comment
+// documents; RMT_CHANNEL_0-3 are the 4 channels this legacy driver/rmt.h
+// API exposes on ESP32-S3. writeMotorMix()/disarmAllMotors() are defined
+// further down, right after the MotorMix struct they depend on.
+EspESC motors[4]; // index 0=M1, 1=M2, 2=M3, 3=M4
+const int         MOTOR_PINS[4]     = { 4, 5, 6, 7 };
+const rmt_channel_t MOTOR_RMT_CH[4] = { RMT_CHANNEL_0, RMT_CHANNEL_1, RMT_CHANNEL_2, RMT_CHANNEL_3 };
 
 // ==========================================
 // PID CONTROLLERS
@@ -222,6 +262,12 @@ struct RawImuReading {
   float gyroY = 0.0f; // Madgwick pitch (deg)
   float gyroZ = 0.0f; // Madgwick yaw   (deg)
   float temp  = 0.0f;
+
+  RawImuReading& operator=(const volatile RawImuReading& o) {
+    accX = o.accX; accY = o.accY; accZ = o.accZ;
+    gyroX = o.gyroX; gyroY = o.gyroY; gyroZ = o.gyroZ; temp = o.temp;
+    return *this;
+  }
 };
 
 struct RawGpsReading {
@@ -231,13 +277,28 @@ struct RawGpsReading {
   int    sats = 0;
   float  speedMps = 0.0f;
   unsigned long lastFixMs = 0;
+
+  // Needed because SharedState is volatile -- the compiler-generated
+  // copy constructor can't bind const T& to volatile T.
+  RawGpsReading& operator=(const volatile RawGpsReading& o) {
+    lat = o.lat; lon = o.lon; fix = o.fix;
+    sats = o.sats; speedMps = o.speedMps; lastFixMs = o.lastFixMs;
+    return *this;
+  }
 };
 
 struct RawSensors {
   RawImuReading imu;
   RawGpsReading gps;
   float         compassHeadingDeg = 0.0f;
-  float         baroAltitudeFt    = 0.0f; 
+  float         baroAltitudeFt    = 0.0f;
+
+  RawSensors& operator=(const volatile RawSensors& o) {
+    imu = o.imu; gps = o.gps;
+    compassHeadingDeg = o.compassHeadingDeg;
+    baroAltitudeFt    = o.baroAltitudeFt;
+    return *this;
+  }
 };
 
 // ==========================================
@@ -268,17 +329,34 @@ struct Dashboard_Raise {
   float baseThrottle    = 0.0f;
   float rollCorrection  = 0.0f;
   float pitchCorrection = 0.0f;
+  Dashboard_Raise& operator=(const volatile Dashboard_Raise& o) {
+    altitudeFt=o.altitudeFt; roll=o.roll; pitch=o.pitch; yaw=o.yaw;
+    compassHeading=o.compassHeading;
+    m1=o.m1; m2=o.m2; m3=o.m3; m4=o.m4;
+    baseThrottle=o.baseThrottle; rollCorrection=o.rollCorrection;
+    pitchCorrection=o.pitchCorrection;
+    return *this;
+  }
 };
 struct Cruise_Raise {
   float targetAltFt      = 0.0f;
   float targetRollDeg    = 0.0f;
   float targetPitchDeg   = 0.0f;
   float yawTargetHeading = 0.0f;
+  Cruise_Raise& operator=(const volatile Cruise_Raise& o) {
+    targetAltFt=o.targetAltFt; targetRollDeg=o.targetRollDeg;
+    targetPitchDeg=o.targetPitchDeg; yawTargetHeading=o.yawTargetHeading;
+    return *this;
+  }
 };
 struct Trip_Raise {
   unsigned long armedAtMs = 0;
   double        launchLat = 0.0;
   double        launchLon = 0.0;
+  Trip_Raise& operator=(const volatile Trip_Raise& o) {
+    armedAtMs=o.armedAtMs; launchLat=o.launchLat; launchLon=o.launchLon;
+    return *this;
+  }
 };
 
 // --- HOLD ---
@@ -295,17 +373,34 @@ struct Dashboard_Hold {
   float baseThrottle    = 0.0f;
   float rollCorrection  = 0.0f;
   float pitchCorrection = 0.0f;
+  Dashboard_Hold& operator=(const volatile Dashboard_Hold& o) {
+    altitudeFt=o.altitudeFt; roll=o.roll; pitch=o.pitch; yaw=o.yaw;
+    compassHeading=o.compassHeading;
+    m1=o.m1; m2=o.m2; m3=o.m3; m4=o.m4;
+    baseThrottle=o.baseThrottle; rollCorrection=o.rollCorrection;
+    pitchCorrection=o.pitchCorrection;
+    return *this;
+  }
 };
 struct Cruise_Hold {
   float targetAltFt      = 10.0f;
   float targetRollDeg    = 0.0f;
   float targetPitchDeg   = 0.0f;
   float yawTargetHeading = 0.0f;
+  Cruise_Hold& operator=(const volatile Cruise_Hold& o) {
+    targetAltFt=o.targetAltFt; targetRollDeg=o.targetRollDeg;
+    targetPitchDeg=o.targetPitchDeg; yawTargetHeading=o.yawTargetHeading;
+    return *this;
+  }
 };
 struct Trip_Hold {
   unsigned long armedAtMs = 0;
   double        launchLat = 0.0;
   double        launchLon = 0.0;
+  Trip_Hold& operator=(const volatile Trip_Hold& o) {
+    armedAtMs=o.armedAtMs; launchLat=o.launchLat; launchLon=o.launchLon;
+    return *this;
+  }
 };
 
 // --- MISSION ---
@@ -328,12 +423,27 @@ struct Dashboard_Mission {
   float  baseThrottle    = 0.0f;
   float  rollCorrection  = 0.0f;
   float  pitchCorrection = 0.0f;
+  Dashboard_Mission& operator=(const volatile Dashboard_Mission& o) {
+    altitudeFt=o.altitudeFt; roll=o.roll; pitch=o.pitch; yaw=o.yaw;
+    compassHeading=o.compassHeading;
+    gpsLat=o.gpsLat; gpsLon=o.gpsLon; gpsFix=o.gpsFix; gpsSats=o.gpsSats;
+    distToWP=o.distToWP; bearingToWP=o.bearingToWP;
+    m1=o.m1; m2=o.m2; m3=o.m3; m4=o.m4;
+    baseThrottle=o.baseThrottle; rollCorrection=o.rollCorrection;
+    pitchCorrection=o.pitchCorrection;
+    return *this;
+  }
 };
 struct Cruise_Mission {
   float targetAltFt      = 10.0f;
   float targetRollDeg    = 0.0f;
   float targetPitchDeg   = 0.0f;
   float yawTargetHeading = 0.0f;
+  Cruise_Mission& operator=(const volatile Cruise_Mission& o) {
+    targetAltFt=o.targetAltFt; targetRollDeg=o.targetRollDeg;
+    targetPitchDeg=o.targetPitchDeg; yawTargetHeading=o.yawTargetHeading;
+    return *this;
+  }
 };
 struct Trip_Mission {
   unsigned long armedAtMs     = 0;
@@ -342,6 +452,12 @@ struct Trip_Mission {
   bool          active        = false;
   double        launchLat     = 0.0;
   double        launchLon     = 0.0;
+  Trip_Mission& operator=(const volatile Trip_Mission& o) {
+    armedAtMs=o.armedAtMs; currentWP=o.currentWP;
+    waypointCount=o.waypointCount; active=o.active;
+    launchLat=o.launchLat; launchLon=o.launchLon;
+    return *this;
+  }
 };
 
 // --- RTL ---
@@ -364,12 +480,25 @@ struct Dashboard_RTL {
   float baseThrottle    = 0.0f;
   float rollCorrection  = 0.0f;
   float pitchCorrection = 0.0f;
+  Dashboard_RTL& operator=(const volatile Dashboard_RTL& o) {
+    altitudeFt=o.altitudeFt; roll=o.roll; pitch=o.pitch; yaw=o.yaw;
+    compassHeading=o.compassHeading;
+    m1=o.m1; m2=o.m2; m3=o.m3; m4=o.m4;
+    baseThrottle=o.baseThrottle; rollCorrection=o.rollCorrection;
+    pitchCorrection=o.pitchCorrection;
+    return *this;
+  }
 };
 struct Cruise_RTL {
   float targetAltFt      = 10.0f;
   float targetRollDeg    = 0.0f;
   float targetPitchDeg   = 0.0f;
   float yawTargetHeading = 0.0f;
+  Cruise_RTL& operator=(const volatile Cruise_RTL& o) {
+    targetAltFt=o.targetAltFt; targetRollDeg=o.targetRollDeg;
+    targetPitchDeg=o.targetPitchDeg; yawTargetHeading=o.yawTargetHeading;
+    return *this;
+  }
 };
 struct Trip_RTL {
   unsigned long armedAtMs     = 0;
@@ -377,6 +506,12 @@ struct Trip_RTL {
   double        launchLat     = 0.0;
   double        launchLon     = 0.0;
   unsigned long settleStartMs = 0;
+  Trip_RTL& operator=(const volatile Trip_RTL& o) {
+    armedAtMs=o.armedAtMs; state=o.state;
+    launchLat=o.launchLat; launchLon=o.launchLon;
+    settleStartMs=o.settleStartMs;
+    return *this;
+  }
 };
 
 // --- HOVER SETTLE ---
@@ -393,12 +528,25 @@ struct Dashboard_HoverSettle {
   float baseThrottle    = 0.0f;
   float rollCorrection  = 0.0f;
   float pitchCorrection = 0.0f;
+  Dashboard_HoverSettle& operator=(const volatile Dashboard_HoverSettle& o) {
+    altitudeFt=o.altitudeFt; roll=o.roll; pitch=o.pitch; yaw=o.yaw;
+    compassHeading=o.compassHeading;
+    m1=o.m1; m2=o.m2; m3=o.m3; m4=o.m4;
+    baseThrottle=o.baseThrottle; rollCorrection=o.rollCorrection;
+    pitchCorrection=o.pitchCorrection;
+    return *this;
+  }
 };
 struct Cruise_HoverSettle {
   float targetAltFt      = 10.0f;
   float targetRollDeg    = 0.0f;
   float targetPitchDeg   = 0.0f;
   float yawTargetHeading = 0.0f;
+  Cruise_HoverSettle& operator=(const volatile Cruise_HoverSettle& o) {
+    targetAltFt=o.targetAltFt; targetRollDeg=o.targetRollDeg;
+    targetPitchDeg=o.targetPitchDeg; yawTargetHeading=o.yawTargetHeading;
+    return *this;
+  }
 };
 struct Trip_HoverSettle {
   unsigned long enteredAtMs = 0;
@@ -418,12 +566,25 @@ struct Dashboard_Landing {
   float baseThrottle    = 0.0f;
   float rollCorrection  = 0.0f;
   float pitchCorrection = 0.0f;
+  Dashboard_Landing& operator=(const volatile Dashboard_Landing& o) {
+    altitudeFt=o.altitudeFt; roll=o.roll; pitch=o.pitch; yaw=o.yaw;
+    compassHeading=o.compassHeading;
+    m1=o.m1; m2=o.m2; m3=o.m3; m4=o.m4;
+    baseThrottle=o.baseThrottle; rollCorrection=o.rollCorrection;
+    pitchCorrection=o.pitchCorrection;
+    return *this;
+  }
 };
 struct Cruise_Landing {
   float targetAltFt      = 0.0f;
   float targetRollDeg    = 0.0f;
   float targetPitchDeg   = 0.0f;
   float yawTargetHeading = 0.0f;
+  Cruise_Landing& operator=(const volatile Cruise_Landing& o) {
+    targetAltFt=o.targetAltFt; targetRollDeg=o.targetRollDeg;
+    targetPitchDeg=o.targetPitchDeg; yawTargetHeading=o.yawTargetHeading;
+    return *this;
+  }
 };
 struct Trip_Landing {};
 
@@ -564,6 +725,29 @@ MotorMix computeMotorMix(float targetAltFt, float targetRollDeg, float targetPit
   return out;
 }
 
+// Sends a computed MotorMix straight to all 4 ESCs. Every physicsTick_*
+// for an active flight phase calls this right after computeMotorMix() --
+// previously the mix was only ever written to shared.dashboard_* for
+// telemetry and NEVER reached the ESCs, so the motors never actually
+// responded to the PID output during flight.
+void writeMotorMix(const MotorMix& mix) {
+#ifndef WOKWI_SIM
+  motors[0].write(mix.m1);
+  motors[1].write(mix.m2);
+  motors[2].write(mix.m3);
+  motors[3].write(mix.m4);
+#else
+  (void)mix;
+#endif
+}
+// Cuts all 4 motors immediately. Used by physicsTick_Parked/Landed instead
+// of a PWM "min throttle" concept that doesn't exist in DShot.
+void disarmAllMotors() {
+#ifndef WOKWI_SIM
+  for (int i = 0; i < 4; i++) motors[i].disarm();
+#endif
+}
+
 // ==========================================
 // FUNCTIONAL STATE SETTERS / TRANSITIONS
 // ==========================================
@@ -575,6 +759,10 @@ void transitionTo(FlightPhase next) {
     unsigned long now    = millis();
     double currentLat    = shared.raw.gps.lat;
     double currentLon    = shared.raw.gps.lon;
+  #ifdef WOKWI_SIM
+    currentLat            = simGpsLat;
+    currentLon            = simGpsLon;
+  #endif
 
     // Track original arming time and launch coords to persist across flight phases
     unsigned long activeArmedAt = 0;
@@ -721,8 +909,18 @@ void checkCoreFailsafes(unsigned long armedAtMs, double launchLat, double launch
     lon     = shared.raw.gps.lon; 
     lastFix = shared.raw.gps.lastFixMs; 
   });
+#ifdef WOKWI_SIM
+  fix      = simGpsFix;
+  lat      = simGpsLat;
+  lon      = simGpsLon;
+  lastFix  = fix ? millis() : lastFix;
+#endif
   
+#ifdef WOKWI_SIM
+  if (launchLat != 0.0) {
+#else
   if (fix && launchLat != 0.0) {
+#endif
     if (gpsDistanceMeters(lat, lon, launchLat, launchLon) > GEOFENCE_RADIUS_M) {
       logLine("[SAFETY] Geofence exceeded — forcing RTL.");
       tripRTL = true;
@@ -984,6 +1182,10 @@ void physicsTick_Parked(float dt) {
   yawPID.reset(); 
   navNorthPID.reset(); 
   navEastPID.reset();
+  // Explicitly disarm every tick so emergency stop doesn't rely on
+  // ESC-side timeout to cut thrust. DShot has no PWM "min throttle" to
+  // hold -- disarm() sends the actual DShot disarm command (0).
+  disarmAllMotors();
 }
 
 void physicsTick_Raise(float dt) {
@@ -998,6 +1200,8 @@ void physicsTick_Raise(float dt) {
   MotorMix mix = computeMotorMix(
     c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
     r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, r.imu.gyroZ, dt);
+
+  writeMotorMix(mix); // send this tick's mix to the ESCs -- was previously never sent
 
   withMutex([&]() {
     shared.dashboard_raise.m1              = mix.m1; 
@@ -1023,6 +1227,8 @@ void physicsTick_Hold(float dt) {
     c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
     r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, r.imu.gyroZ, dt);
 
+  writeMotorMix(mix); // send this tick's mix to the ESCs -- was previously never sent
+
   withMutex([&]() {
     shared.dashboard_hold.m1              = mix.m1; 
     shared.dashboard_hold.m2              = mix.m2;
@@ -1046,6 +1252,8 @@ void physicsTick_Mission(float dt) {
   MotorMix mix = computeMotorMix(
     c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
     r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, r.imu.gyroZ, dt);
+
+  writeMotorMix(mix); // send this tick's mix to the ESCs -- was previously never sent
 
   withMutex([&]() {
     shared.dashboard_mission.m1              = mix.m1; 
@@ -1071,6 +1279,8 @@ void physicsTick_RTL(float dt) {
     c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
     r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, r.imu.gyroZ, dt);
 
+  writeMotorMix(mix); // send this tick's mix to the ESCs -- was previously never sent
+
   withMutex([&]() {
     shared.dashboard_rtl.m1              = mix.m1; 
     shared.dashboard_rtl.m2              = mix.m2;
@@ -1094,6 +1304,8 @@ void physicsTick_HoverSettle(float dt) {
   MotorMix mix = computeMotorMix(
     c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
     r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, r.imu.gyroZ, dt);
+
+  writeMotorMix(mix); // send this tick's mix to the ESCs -- was previously never sent
 
   withMutex([&]() {
     shared.dashboard_hoverSettle.m1              = mix.m1; 
@@ -1119,6 +1331,8 @@ void physicsTick_Landing(float dt) {
     c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
     r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, r.imu.gyroZ, dt);
 
+  writeMotorMix(mix); // send this tick's mix to the ESCs -- was previously never sent
+
   withMutex([&]() {
     shared.dashboard_landing.m1              = mix.m1; 
     shared.dashboard_landing.m2              = mix.m2;
@@ -1138,6 +1352,9 @@ void physicsTick_Landed(float dt) {
   yawPID.reset(); 
   navNorthPID.reset(); 
   navEastPID.reset();
+  // Same reasoning as physicsTick_Parked: disarm explicitly rather than
+  // trusting whatever the ESCs were last set to.
+  disarmAllMotors();
 }
 
 // ==========================================
@@ -1151,8 +1368,11 @@ void navigationTask(void* parameter) {
   for (;;) {
 #ifdef WOKWI_SIM
     withMutex([&]() {
-      if (shared.raw.gps.fix) shared.raw.gps.lastFixMs = millis();
-      shared.raw.gps.sats = shared.raw.gps.fix ? 8 : 0;
+  shared.raw.gps.lat = simGpsLat;
+  shared.raw.gps.lon = simGpsLon;
+  shared.raw.gps.fix = simGpsFix;
+  if (simGpsFix) shared.raw.gps.lastFixMs = millis();
+  shared.raw.gps.sats = simGpsFix ? 8 : 0;
     });
 #else
     while (Serial2.available() > 0) gps.encode(Serial2.read());
@@ -1216,7 +1436,9 @@ void physicsTask(void* parameter) {
       filter.updateIMU(gx, gy, gz, a.acceleration.x, a.acceleration.y, a.acceleration.z);
     }
 
+#ifndef WOKWI_SIM
     float baroAlt = ((float)barometer.readAltitudeMeters() * 3.28084f) - groundAltitudeFt;
+#endif
 
     withMutex([&]() {
       shared.raw.imu.gyroX = filter.getRoll(); 
@@ -1226,7 +1448,13 @@ void physicsTask(void* parameter) {
       shared.raw.imu.accY  = a.acceleration.y; 
       shared.raw.imu.accZ  = a.acceleration.z;
       shared.raw.imu.temp  = temp.temperature; 
+#ifndef WOKWI_SIM
       shared.raw.baroAltitudeFt = baroAlt;
+#endif
+      // Under WOKWI_SIM, the custom BME280 chip always returns a fixed
+      // pressure reading -- there's no real altitude physics to sample.
+      // baroAltitudeFt is instead driven entirely by parseSimInput()'s
+      // "ALT:<feet>" command, same pattern as compass heading via "HDG:".
     });
 
     FlightPhase phase;
@@ -1579,28 +1807,21 @@ void initGPS() {
   Serial2.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN); 
 }
 
-// ESC calibration + arming runs every boot (props OFF, battery on):
-//   1. MAX throttle pulse -> ESC beeps high (recognises top of range)
-//   2. MIN throttle pulse -> ESC beeps low (saves range to EEPROM)
-//   3. ARM pulse held     -> ESC ready to accept throttle commands
-// Total ~8 s. Safe to repeat every boot; ESCs re-save the same values.
-// Adjust EspESC:: calls below to match your EspESC.hpp API.
+// DShot600 init runs every boot: bring up each motor's RMT channel,
+// then send an explicit disarm. No calibration/beep sequence -- that
+// was a leftover PWM-ESC description; DShot has no equivalent step.
 void initESC() {
-  EspESC::begin();
-
-  logLine("[ESC] Calibrating -- REMOVE PROPS. Sending MAX throttle for 3 s...");
-  EspESC::writeAllMicroseconds(ESC_PULSE_MAX_US);
-  delay(3000);
-
-  logLine("[ESC] Sending MIN throttle -- ESC should beep to confirm range saved.");
-  EspESC::writeAllMicroseconds(ESC_PULSE_MIN_US);
-  delay(3000);
-
-  logLine("[ESC] Arming -- holding min throttle for 2 s...");
-  EspESC::writeAllMicroseconds(ESC_PULSE_ARM_US);
-  delay(2000);
-
-  logLine("[ESC] ESCs calibrated and armed.");
+  // DShot600 has NO calibration step -- the previous "send max, then
+  // min, then arm" sequence is an analog/OneShot PWM ESC ritual and
+  // does nothing meaningful (or could be actively wrong) on a DShot ESC.
+  // All that's needed is bringing up each motor's RMT channel and
+  // sending an explicit disarm so they're confirmed at zero before
+  // anything else runs.
+  for (int i = 0; i < 4; i++) {
+    motors[i].init(MOTOR_PINS[i], MOTOR_RMT_CH[i]);
+  }
+  disarmAllMotors();
+  logLine("[ESC] DShot600 channels initialized, all motors disarmed.");
 }
 
 void initLittleFS() {
@@ -1631,6 +1852,12 @@ void initWiFi() {
 // SIMULATION
 // ==========================================
 #ifdef WOKWI_SIM
+// Defined further down (shared with the real crsfTask, which is compiled
+// out under WOKWI_SIM). Forward-declared here so parseSimInput can call
+// them without reordering the whole file.
+void crsfHandleStart();
+void crsfHandleStop();
+
 void parseSimInput() {
   static String buf = "";
   while (Serial.available()) {
@@ -1639,19 +1866,31 @@ void parseSimInput() {
       if (buf.startsWith("HDG:")) { 
         withMutex([&]() { shared.raw.compassHeadingDeg = buf.substring(4).toFloat(); }); 
       }
-      else if (buf.startsWith("LAT:")) { 
-        withMutex([&]() { shared.raw.gps.lat = buf.substring(4).toDouble(); }); 
+      else if (buf.startsWith("LAT:")) {
+        simGpsLat = buf.substring(4).toDouble();
       }
-      else if (buf.startsWith("LON:")) { 
-        withMutex([&]() { shared.raw.gps.lon = buf.substring(4).toDouble(); }); 
+      else if (buf.startsWith("LON:")) {
+        simGpsLon = buf.substring(4).toDouble();
       }
-      else if (buf.startsWith("FIX:")) { 
-        withMutex([&]() { shared.raw.gps.fix = (buf.substring(4).toInt() == 1); }); 
+      else if (buf.startsWith("FIX:")) {
+        simGpsFix = buf.substring(4).toInt() == 1;
+      }
+      else if (buf.startsWith("ALT:")) {
+        withMutex([&]() { shared.raw.baroAltitudeFt = buf.substring(4).toFloat(); });
       }
       else if (buf.startsWith("MISSION:")) {
         bool fixNow; 
         withMutex([&]() { fixNow = shared.raw.gps.fix; });
         if (fixNow) transitionTo(PHASE_MISSION);
+      }
+      // Fake RC switch commands -- call the exact same handlers the real
+      // crsfTask calls on a real CRSF frame. Each CRSFSTART:1 line is one
+      // simulated LOW->HIGH edge (send it once per "press", not held).
+      else if (buf.startsWith("CRSFSTART:")) {
+        if (buf.substring(10).toInt() == 1) crsfHandleStart();
+      }
+      else if (buf.startsWith("CRSFSTOP:")) {
+        if (buf.substring(9).toInt() == 1) crsfHandleStop();
       }
       buf = "";
     } else if (c != '\r') { 
@@ -1684,7 +1923,51 @@ static uint16_t crsfChannel(const uint8_t* payload, int chIdx) {
   return (raw >> bitIdx) & 0x7FF;
 }
 
+// Shared by the real crsfTask (byte-parsed CRSF frames) and, under
+// WOKWI_SIM, by parseSimInput() (fake "CRSFSTOP:1" serial commands).
+// Keeping this in one place means the sim exercises the exact same
+// phase-transition logic as real hardware -- only the byte-level
+// frame parsing itself goes untested in sim.
+void crsfHandleStop() {
+  FlightPhase phase;
+  withMutex([&]() { phase = shared.phase; });
+  if (phase != PHASE_PARKED && phase != PHASE_LANDED) {
+    logLine("[CRSF] STOP switch -- emergency stop.");
+    transitionTo(PHASE_PARKED);
+  }
+}
+
+void crsfHandleStart() {
+  FlightPhase phase;
+  bool hasFix;
+  withMutex([&]() { phase = shared.phase; hasFix = shared.raw.gps.fix; });
+
+  // LANDED is treated the same as PARKED for re-arming: motors are
+  // already confirmed at min throttle in both (see physicsTick_Parked/
+  // physicsTick_Landed), so there's no safety reason to force a trip
+  // back through the web /stop endpoint just to fly again after a
+  // normal landing. (Previously LANDED fell through to "already
+  // flying/busy", which was wrong -- a landed drone isn't busy.)
+  if (phase == PHASE_PARKED || phase == PHASE_LANDED) {
+    if (!hasFix) {
+      logLine("[CRSF] START ignored -- no GPS fix.");
+    } else {
+      logLine("[CRSF] START switch -- arming and taking off.");
+      transitionTo(PHASE_RAISE);
+    }
+  } else if (phase == PHASE_HOLD) {
+     logLine("[CRSF] START switch -- starting waypoint mission.");
+     transitionTo(PHASE_MISSION);
+  } else {
+    logLine("[CRSF] START ignored -- already flying/busy (phase: "
+            + String(phaseName(phase)) + ")");
+  }
+}
+
+#ifndef WOKWI_SIM
 void crsfTask(void* parameter) {
+  logLine("[CRSF] WARNING: CRSF_RX_PIN (GPIO" + String(CRSF_RX_PIN) + ") is a placeholder -- "
+          "verify it doesn't collide with EspESC.hpp's pins before first flight.");
   Serial1.begin(CRSF_BAUD, SERIAL_8N1, CRSF_RX_PIN, -1 /* TX unused */);
   logLine("[CRSF] Listening -- Ch5=START, Ch6=STOP");
 
@@ -1723,36 +2006,14 @@ void crsfTask(void* parameter) {
         // -- STOP: level-triggered, highest priority --
         // Any frame with Ch6 low cuts motors immediately, regardless of phase.
         if (stopVal < CRSF_LOW_THRESHOLD) {
-          FlightPhase phase;
-          withMutex([&]() { phase = shared.phase; });
-          if (phase != PHASE_PARKED && phase != PHASE_LANDED) {
-            logLine("[CRSF] STOP switch -- emergency stop.");
-            transitionTo(PHASE_PARKED);
-          }
+          crsfHandleStop();
         }
 
         // -- START: edge-triggered (LOW->HIGH transition only) --
         // Only triggers action when Ch5 crosses UP, so holding the switch does nothing extra.
         bool startHigh = (startVal > CRSF_HIGH_THRESHOLD);
         if (startHigh && !prevStartHigh) {
-          FlightPhase phase;
-          bool hasFix;
-          withMutex([&]() { phase = shared.phase; hasFix = shared.raw.gps.fix; });
-          
-          if (phase == PHASE_PARKED) {
-            if (!hasFix) {
-              logLine("[CRSF] START ignored -- no GPS fix.");
-            } else {
-              logLine("[CRSF] START switch -- arming and taking off.");
-              transitionTo(PHASE_RAISE);
-            }
-          } else if (phase == PHASE_HOLD) {
-             logLine("[CRSF] START switch -- starting waypoint mission.");
-             transitionTo(PHASE_MISSION);
-          } else {
-            logLine("[CRSF] START ignored -- already flying/busy (phase: "
-                    + String(phaseName(phase)) + ")");
-          }
+          crsfHandleStart();
         }
         prevStartHigh = startHigh;
       }
@@ -1762,6 +2023,7 @@ void crsfTask(void* parameter) {
     vTaskDelay(pdMS_TO_TICKS(2)); // yield; 2 ms is well within the 4 ms frame interval
   }
 }
+#endif // !WOKWI_SIM
 
 // ==========================================
 // SETUP
@@ -1774,7 +2036,9 @@ void setup() {
   Wire.begin(16, 15);
   
   initWiFi(); 
+#ifndef WOKWI_SIM
   initLittleFS(); 
+#endif
   initMPU();
   
 #ifndef WOKWI_SIM
@@ -1801,13 +2065,27 @@ void setup() {
 
   xTaskCreatePinnedToCore(navigationTask, "NavTask",    8192, NULL, 1, NULL, 0);
   xTaskCreatePinnedToCore(physicsTask,    "PhysicsTask", 8192, NULL, 2, NULL, 1);
+#ifndef WOKWI_SIM
+  // No real ELRS receiver exists in the Wokwi diagram, and CRSF_RX_PIN
+  // currently collides with the I2C bus (see the pin-conflict note below).
+  // Sim builds trigger START/STOP via parseSimInput() -> crsfHandleStart/Stop()
+  // instead. TODO(hardware): CRSF_RX_PIN == 16 == Wire SDA. Move CRSF_RX_PIN
+  // to a free GPIO once EspESC.hpp's pin usage is confirmed.
   xTaskCreatePinnedToCore(crsfTask,       "CRSFTask",    4096, NULL, 1, NULL, 0);
+#endif
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest* r) { 
+#ifdef WOKWI_SIM
+    r->send(200, "text/plain", "Wokwi simulation");
+#else
     r->send(LittleFS, "/index.html", "text/html"); 
+#endif
   });
   
+#ifndef WOKWI_SIM
   server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
+#endif
+  server.addHandler(&events);
 
   server.on("/takeoff", HTTP_GET, [](AsyncWebServerRequest* r) {
     bool hasFix; 
@@ -1899,10 +2177,9 @@ void setup() {
     logLine(String("[MOTOR TEST] M") + motor + " at " + pct + "% for 2 s — PROPS OFF?");
 
     // Spin the requested motor for 2 s then cut.
-    // EspESC::writeMotor(index, 0.0-1.0) assumed — adjust to your EspESC API.
-    EspESC::writeMotor(motor - 1, throttle); // 0-indexed
+    motors[motor - 1].write(throttle); // 0-indexed
     delay(2000);
-    EspESC::writeMotor(motor - 1, 0.0f);
+    motors[motor - 1].disarm();
 
     logLine(String("[MOTOR TEST] M") + motor + " stopped.");
     r->send(200, "text/plain",
@@ -1910,6 +2187,7 @@ void setup() {
   });
 
   server.begin();
+  logLine("[WEB] Server started.");
 }
 
 // ==========================================
@@ -1922,5 +2200,21 @@ unsigned long lastFlightSend = 0;
 void loop() {
 #ifdef WOKWI_SIM
   parseSimInput();
+#else
+  // Was declared (lastGyroSend/lastAccSend/lastFlightSend, SSE_*_MS) but
+  // never actually used anywhere -- the dashboard had no live data feed.
+  unsigned long now = millis();
+  if (now - lastGyroSend >= SSE_GYRO_MS) {
+    events.send(getGyroReadings().c_str(), "gyro", now);
+    lastGyroSend = now;
+  }
+  if (now - lastAccSend >= SSE_ACC_MS) {
+    events.send(getAccReadings().c_str(), "acc", now);
+    lastAccSend = now;
+  }
+  if (now - lastFlightSend >= SSE_FLIGHT_MS) {
+    events.send(getFlightReadings().c_str(), "flight", now);
+    lastFlightSend = now;
+  }
 #endif
 }

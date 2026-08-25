@@ -1,0 +1,176 @@
+name: 'Full Flight Regression Test'
+version: 1
+author: 'Zach'
+
+# ============================================================
+# ONE continuous run covering everything that CAN share a single
+# boot without the phases fighting each other. What's deliberately
+# NOT here (each needs its own isolated scenario -- see
+# edge_*.yaml): geofence breach, permanent GPS loss (no recovery),
+# and max-flight-time timeout. All three force a phase change that
+# would either take too long here or leave the drone in a state
+# that breaks the steps that come after it.
+#
+# Sequencing note: after full auto-landing the firmware ends up in
+# PHASE_LANDED, and neither CRSFSTART nor CRSFSTOP acts on that
+# phase (only the web /stop endpoint force-resets to PARKED, and
+# yaml scenarios can't hit HTTP endpoints -- see api_endpoint_test.sh
+# for that). So anything that needs to re-arm happens BEFORE the
+# drone is allowed to fully land. That's why the mid-mission
+# emergency-stop test below comes before the nominal full mission,
+# not after.
+# ============================================================
+
+steps:
+  - wait-serial: '[WEB] Server started.'
+  - delay: 500ms
+
+  # ── START ignored: no GPS fix yet ───────────────────────────
+  - write-serial: "CRSFSTART:1\n"
+  - delay: 300ms
+  - wait-serial: '[CRSF] START ignored -- no GPS fix.'
+
+  # ── Establish initial position at WP0, level, GPS fix ───────
+  - write-serial: "ALT:0\n"
+  - write-serial: "HDG:090.0\n"
+  - write-serial: "LAT:36.123456\n"
+  - write-serial: "LON:-80.123456\n"
+  - write-serial: "FIX:1\n"
+  - delay: 500ms
+
+  # ── START: arm + takeoff (PARKED -> RAISE) ──────────────────
+  - write-serial: "CRSFSTART:1\n"
+  - delay: 300ms
+  - wait-serial: '[CRSF] START switch -- arming and taking off.'
+
+  # ── START ignored: already busy mid-RAISE ───────────────────
+  - write-serial: "CRSFSTART:1\n"
+  - delay: 300ms
+  - wait-serial: '[CRSF] START ignored -- already flying/busy (phase: RAISE)'
+
+  # RAISE ramps its target for TAKEOFF_ALTITUDE_FT / RAISE_CLIMB_RATE_FPS
+  # = 15 / 3.0 = 5s, then auto-transitions to HOLD.
+  - delay: 5500ms
+  - wait-serial: '[NAV] Takeoff altitude reached, transitioning to HOLD.'
+
+  # ── START: begin mission (HOLD -> MISSION) ──────────────────
+  - write-serial: "CRSFSTART:1\n"
+  - delay: 300ms
+  - wait-serial: '[CRSF] START switch -- starting waypoint mission.'
+
+  # WP0 is the first mission target and we're already sitting on
+  # it, so it's satisfied on the very next nav tick.
+  - wait-serial: '[NAV] Reached waypoint 0 — advancing.'
+
+  # ── Move partway into leg WP0 -> WP1, then interrupt with STOP ──
+  # WP1 = (36.123789, -80.123456)
+  - write-serial: "LAT:36.123530\n"
+  - delay: 800ms
+
+  # ── STOP: emergency stop mid-mission ────────────────────────
+  - write-serial: "CRSFSTOP:1\n"
+  - delay: 300ms
+  - wait-serial: '[CRSF] STOP switch -- emergency stop.'
+
+  # ── Re-arm from PARKED (still have GPS fix) ─────────────────
+  - write-serial: "CRSFSTART:1\n"
+  - delay: 300ms
+  - wait-serial: '[CRSF] START switch -- arming and taking off.'
+  - delay: 5500ms
+  - wait-serial: '[NAV] Takeoff altitude reached, transitioning to HOLD.'
+
+  - write-serial: "CRSFSTART:1\n"
+  - delay: 300ms
+  - wait-serial: '[CRSF] START switch -- starting waypoint mission.'
+  - wait-serial: '[NAV] Reached waypoint 0 — advancing.'
+
+  # ── Leg: WP0 -> WP1 (lat increases, lon fixed) ──────────────
+  - write-serial: "LAT:36.123530\n"
+  - delay: 1500ms
+  - write-serial: "LAT:36.123610\n"
+  - delay: 1500ms
+
+  # ── Wind gust mid-leg (shortened Act 1 from wind_gust.yaml) ──
+  # Proves the PID doesn't choke or panic on a sudden disturbance
+  # while actively navigating. Full-duration recovery watching is
+  # in the standalone wind_gust.yaml -- here we just prove it survives.
+  - set-control:
+      part-id: mpu
+      control: accelX
+      value: 2.5
+  - set-control:
+      part-id: mpu
+      control: accelZ
+      value: 0.97
+  - set-control:
+      part-id: mpu
+      control: rotationX
+      value: 10
+  - delay: 2000ms
+  - set-control:
+      part-id: mpu
+      control: rotationX
+      value: 0
+  - set-control:
+      part-id: mpu
+      control: accelX
+      value: 0
+  - set-control:
+      part-id: mpu
+      control: accelZ
+      value: 1
+  - delay: 1000ms
+
+  - write-serial: "LAT:36.123690\n"
+  - delay: 1500ms
+
+  # ── Temporary GPS loss + recovery mid-leg ───────────────────
+  - write-serial: "FIX:0\n"
+  - delay: 1500ms
+  - write-serial: "FIX:1\n"
+  - delay: 1000ms
+
+  - write-serial: "LAT:36.123760\n"
+  - delay: 1500ms
+  - write-serial: "LAT:36.123789\n"
+  - delay: 2000ms
+  - wait-serial: '[NAV] Reached waypoint 1 — advancing.'
+
+  # ── Leg: WP1 -> WP2 (lon shifts west, lat fixed) ────────────
+  # WP2 = (36.123789, -80.123789)
+  - write-serial: "LON:-80.123530\n"
+  - delay: 1500ms
+  - write-serial: "LON:-80.123610\n"
+  - delay: 1500ms
+  - write-serial: "LON:-80.123690\n"
+  - delay: 1500ms
+  - write-serial: "LON:-80.123760\n"
+  - delay: 1500ms
+  - write-serial: "LON:-80.123789\n"
+  - delay: 2000ms
+  - wait-serial: '[NAV] Reached waypoint 2 — advancing.'
+
+  # ── Leg: WP2 -> WP3 (lat decreases, lon fixed) ──────────────
+  # WP3 = (36.123456, -80.123789)
+  - write-serial: "LAT:36.123710\n"
+  - delay: 1500ms
+  - write-serial: "LAT:36.123630\n"
+  - delay: 1500ms
+  - write-serial: "LAT:36.123550\n"
+  - delay: 1500ms
+  - write-serial: "LAT:36.123480\n"
+  - delay: 1500ms
+  - write-serial: "LAT:36.123456\n"
+  - delay: 2000ms
+  - wait-serial: '[NAV] Reached waypoint 3 — advancing.'
+  - wait-serial: '[NAV] Mission complete — hovering before landing.'
+
+  # ── Hover settle (MISSION_COMPLETE_HOVER_MS = 10000ms) ──────
+  - delay: 10500ms
+  - wait-serial: '[NAV] Hover complete — beginning automatic landing.'
+
+  # LANDING resolves in ~1 physics tick in sim (see README -- baro
+  # altitude is fixed by the custom BME280 chip, current alt is
+  # already ~0 so descent hits the floor almost immediately).
+  - delay: 1000ms
+  - wait-serial: '[NAV] Landed — motors disarmed.'

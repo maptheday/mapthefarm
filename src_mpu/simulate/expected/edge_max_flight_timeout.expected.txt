@@ -1,0 +1,10 @@
+MUST:[WEB] Server started.
+MUST:[NAV] Takeoff altitude reached, transitioning to HOLD.
+MUST:[SAFETY] Max flight time reached — forcing RTL.
+MUST:[RTL] Climb complete. Returning to launch.
+MUST:[RTL] Arrived over launch pad. Settling.
+MUST:[RTL] Settle complete. Beginning landing.
+MUST:[NAV] Landed — motors disarmed.
+
+FORBID:[PANIC]
+FORBID:[SAFETY] Geofence exceeded
