@@ -15,8 +15,8 @@
 #include "EspESC.hpp"
 #include "PID.hpp"
 
-const char* ssid     = "Wokwi-GUEST";
-const char* password = "";
+const char* ssid     = "SpectrumSetup-C3";
+const char* password = "mellowlemon735";
 
 // ==========================================
 // TIMING CONFIGURATION
@@ -1423,6 +1423,7 @@ void physicsTask(void* parameter) {
     float dt          = (now - lastGyroMicros) / 1000000.0f;
     lastGyroMicros    = now;
 
+#ifndef WOKWI_SIM
     sensors_event_t a;
     sensors_event_t g;
     sensors_event_t temp;
@@ -1436,26 +1437,25 @@ void physicsTask(void* parameter) {
       filter.updateIMU(gx, gy, gz, a.acceleration.x, a.acceleration.y, a.acceleration.z);
     }
 
-#ifndef WOKWI_SIM
     float baroAlt = ((float)barometer.readAltitudeMeters() * 3.28084f) - groundAltitudeFt;
-#endif
 
     withMutex([&]() {
-      shared.raw.imu.gyroX = filter.getRoll(); 
-      shared.raw.imu.gyroY = filter.getPitch(); 
-      shared.raw.imu.gyroZ = filter.getYaw();
-      shared.raw.imu.accX  = a.acceleration.x; 
-      shared.raw.imu.accY  = a.acceleration.y; 
-      shared.raw.imu.accZ  = a.acceleration.z;
-      shared.raw.imu.temp  = temp.temperature; 
-#ifndef WOKWI_SIM
+      shared.raw.imu.gyroX      = filter.getRoll();
+      shared.raw.imu.gyroY      = filter.getPitch();
+      shared.raw.imu.gyroZ      = filter.getYaw();
+      shared.raw.imu.accX       = a.acceleration.x;
+      shared.raw.imu.accY       = a.acceleration.y;
+      shared.raw.imu.accZ       = a.acceleration.z;
+      shared.raw.imu.temp       = temp.temperature;
       shared.raw.baroAltitudeFt = baroAlt;
-#endif
-      // Under WOKWI_SIM, the custom BME280 chip always returns a fixed
-      // pressure reading -- there's no real altitude physics to sample.
-      // baroAltitudeFt is instead driven entirely by parseSimInput()'s
-      // "ALT:<feet>" command, same pattern as compass heading via "HDG:".
     });
+#else
+    // Sim mode: no MPU6050 or barometer hardware present.
+    // IMU is left at zero -- attitude control is not exercised in HIL tests.
+    // baroAltitudeFt is driven by the HIL runner via ALT: serial commands
+    // and written directly into shared.raw by parseSimInput().
+    (void)dt;
+#endif
 
     FlightPhase phase;
     withMutex([&]() { phase = shared.phase; });
@@ -1863,7 +1863,14 @@ void parseSimInput() {
   while (Serial.available()) {
     char c = Serial.read();
     if (c == '\n') {
-      if (buf.startsWith("HDG:")) { 
+
+      buf.trim(); // Cleans up any invisible \r characters before checking
+      
+      // --- ADD THE PING LOGIC HERE ---
+      if (buf.startsWith("PING:")) {
+        Serial.println("READY");
+      }
+      else if (buf.startsWith("HDG:")) { 
         withMutex([&]() { shared.raw.compassHeadingDeg = buf.substring(4).toFloat(); }); 
       }
       else if (buf.startsWith("LAT:")) {
@@ -2032,27 +2039,31 @@ void setup() {
   sharedDataMutex = xSemaphoreCreateMutex(); 
   serialMutex     = xSemaphoreCreateMutex();
   
-  Serial.begin(115200); 
+  Serial.begin(115200);
+#ifdef WOKWI_SIM
+  // ESP32-S3 native USB CDC takes a moment to enumerate after reset.
+  // Without this delay, early Serial output is dropped before the host
+  // sees the port. 2s is enough for macOS to reconnect and open the port.
+  delay(2000);
+#endif
   Wire.begin(16, 15);
   
   initWiFi(); 
 #ifndef WOKWI_SIM
-  initLittleFS(); 
-#endif
+  initLittleFS();
   initMPU();
-  
-#ifndef WOKWI_SIM
-  initCompass(); 
+  initCompass();
   initGPS();
   initESC();
 #endif
+#ifndef WOKWI_SIM
   barometer.initialize();
   
   // Average 20 barometer readings over ~2 s so the sensor has time to settle
   // and temperature effects are smoothed before we lock in the ground reference.
   logLine("[BARO] Sampling ground altitude (20 readings)...");
   {
-    const int   BARO_SAMPLES    = 20;
+    const int   BARO_SAMPLES     = 20;
     const int   BARO_INTERVAL_MS = 100;
     float accum = 0.0f;
     for (int i = 0; i < BARO_SAMPLES; i++) {
@@ -2062,6 +2073,12 @@ void setup() {
     groundAltitudeFt = accum / BARO_SAMPLES;
   }
   logLine(String("[BARO] Ground altitude locked: ") + String(groundAltitudeFt, 1) + " ft");
+#else
+  // In sim mode baroAltitudeFt is driven entirely by the HIL runner
+  // via ALT: serial commands. No real sensor to read, no ground reference needed.
+  groundAltitudeFt = 0.0f;
+  logLine("[BARO] Sim mode -- barometer driven by HIL runner (ALT: commands).");
+#endif
 
   xTaskCreatePinnedToCore(navigationTask, "NavTask",    8192, NULL, 1, NULL, 0);
   xTaskCreatePinnedToCore(physicsTask,    "PhysicsTask", 8192, NULL, 2, NULL, 1);
