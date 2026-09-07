@@ -654,6 +654,11 @@ void withMutex(Fn fn) {
 void logLine(const String& msg) {
   if (xSemaphoreTake(serialMutex, portMAX_DELAY) == pdTRUE) {
     Serial.println(msg);
+    Serial.flush(); // block until this line is actually on the wire before
+                     // releasing the mutex -- USB CDC buffers writes
+                     // asynchronously, so without this a second task can
+                     // start writing while this line is still draining,
+                     // tearing the two messages together.
     xSemaphoreGive(serialMutex);
   }
 }
@@ -1284,12 +1289,12 @@ void physicsTick_RTL(float dt) {
   writeMotorMix(mix); // send this tick's mix to the ESCs -- was previously never sent
 
   withMutex([&]() {
-    shared.dashboard_rtl.m1              = mix.m1; 
+    shared.dashboard_rtl.m1              = mix.m1;
     shared.dashboard_rtl.m2              = mix.m2;
-    shared.dashboard_rtl.m3              = mix.m3; 
+    shared.dashboard_rtl.m3              = mix.m3;
     shared.dashboard_rtl.m4              = mix.m4;
     shared.dashboard_rtl.baseThrottle    = mix.baseThrottle;
-    shared.dashboard_rtl.rollCorrection  = mix.rollCorrection; 
+    shared.dashboard_rtl.rollCorrection  = mix.rollCorrection;
     shared.dashboard_rtl.pitchCorrection = mix.pitchCorrection;
   });
 }
@@ -1899,6 +1904,30 @@ void parseSimInput() {
       // [HIL] Ready so the runner knows setup() has completed.
       else if (buf.startsWith("PING:")) {
         logLine("[HIL] Ready.");
+      }
+      // On-demand motor telemetry -- queried by the HIL harness instead of
+      // pushed periodically, so it never collides on the wire with
+      // safety/phase-transition log lines fired from the nav task.
+      else if (buf.startsWith("MOTOR?")) {
+        Dashboard_RTL m;
+        withMutex([&]() { m = shared.dashboard_rtl; });
+        logLine("[MOTOR] base=" + String(m.baseThrottle, 2) +
+                " roll=" + String(m.rollCorrection, 3) +
+                " pitch=" + String(m.pitchCorrection, 3));
+      }
+      // HIL state query. Tests must not use human-readable event logs as a
+      // control protocol because a dropped CDC byte can make a real event
+      // indistinguishable from a missing event.
+      else if (buf.startsWith("STATUS?")) {
+        FlightPhase phase;
+        RTLState rtlState;
+        withMutex([&]() {
+          phase = shared.phase;
+          rtlState = shared.trip_rtl.state;
+        });
+        logLine("[STATUS] phase=" + String(phaseName(phase)) +
+                " rtl=" + String(rtlState == RTL_CLIMB ? "CLIMB" :
+                                    rtlState == RTL_RETURN ? "RETURN" : "SETTLE"));
       }
       buf = "";
     } else if (c != '\r') { 

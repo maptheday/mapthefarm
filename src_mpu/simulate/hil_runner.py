@@ -96,6 +96,78 @@ def forbid_count_gt_1(substring: str):
 
 
 # ---------------------------------------------------------------------------
+# Motor telemetry -- request/response only (firmware never pushes this
+# unsolicited), so it can't collide on the wire with safety/phase-transition
+# log lines emitted from the nav task. Query it explicitly between waits.
+# ---------------------------------------------------------------------------
+import re as _re
+
+_MOTOR_RE = _re.compile(
+    r"\[MOTOR\] base=(?P<base>-?[\d.]+) roll=(?P<roll>-?[\d.]+) "
+    r"pitch=(?P<pitch>-?[\d.]+)"
+)
+_STATUS_RE = _re.compile(r"\[STATUS\] phase=(?P<phase>[A-Z_]+) rtl=(?P<rtl>[A-Z]+)")
+
+def query_motor(timeout: float = 3.0):
+    """Send MOTOR? and block for the matching [MOTOR] response line.
+
+    Returns a dict with keys base/roll/pitch, reflecting the mix the
+    firmware actually computed for the ESCs, not just injected sensor
+    state -- used to assert the firmware is really commanding the
+    motors (climb throttle, steering correction) rather than only
+    transitioning phases on scripted sensor values.
+    """
+    send("MOTOR?")
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        try:
+            line = log_queue.get(timeout=min(remaining, 0.5))
+        except queue.Empty:
+            continue
+        m = _MOTOR_RE.search(line)
+        if m:
+            return {k: float(v) for k, v in m.groupdict().items()}
+    return None
+
+def wait_for_motor_base(minimum: float, timeout: float = 3.0):
+    """Wait for physicsTask to publish a non-stale motor sample."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        sample = query_motor(timeout=min(0.5, deadline - time.monotonic()))
+        if sample is not None and sample["base"] >= minimum:
+            return sample
+    return None
+
+def query_status(timeout: float = 1.0):
+    """Request firmware state; tolerate a lost response by letting callers retry."""
+    send("STATUS?")
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            line = log_queue.get(timeout=min(deadline - time.monotonic(), 0.25))
+        except queue.Empty:
+            continue
+        match = _STATUS_RE.search(line)
+        if match:
+            return match.groupdict()
+    return None
+
+def wait_for_status(phase=None, rtl=None, timeout=10.0):
+    """Poll state instead of depending on a potentially truncated log line."""
+    deadline = time.monotonic() + timeout
+    phases = {phase} if isinstance(phase, str) else set(phase or ())
+    while time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        status = query_status(timeout=min(1.0, remaining))
+        if status and (phase is None or status["phase"] in phases) and \
+                      (rtl is None or status["rtl"] == rtl):
+            return status
+        time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Sensor loops
 # ---------------------------------------------------------------------------
 
@@ -229,6 +301,10 @@ def main():
     mod.wait_for_gps_publish = wait_for_gps_publish
     mod.forbid            = forbid
     mod.forbid_count_gt_1 = forbid_count_gt_1
+    mod.query_motor       = query_motor
+    mod.wait_for_motor_base = wait_for_motor_base
+    mod.query_status      = query_status
+    mod.wait_for_status   = wait_for_status
     mod.send              = send
     mod.arm_and_takeoff   = arm_and_takeoff
     mod.start_mission     = start_mission
