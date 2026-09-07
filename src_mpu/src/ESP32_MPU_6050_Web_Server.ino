@@ -231,6 +231,12 @@ enum FlightPhase {
   PHASE_LANDED
 };
 
+#ifdef WOKWI_SIM
+volatile bool        hilGatePending  = false;
+volatile bool        hilGateApproved = false;
+volatile FlightPhase hilGateNext     = PHASE_PARKED;
+#endif
+
 const char* phaseName(FlightPhase p) {
   switch (p) {
     case PHASE_PARKED:       return "PARKED";
@@ -249,6 +255,32 @@ const char* phaseName(FlightPhase p) {
 bool phaseFlightEnabled(FlightPhase phase) {
   return phase != PHASE_PARKED && phase != PHASE_LANDED;
 }
+
+#ifdef WOKWI_SIM
+void transitionTo(FlightPhase next);
+
+bool hilGateAllows(FlightPhase next) {
+  if (!hilGatePending) {
+    hilGatePending = true;
+    hilGateApproved = false;
+    hilGateNext = next;
+    logLine(String("[HIL_GATE] request=") + phaseName(next));
+    return false;
+  }
+  return hilGateNext == next && hilGateApproved;
+}
+
+bool hilGateBlocked() {
+  if (!hilGatePending) return false;
+  if (hilGateApproved) {
+    FlightPhase next = hilGateNext;
+    transitionTo(next);
+    hilGatePending = false;
+    hilGateApproved = false;
+  }
+  return true;
+}
+#endif
 
 // ==========================================
 // RAW SENSOR READS
@@ -759,6 +791,9 @@ void disarmAllMotors() {
 // FUNCTIONAL STATE SETTERS / TRANSITIONS
 // ==========================================
 void transitionTo(FlightPhase next) {
+#ifdef WOKWI_SIM
+  if (!hilGateAllows(next)) return;
+#endif
   withMutex([&]() {
     FlightPhase prev     = shared.phase;
     float currentAlt     = shared.raw.baroAltitudeFt;
@@ -1374,6 +1409,12 @@ void navigationTask(void* parameter) {
 
   for (;;) {
 #ifdef WOKWI_SIM
+    if (hilGateBlocked()) {
+      vTaskDelay(pdMS_TO_TICKS(NAV_LOOP_MS));
+      continue;
+    }
+#endif
+#ifdef WOKWI_SIM
     withMutex([&]() {
   shared.raw.gps.lat = simGpsLat;
   shared.raw.gps.lon = simGpsLon;
@@ -1426,6 +1467,12 @@ void physicsTask(void* parameter) {
   TickType_t lastWakeTime     = xTaskGetTickCount();
 
   for (;;) {
+#ifdef WOKWI_SIM
+    if (hilGateBlocked()) {
+      vTaskDelay(pdMS_TO_TICKS(PHYSICS_LOOP_MS));
+      continue;
+    }
+#endif
     unsigned long now = micros();
     float dt          = (now - lastGyroMicros) / 1000000.0f;
     lastGyroMicros    = now;
@@ -1905,6 +1952,17 @@ void parseSimInput() {
       else if (buf.startsWith("PING:")) {
         logLine("[HIL] Ready.");
       }
+      else if (buf.startsWith("ALLOW:")) {
+        String allowed = buf.substring(6);
+        for (int i = PHASE_PARKED; i <= PHASE_LANDED; ++i) {
+          FlightPhase phase = static_cast<FlightPhase>(i);
+          if (allowed == phaseName(phase) && hilGatePending && hilGateNext == phase) {
+            hilGateApproved = true;
+            logLine(String("[HIL_GATE] approved=") + allowed);
+            break;
+          }
+        }
+      }
       // On-demand motor telemetry -- queried by the HIL harness instead of
       // pushed periodically, so it never collides on the wire with
       // safety/phase-transition log lines fired from the nav task.
@@ -1921,13 +1979,18 @@ void parseSimInput() {
       else if (buf.startsWith("STATUS?")) {
         FlightPhase phase;
         RTLState rtlState;
+        bool gatePending;
+        FlightPhase gateNext;
         withMutex([&]() {
           phase = shared.phase;
           rtlState = shared.trip_rtl.state;
+          gatePending = hilGatePending;
+          gateNext = hilGateNext;
         });
         logLine("[STATUS] phase=" + String(phaseName(phase)) +
                 " rtl=" + String(rtlState == RTL_CLIMB ? "CLIMB" :
-                                    rtlState == RTL_RETURN ? "RETURN" : "SETTLE"));
+                                    rtlState == RTL_RETURN ? "RETURN" : "SETTLE") +
+                " gate=" + String(gatePending ? phaseName(gateNext) : "NONE"));
       }
       buf = "";
     } else if (c != '\r') { 

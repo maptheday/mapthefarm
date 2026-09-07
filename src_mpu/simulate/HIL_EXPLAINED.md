@@ -255,6 +255,30 @@ A good general rule is:
 
 > Logs explain what happened to people. Status responses answer the test directly.
 
+### The host permission gate
+
+For HIL builds, the ESP32 also asks Python for permission before moving to
+the next flight phase:
+
+```text
+Python: STATUS?
+ESP32:  [STATUS] phase=HOLD rtl=CLIMB gate=RTL
+Python: ALLOW:RTL
+ESP32:  moves to RTL
+```
+
+While waiting, both the navigation and physics loops pause their normal work.
+The main serial loop stays alive so it can receive the approval. This is why
+the firmware must not simply block inside `transitionTo()` while holding a
+mutex: the code that receives `ALLOW:RTL` would not get a chance to run.
+
+The Python runner automatically sends the approval when `STATUS?` reports a
+pending gate. The separate `[HIL_GATE]` log is only a human-readable hint; it
+is not required for approval. Without the `ALLOW:<phase>` message, the
+simulated firmware does not advance. This includes an emergency-stop request
+to enter `PARKED`; the HIL test intentionally gives Python control of every
+phase transition.
+
 ---
 
 ## 7. What “waiting for status” means

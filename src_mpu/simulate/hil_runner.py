@@ -106,7 +106,10 @@ _MOTOR_RE = _re.compile(
     r"\[MOTOR\] base=(?P<base>-?[\d.]+) roll=(?P<roll>-?[\d.]+) "
     r"pitch=(?P<pitch>-?[\d.]+)"
 )
-_STATUS_RE = _re.compile(r"\[STATUS\] phase=(?P<phase>[A-Z_]+) rtl=(?P<rtl>[A-Z]+)")
+_STATUS_RE = _re.compile(
+    r"\[STATUS\] phase=(?P<phase>[A-Z_]+) rtl=(?P<rtl>[A-Z]+) "
+    r"gate=(?P<gate>[A-Z_]+)"
+)
 
 def query_motor(timeout: float = 3.0):
     """Send MOTOR? and block for the matching [MOTOR] response line.
@@ -150,7 +153,11 @@ def query_status(timeout: float = 1.0):
             continue
         match = _STATUS_RE.search(line)
         if match:
-            return match.groupdict()
+            status = match.groupdict()
+            if status["gate"] != "NONE":
+                send(f"ALLOW:{status['gate']}")
+                print(f"[HIL] Approved phase transition to {status['gate']}", flush=True)
+            return status
     return None
 
 def wait_for_status(phase=None, rtl=None, timeout=10.0):
