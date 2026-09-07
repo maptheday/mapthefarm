@@ -9,10 +9,9 @@ Landing from 15 ft at 1.5 ft/s -> ~10s.
 """
 import time
 
-assert wait_for("[WEB] Server started.", timeout=30), "Firmware never booted"
 
 set_world(lat=36.123456, lon=-80.123456, fix=True, alt_ft=0.0, heading_deg=90.0)
-time.sleep(1.0)
+assert wait_for_gps_publish(), "GPS loop never published the initial fix"
 
 send("CRSFSTART:1")
 assert wait_for("[CRSF] START switch -- arming and taking off.", timeout=5), \

@@ -156,6 +156,7 @@ EspBarometer     barometer;
 TinyGPSPlus      gps;
 QMC5883LCompass  compass;
 
+#ifndef WOKWI_SIM
 AsyncWebServer    server(80);
 // SSE endpoint for live telemetry -- was never declared, so getGyroReadings()/
 // getAccReadings()/getFlightReadings() had no way to reach the frontend.
@@ -163,6 +164,7 @@ AsyncWebServer    server(80);
 // formatter function names -- verify against your frontend's EventSource
 // listener names (data/*.js) before relying on this.
 AsyncEventSource  events("/events");
+#endif
 
 // Forward declaration -- full definition is further down with computeMotorMix().
 // Needed here because the Arduino .ino converter hoists writeMotorMix()'s
@@ -1863,14 +1865,7 @@ void parseSimInput() {
   while (Serial.available()) {
     char c = Serial.read();
     if (c == '\n') {
-
-      buf.trim(); // Cleans up any invisible \r characters before checking
-      
-      // --- ADD THE PING LOGIC HERE ---
-      if (buf.startsWith("PING:")) {
-        Serial.println("READY");
-      }
-      else if (buf.startsWith("HDG:")) { 
+      if (buf.startsWith("HDG:")) { 
         withMutex([&]() { shared.raw.compassHeadingDeg = buf.substring(4).toFloat(); }); 
       }
       else if (buf.startsWith("LAT:")) {
@@ -1898,6 +1893,12 @@ void parseSimInput() {
       }
       else if (buf.startsWith("CRSFSTOP:")) {
         if (buf.substring(9).toInt() == 1) crsfHandleStop();
+      }
+      // HIL runner ping -- confirms firmware is alive and ready.
+      // Runner sends PING: after reconnecting; firmware echoes back
+      // [HIL] Ready so the runner knows setup() has completed.
+      else if (buf.startsWith("PING:")) {
+        logLine("[HIL] Ready.");
       }
       buf = "";
     } else if (c != '\r') { 
@@ -2046,9 +2047,13 @@ void setup() {
   // sees the port. 2s is enough for macOS to reconnect and open the port.
   delay(2000);
 #endif
+#ifndef WOKWI_SIM
   Wire.begin(16, 15);
-  
-  initWiFi(); 
+  initWiFi();
+#else
+  logLine("[WIFI] Sim mode — skipping WiFi, HIL runner talks over serial only.");
+#endif
+
 #ifndef WOKWI_SIM
   initLittleFS();
   initMPU();
@@ -2091,6 +2096,7 @@ void setup() {
   xTaskCreatePinnedToCore(crsfTask,       "CRSFTask",    4096, NULL, 1, NULL, 0);
 #endif
 
+#ifndef WOKWI_SIM
   server.on("/", HTTP_GET, [](AsyncWebServerRequest* r) { 
 #ifdef WOKWI_SIM
     r->send(200, "text/plain", "Wokwi simulation");
@@ -2205,6 +2211,7 @@ void setup() {
 
   server.begin();
   logLine("[WEB] Server started.");
+#endif
 }
 
 // ==========================================

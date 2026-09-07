@@ -55,34 +55,46 @@ Always `rm data/*.gz` before re-gzipping so stale compressed files don't get upl
 
 ----
 
-wokwi
-
-wokwi-cli init
 
 pio run                    # compile firmware
 
-cd simulate 
-wokwi-cli chip compile bme280.chip.c
+-------
 
-then 
+### Find the ESP32 serial port (macOS)
 
-cd ..
+Unplug and reconnect the ESP32, then list the serial devices:
 
-export WOKWI_CLI_TOKEN=wok_05I9anjYhSTdkgZSP5LgzSI6vmkhlQR4a0402da8
-wokwi-cli simulate         # simulate it
- need diagram.json
- and wokwi.toml
+```bash
+ls /dev/cu.*
+pio device list
+```
 
+Use the port that appears when the ESP32 is connected, usually a name such as
+`/dev/cu.usbmodem14201`. Prefer `/dev/cu.*` on macOS. If no ESP32 port appears,
+check the USB cable, board connection, and USB permissions.
 
+Set the port once in the shell so the upload and HIL commands use the same
+device. Replace the example value whenever macOS assigns a different port:
 
- -------
+```bash
+export ESP_PORT=/dev/cu.usbmodem14201
 
+pio run -e wokwi_sim --target clean
+pio run -e wokwi_sim --target upload --upload-port "$ESP_PORT"
 
- export WOKWI_CLI_TOKEN=wok_05I9anjYhSTdkgZSP5LgzSI6vmkhlQR4a0402da8
+python3 simulate/hil_runner.py \
+  --port "$ESP_PORT" \
+  --scenario simulate/scenarios/edge_geofence_breach.py
+```
 
- pio run -e esp32dev      # real hardware, compass/GPS/barometer talk to real chips
-pio run -e wokwi_sim      # sim build, #ifdef WOKWI_SIM blocks are active
+The `wokwi_sim` environment has a default port in `platformio.ini`, but the
+`--upload-port` option above overrides it when the port changes. To inspect the
+current default, run:
 
- wokwi-cli simulate --scenario scenarios/wind_gust.yaml --timeout 60000 | tee simulate/logs/wind_gust_$(date +%Y%m%d_%H%M%S).log
+```bash
+grep -E '^(monitor_port|upload_port)' platformio.ini
+```
 
- wokwi-cli simulate --scenario scenarios/gps_compass_test.yaml --timeout 60000 | tee simulate/logs/gps_compass_$(date +%Y%m%d_%H%M%S).log
+HIL tests do not build or flash the firmware. If the runner connects but fails
+before takeoff, upload the current `wokwi_sim` firmware first, then rerun the
+scenario. A failed upload can leave an older firmware image on the board.

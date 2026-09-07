@@ -3,15 +3,12 @@
 Hardware-in-the-Loop (HIL) test runner for Map The Farm drone firmware.
 
 Connects to the real ESP32 over USB serial and runs continuous sensor loops
-in background threads — barometer at ~10 Hz, GPS at ~1 Hz, compass at ~10 Hz.
-Scenario scripts mutate a shared world-state dict and the sensor threads read
-from it on every tick.
+in background threads -- barometer at ~10 Hz, GPS at ~1 Hz, compass at ~10 Hz.
+Scenario scripts mutate a shared world-state dict and the sensor threads do
+the rest. No Wokwi, no YAML, no race conditions.
 
 Usage:
-    python3 hil_runner.py --port /dev/tty.usbmodem14101 --scenario scenarios/full_flight_test.py
     python3 hil_runner.py --port /dev/tty.usbmodem14101 --scenario scenarios/edge_geofence_breach.py
-    python3 hil_runner.py --port /dev/tty.usbmodem14101 --scenario scenarios/edge_gps_permanent_loss.py
-    python3 hil_runner.py --port /dev/tty.usbmodem14101 --scenario scenarios/edge_max_flight_timeout.py
 
 The firmware must be built with WOKWI_SIM defined:
     pio run -e wokwi_sim --target upload
@@ -29,8 +26,6 @@ import serial
 
 # ---------------------------------------------------------------------------
 # Shared world state
-# Every sensor thread reads from this dict on each tick. Scenario scripts
-# write to it to simulate moving the drone, losing GPS, etc.
 # ---------------------------------------------------------------------------
 world = {
     "alt_ft":      0.0,
@@ -43,19 +38,18 @@ world_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
-# Serial connection (shared by all threads; writes are serialised by a lock)
+# Serial connection
 # ---------------------------------------------------------------------------
 ser = None
 serial_write_lock = threading.Lock()
 
 def send(line: str):
-    """Write one newline-terminated command to the firmware."""
     with serial_write_lock:
         ser.write((line + "\n").encode())
 
 
 # ---------------------------------------------------------------------------
-# Log capture thread
+# Log capture
 # ---------------------------------------------------------------------------
 log_queue: queue.Queue = queue.Queue()
 log_lines: list = []
@@ -79,32 +73,23 @@ def _log_reader():
             break
 
 def wait_for(substring: str, timeout: float = 60.0) -> bool:
-    """Block until a firmware log line containing `substring` appears."""
-    print(f"[HIL] wait_for: {substring!r}", flush=True)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         remaining = deadline - time.monotonic()
         try:
             line = log_queue.get(timeout=min(remaining, 0.5))
-            print(f"[HIL] got line: {line!r}", flush=True)
             if substring in line:
                 return True
         except queue.Empty:
             pass
-    print(f"[HIL] wait_for TIMED OUT: {substring!r}", flush=True)
     return False
 
 def forbid(substring: str):
-    """
-    Assert that `substring` never appeared anywhere in the log.
-    Call this at the end of a scenario for whole-run FORBID checks.
-    """
     with log_lock:
         hits = [l for l in log_lines if substring in l]
     assert not hits, f"FORBID violated: '{substring}' found in log: {hits[0]!r}"
 
 def forbid_count_gt_1(substring: str):
-    """Assert that `substring` appeared at most once in the full log."""
     with log_lock:
         count = sum(1 for l in log_lines if substring in l)
     assert count <= 1, f"FORBID_COUNT_GT_1 violated: '{substring}' appeared {count} times"
@@ -121,7 +106,11 @@ def _barometer_loop(interval_s: float = 0.1):
         send(f"ALT:{alt:.2f}")
         time.sleep(interval_s)
 
+gps_tick = 0
+gps_tick_cond = threading.Condition()
+
 def _gps_loop(interval_s: float = 1.0):
+    global gps_tick
     while True:
         with world_lock:
             lat = world["lat"]
@@ -131,7 +120,29 @@ def _gps_loop(interval_s: float = 1.0):
         if fix:
             send(f"LAT:{lat:.6f}")
             send(f"LON:{lon:.6f}")
+        with gps_tick_cond:
+            gps_tick += 1
+            gps_tick_cond.notify_all()
         time.sleep(interval_s)
+
+def wait_for_gps_publish(n: int = 2, timeout: float = 5.0) -> bool:
+    """Block until the GPS loop has published at least `n` more times.
+
+    Scenarios call this after set_world(lat=..., lon=...) instead of
+    sleeping a guessed duration. n=2 covers the race where set_world()
+    lands between the loop's world read and its next publish -- the
+    first tick may still send the old position, the second is
+    guaranteed to see the update.
+    """
+    deadline = time.monotonic() + timeout
+    with gps_tick_cond:
+        target = gps_tick + n
+        while gps_tick < target:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            gps_tick_cond.wait(remaining)
+    return True
 
 def _compass_loop(interval_s: float = 0.1):
     while True:
@@ -142,11 +153,10 @@ def _compass_loop(interval_s: float = 0.1):
 
 
 # ---------------------------------------------------------------------------
-# Convenience helpers for scenario scripts
+# Convenience helpers
 # ---------------------------------------------------------------------------
 
 def set_world(**kwargs):
-    """Update one or more world-state values atomically."""
     with world_lock:
         world.update(kwargs)
 
@@ -176,71 +186,50 @@ def main():
 
     global ser
 
-    # ESP32-S3 native USB CDC re-enumeration:
-    # Opening the port resets the board. The board drops off USB,
-    # reboots, then comes back on the same port name. We poll until
-    # the port is actually readable again, then start the log reader.
-    print(f"[HIL] Opening {args.port} to trigger reset...")
-    try:
-        trigger = serial.Serial(args.port, args.baud, timeout=0.1)
-        time.sleep(0.5)
-        trigger.close()
-    except Exception:
-        pass
+    # Open the port once and keep it open -- same pattern that works in
+    # pio device monitor. Opening triggers a board reset on ESP32-S3.
+    # We start reading immediately and ping until the firmware responds.
+    print(f"[HIL] Opening {args.port}...")
+    ser = serial.Serial(args.port, args.baud, timeout=1.0)
 
-    # Poll until the port comes back
-    print("[HIL] Waiting for board to re-enumerate...")
-    ser = None
-    deadline = time.monotonic() + 15.0
-    while time.monotonic() < deadline:
-        try:
-            ser = serial.Serial(args.port, args.baud, timeout=1.0)
-            print(f"[HIL] Port back up. Starting log reader.")
-            break
-        except Exception:
-            time.sleep(0.25)
-
-    if ser is None:
-        print("[HIL] Board never came back on port — is it plugged in?")
-        sys.exit(1)
-
-    # Log reader starts the moment the port is readable
-    threading.Thread(target=_log_reader, daemon=True).start()
-
-    # 2. Perform the PING/READY handshake to guarantee firmware is ready
-    print("[HIL] Handshaking with firmware (sending PING:)...")
-    ping_success = False
-    deadline = time.monotonic() + 10.0
-    while time.monotonic() < deadline:
-        send("PING:")
-        if wait_for("READY", timeout=1.0):
-            ping_success = True
-            print("[HIL] Board responded with READY! Handshake complete.")
-            break
-        time.sleep(0.5)
-
-    if not ping_success:
-        print("[HIL] ERROR: Board failed to respond to PING: within 10 seconds.")
-        sys.exit(1)
-        
+    threading.Thread(target=_log_reader,     daemon=True).start()
     threading.Thread(target=_barometer_loop, daemon=True).start()
     threading.Thread(target=_gps_loop,       daemon=True).start()
     threading.Thread(target=_compass_loop,   daemon=True).start()
 
-    print(f"[HIL] Loading scenario: {args.scenario}")
+    # Ping until firmware responds -- covers the board reset + WiFi connect time
+    print("[HIL] Waiting for firmware (PING handshake)...")
+    ready = False
+    for _ in range(40):
+        send("PING:")
+        try:
+            line = log_queue.get(timeout=0.5)
+            if "[HIL] Ready." in line:
+                ready = True
+                break
+            log_queue.put(line)
+        except queue.Empty:
+            pass
+
+    if not ready:
+        print("[HIL] No PING response -- check port and that WOKWI_SIM firmware is flashed.")
+        sys.exit(1)
+
+    print(f"[HIL] Firmware ready. Loading scenario: {args.scenario}")
 
     spec = importlib.util.spec_from_file_location("scenario", args.scenario)
     mod  = importlib.util.module_from_spec(spec)
 
-    mod.world          = world
-    mod.world_lock     = world_lock
-    mod.log_lines      = log_lines
-    mod.log_lock       = log_lock
-    mod.set_world      = set_world
-    mod.wait_for       = wait_for
-    mod.forbid         = forbid
+    mod.world             = world
+    mod.world_lock        = world_lock
+    mod.log_lines         = log_lines
+    mod.log_lock          = log_lock
+    mod.set_world         = set_world
+    mod.wait_for          = wait_for
+    mod.wait_for_gps_publish = wait_for_gps_publish
+    mod.forbid            = forbid
     mod.forbid_count_gt_1 = forbid_count_gt_1
-    mod.send           = send
+    mod.send              = send
     mod.arm_and_takeoff   = arm_and_takeoff
     mod.start_mission     = start_mission
     mod.emergency_stop    = emergency_stop

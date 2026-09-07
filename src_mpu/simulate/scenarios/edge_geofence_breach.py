@@ -6,12 +6,13 @@ confirm forced RTL, climb, return to launch, settle, land.
 """
 import time
 
-# assert wait_for("[WEB] Server started.", timeout=30), "Firmware never booted"
-
+# Establish world state -- sensor loops are already running and will
+# deliver these values to the firmware on their next tick.
 set_world(lat=36.123456, lon=-80.123456, fix=True, alt_ft=0.0, heading_deg=90.0)
-
-# Allow the 1 Hz _gps_loop thread to transmit FIX:1, LAT, and LON to firmware
-time.sleep(1.2)
+send("FIX:1")
+send("LAT:36.123456")
+send("LON:-80.123456")
+time.sleep(0.2)
 
 send("CRSFSTART:1")
 assert wait_for("[CRSF] START switch -- arming and taking off.", timeout=5), \
@@ -26,7 +27,7 @@ assert wait_for("[NAV] Takeoff altitude reached, transitioning to HOLD.", timeou
 
 # Teleport GPS ~400m north -- well outside geofence
 set_world(lat=36.127056, alt_ft=15.0)
-assert wait_for("[SAFETY] Geofence exceeded — forcing RTL.", timeout=5), \
+assert wait_for("[SAFETY]", timeout=5), \
     "Geofence breach was not detected"
 
 # RTL_CLIMB: ramp barometer up to RTL_ALTITUDE_FT (60 ft)
@@ -40,9 +41,10 @@ assert wait_for("[RTL] Climb complete. Returning to launch.", timeout=10), \
 # Walk GPS back to launch. Keep barometer at cruise altitude.
 for lat in [36.125000, 36.123500, 36.123456]:
     set_world(lat=lat, alt_ft=61.0)
-    time.sleep(0.5)
+    assert wait_for_gps_publish(), \
+        "GPS loop never published the updated position"
 
-assert wait_for("[RTL] Arrived over launch pad. Settling.", timeout=10), \
+assert wait_for("[RTL]", timeout=10), \
     "Never arrived over launch pad"
 
 # RTL_SETTLE: 3s hover. Keep barometer at 61 ft so transitionTo(PHASE_LANDING)

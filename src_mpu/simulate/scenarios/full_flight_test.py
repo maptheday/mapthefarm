@@ -6,7 +6,6 @@ re-arm, full 4-waypoint mission, hover settle, auto-land.
 """
 import time
 
-assert wait_for("[WEB] Server started.", timeout=30), "Firmware never booted"
 
 # ── START ignored: no GPS fix yet ────────────────────────────────────────
 send("CRSFSTART:1")
@@ -15,7 +14,7 @@ assert wait_for("[CRSF] START ignored -- no GPS fix.", timeout=5), \
 
 # ── Establish initial position ───────────────────────────────────────────
 set_world(lat=36.123456, lon=-80.123456, fix=True, alt_ft=0.0, heading_deg=90.0)
-time.sleep(1.0)
+assert wait_for_gps_publish(), "GPS loop never published the initial fix"
 
 # ── Arm + takeoff ────────────────────────────────────────────────────────
 send("CRSFSTART:1")
@@ -47,7 +46,7 @@ assert wait_for("[NAV] Reached waypoint 0 — advancing.", timeout=10), \
 
 # ── Move partway into WP0->WP1 then e-stop ──────────────────────────────
 set_world(lat=36.123530, alt_ft=30.0)
-time.sleep(0.8)
+assert wait_for_gps_publish(), "GPS loop never published the updated position"
 send("CRSFSTOP:1")
 assert wait_for("[CRSF] STOP switch -- emergency stop.", timeout=5), \
     "E-stop did not fire"
@@ -57,7 +56,7 @@ forbid_count_gt_1("[NAV] Mission complete — hovering before landing.")
 
 # ── Re-arm from PARKED ───────────────────────────────────────────────────
 set_world(lat=36.123456, alt_ft=0.0, fix=True)
-time.sleep(1.0)
+assert wait_for_gps_publish(), "GPS loop never published the updated position"
 
 send("CRSFSTART:1")
 assert wait_for("[CRSF] START switch -- arming and taking off.", timeout=5), \
@@ -84,24 +83,24 @@ assert wait_for("[NAV] Reached waypoint 0 — advancing.", timeout=10), \
 # ── Leg WP0 -> WP1 ──────────────────────────────────────────────────────
 for lat in [36.123530, 36.123610]:
     set_world(lat=lat, alt_ft=30.0)
-    time.sleep(1.5)
+    assert wait_for_gps_publish(), "GPS loop never published the updated position"
 
 # Wind gust: on real hardware, physically shake the board here.
 # In HIL the IMU is live so any real disturbance will be felt by the firmware.
 time.sleep(3.0)
 
 set_world(lat=36.123690, alt_ft=30.0)
-time.sleep(1.5)
+assert wait_for_gps_publish(), "GPS loop never published the updated position"
 
 # Temporary GPS loss + recovery
 set_world(fix=False, alt_ft=30.0)
-time.sleep(1.5)
+assert wait_for_gps_publish(), "GPS loop never published the fix-lost state"
 set_world(fix=True, alt_ft=30.0)
-time.sleep(1.0)
+assert wait_for_gps_publish(), "GPS loop never published the recovered fix"
 
 for lat in [36.123760, 36.123789]:
     set_world(lat=lat, alt_ft=30.0)
-    time.sleep(1.5)
+    assert wait_for_gps_publish(), "GPS loop never published the updated position"
 
 assert wait_for("[NAV] Reached waypoint 1 — advancing.", timeout=15), \
     "Never reached WP1"
@@ -109,7 +108,7 @@ assert wait_for("[NAV] Reached waypoint 1 — advancing.", timeout=15), \
 # ── Leg WP1 -> WP2 ──────────────────────────────────────────────────────
 for lon in [-80.123530, -80.123610, -80.123690, -80.123760, -80.123789]:
     set_world(lon=lon, alt_ft=30.0)
-    time.sleep(1.5)
+    assert wait_for_gps_publish(), "GPS loop never published the updated position"
 
 assert wait_for("[NAV] Reached waypoint 2 — advancing.", timeout=15), \
     "Never reached WP2"
@@ -117,7 +116,7 @@ assert wait_for("[NAV] Reached waypoint 2 — advancing.", timeout=15), \
 # ── Leg WP2 -> WP3 ──────────────────────────────────────────────────────
 for lat in [36.123710, 36.123630, 36.123550, 36.123480, 36.123456]:
     set_world(lat=lat, alt_ft=30.0)
-    time.sleep(1.5)
+    assert wait_for_gps_publish(), "GPS loop never published the updated position"
 
 assert wait_for("[NAV] Reached waypoint 3 — advancing.", timeout=15), \
     "Never reached WP3"
