@@ -1,0 +1,156 @@
+Run log: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/hil_20260907_192319_XXXXXX.log
+Auto-discovered ESP32 port: /dev/cu.usbmodem14201
+== Uploading WOKWI_SIM firmware to /dev/cu.usbmodem14201 ==
+Processing wokwi_sim (platform: espressif32; board: esp32-s3-devkitc-1-n16r8; framework: arduino)
+--------------------------------------------------------------------------------
+Verbose mode can be enabled via `-v, --verbose` option
+CONFIGURATION: https://docs.platformio.org/page/boards/espressif32/esp32-s3-devkitc-1-n16r8.html
+PLATFORM: Espressif 32 (7.0.1) > Espressif ESP32-S3-DevKitC-1-N16R8 (16 MB, 8 MB PSRAM)
+HARDWARE: ESP32S3 240MHz, 320KB RAM, 16MB Flash
+DEBUG: Current (esp-builtin) On-board (esp-builtin) External (cmsis-dap, esp-bridge, esp-prog, iot-bus-jtag, jlink, minimodule, olimex-arm-usb-ocd, olimex-arm-usb-ocd-h, olimex-arm-usb-tiny-h, olimex-jtag-tiny, tumpa)
+PACKAGES: 
+ - framework-arduinoespressif32 @ 3.20017.241212+sha.dcc1105b 
+ - tool-esptoolpy @ 2.41100.0 (4.11.0) 
+ - tool-mkfatfs @ 2.0.1 
+ - tool-mklittlefs @ 1.203.210628 (2.3) 
+ - tool-mkspiffs @ 2.230.0 (2.30) 
+ - tool-openocd-esp32 @ 2.1100.20220706 (11.0) 
+ - toolchain-riscv32-esp @ 8.4.0+2021r2-patch5 
+ - toolchain-xtensa-esp32s3 @ 8.4.0+2021r2-patch5
+Converting ESP32_MPU_6050_Web_Server.ino
+LDF: Library Dependency Finder -> https://bit.ly/configure-pio-ldf
+LDF Modes: Finder ~ chain, Compatibility ~ soft
+Found 45 compatible libraries
+Scanning dependencies...
+Dependency Graph
+|-- AsyncTCP @ 3.5.0
+|-- ESPAsyncWebServer @ 3.12.0
+|-- Adafruit MPU6050 @ 2.2.9
+|-- Adafruit Unified Sensor @ 1.1.15
+|-- ArduinoJson @ 7.4.3
+|-- Madgwick @ 1.2.0
+|-- Adafruit BME280 Library @ 2.3.0
+|-- TinyGPSPlus @ 1.1.0
+|-- QMC5883LCompass @ 1.2.3
+|-- LittleFS @ 2.0.0
+|-- Preferences @ 2.0.0
+|-- WiFi @ 2.0.0
+|-- Wire @ 2.0.0
+Building in release mode
+Compiling .pio/build/wokwi_sim/src/ESP32_MPU_6050_Web_Server.ino.cpp.o
+Retrieving maximum program size .pio/build/wokwi_sim/firmware.elf
+Checking size .pio/build/wokwi_sim/firmware.elf
+Advanced Memory Usage is available via "PlatformIO Home > Project Inspect"
+RAM:   [=         ]   6.5% (used 21228 bytes from 327680 bytes)
+Flash: [=         ]   5.6% (used 364065 bytes from 6553600 bytes)
+Configuring upload protocol...
+AVAILABLE: cmsis-dap, esp-bridge, esp-builtin, esp-prog, espota, esptool, iot-bus-jtag, jlink, minimodule, olimex-arm-usb-ocd, olimex-arm-usb-ocd-h, olimex-arm-usb-tiny-h, olimex-jtag-tiny, tumpa
+CURRENT: upload_protocol = esptool
+Looking for upload port...
+Using manually specified: /dev/cu.usbmodem14201
+Uploading .pio/build/wokwi_sim/firmware.bin
+esptool.py v4.11.0
+Serial port /dev/cu.usbmodem14201
+Connecting...
+Chip is ESP32-S3 (QFN56) (revision v0.2)
+Features: WiFi, BLE, Embedded PSRAM 8MB (AP_3v3)
+Crystal is 40MHz
+USB mode: USB-Serial/JTAG
+MAC: e0:72:a1:db:c6:20
+Uploading stub...
+Running stub...
+Stub running...
+Changing baud rate to 460800
+Changed.
+Configuring flash size...
+Flash will be erased from 0x00000000 to 0x00003fff...
+Flash will be erased from 0x00008000 to 0x00008fff...
+Flash will be erased from 0x0000e000 to 0x0000ffff...
+Flash will be erased from 0x00010000 to 0x00068fff...
+SHA digest in image updated
+Compressed 15104 bytes to 10429...
+Writing at 0x00000000... (100 %)
+Wrote 15104 bytes (10429 compressed) at 0x00000000 in 0.2 seconds (effective 699.3 kbit/s)...
+Hash of data verified.
+Compressed 3072 bytes to 146...
+Writing at 0x00008000... (100 %)
+Wrote 3072 bytes (146 compressed) at 0x00008000 in 0.0 seconds (effective 837.9 kbit/s)...
+Hash of data verified.
+Compressed 8192 bytes to 47...
+Writing at 0x0000e000... (100 %)
+Wrote 8192 bytes (47 compressed) at 0x0000e000 in 0.1 seconds (effective 995.1 kbit/s)...
+Hash of data verified.
+Compressed 364432 bytes to 206671...
+Writing at 0x00010000... (7 %)
+Writing at 0x0001b9ce... (15 %)
+Writing at 0x0002872d... (23 %)
+Writing at 0x0002dba5... (30 %)
+Writing at 0x000338ad... (38 %)
+Writing at 0x000393c5... (46 %)
+Writing at 0x0003ef35... (53 %)
+Writing at 0x000445fb... (61 %)
+Writing at 0x0004996f... (69 %)
+Writing at 0x0004f3c3... (76 %)
+Writing at 0x00054a1a... (84 %)
+Writing at 0x0005d1d4... (92 %)
+Writing at 0x000654ae... (100 %)
+Wrote 364432 bytes (206671 compressed) at 0x00010000 in 2.3 seconds (effective 1281.8 kbit/s)...
+Hash of data verified.
+
+Leaving...
+Hard resetting via RTS pin...
+========================= [SUCCESS] Took 9.75 seconds =========================
+
+Environment    Status    Duration
+-------------  --------  ------------
+wokwi_sim      SUCCESS   00:00:09.749
+========================= 1 succeeded in 00:00:09.749 =========================
+== Running HIL scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/edge_geofence_breach.py ==
+[HIL] Opening /dev/cu.usbmodem14201...
+[HIL] Waiting for firmware (PING handshake)...
+[FW] '[WIFI] Sim mode — skipping WiFi, HIL runner talks over serial only.'
+[FW] '[BARO] Sim mode -- barometer driven by HIL runner (ALT: commands).'
+[FW] '[HIL] Ready.'
+[HIL] Firmware ready. Loading scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/edge_geofence_breach.py
+[FW] '[HIL] Ready.'
+[FW] '[HIL] Ready.'
+[FW] '[CRSF] START switch -- arming and taking off.'
+[FW] '[HIL_GATE] request=RAISE'
+[STATE] Drone is on the ground and ready. RTL sub-state: CLIMB (standby; RTL is not active). Gate: waiting for approval to enter RAISE.
+[HIL] Approved phase transition to RAISE
+[FW] '[HIL_GATE] approved=RAISE'
+[STATE] Drone is climbing to takeoff altitude. RTL sub-state: CLIMB (standby; RTL is not active). Gate: no approval pending.
+[FW] '[NAV] Takeoff altitude reached, transitioning to HOLD.'
+[FW] '[HIL_GATE] request=HOLD'
+[STATE] Drone is climbing to takeoff altitude. RTL sub-state: CLIMB (standby; RTL is not active). Gate: waiting for approval to enter HOLD.
+[HIL] Approved phase transition to HOLD
+[FW] '[HIL_GATE] approved=HOLD'
+[STATE] Drone is hovering in place. RTL sub-state: CLIMB (standby; RTL is not active). Gate: no approval pending.
+[FW] '[SAFETY] Geofence exceeded — forcing RTL.'
+[FW] '[HIL_GATE] request=RTL'
+[STATE] Drone is hovering in place. RTL sub-state: CLIMB (standby; RTL is not active). Gate: waiting for approval to enter RTL.
+[HIL] Approved phase transition to RTL
+[FW] '[HIL_GATE] approved=RTL'
+[STATE] Drone is returning to the launch point. RTL sub-state: CLIMB (climbing to RTL altitude). Gate: no approval pending.
+[FW] '[MOTOR] base=1.00 roll=0.000 pitch=0.000'
+[FW] '[RTL] Climb complete. Returning to launch.'
+[STATE] Drone is returning to the launch point. RTL sub-state: RETURN (flying toward the launch point). Gate: no approval pending.
+[FW] '[MOTOR] base=0.46 roll=-0.000 pitch=-0.154'
+[FW] '[MOTOR] base=0.45 roll=-0.000 pitch=-0.171'
+[FW] '[MOTOR] base=0.43 roll=-0.000 pitch=-0.038'
+[FW] '[MOTOR] base=0.41 roll=-0.000 pitch=-0.038'
+[STATE] Drone is returning to the launch point. RTL sub-state: SETTLE (settling over the launch point). Gate: no approval pending.
+[FW] '[RTL] Settle complete. Beginning landing.'
+[FW] '[HIL_GATE] request=LANDING'
+[STATE] Drone is returning to the launch point. RTL sub-state: SETTLE (settling over the launch point). Gate: waiting for approval to enter LANDING.
+[HIL] Approved phase transition to LANDING
+[FW] '[HIL_GATE] approved=LANDING'
+[STATE] Drone is descending to land. RTL sub-state: SETTLE (standby; RTL is not active). Gate: no approval pending.
+[FW] '[HIL_GATE] request=LANDED'
+[FW] '[NAV] Landed — motors disarmed.'
+[STATE] Drone is descending to land. RTL sub-state: SETTLE (standby; RTL is not active). Gate: waiting for approval to enter LANDED.
+[HIL] Approved phase transition to LANDED
+[FW] '[HIL_GATE] approved=LANDED'
+[STATE] Drone is on the ground with motors disarmed. RTL sub-state: SETTLE (standby; RTL is not active). Gate: no approval pending.
+
+RESULT: PASS

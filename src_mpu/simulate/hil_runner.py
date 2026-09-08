@@ -55,19 +55,82 @@ log_queue: queue.Queue = queue.Queue()
 log_lines: list = []
 log_lock  = threading.Lock()
 
+
+def _complete_lines(rx_buffer: bytearray, raw: bytes):
+    """Append raw serial bytes and return only complete newline-delimited lines."""
+    rx_buffer.extend(raw)
+    lines = []
+    while b"\n" in rx_buffer:
+        raw_line, _, remainder = rx_buffer.partition(b"\n")
+        rx_buffer[:] = remainder
+        line = raw_line.decode("utf-8", errors="replace").rstrip("\r")
+        if line:
+            lines.append(line)
+    return lines
+
+
+_PHASE_DESCRIPTIONS = {
+    "PARKED": "on the ground and ready",
+    "RAISE": "climbing to takeoff altitude",
+    "HOLD": "hovering in place",
+    "MISSION": "following the mission route",
+    "RTL": "returning to the launch point",
+    "HOVER_SETTLE": "hovering over the launch point before landing",
+    "LANDING": "descending to land",
+    "LANDED": "on the ground with motors disarmed",
+}
+
+_RTL_DESCRIPTIONS = {
+    "CLIMB": "climbing to RTL altitude",
+    "RETURN": "flying toward the launch point",
+    "SETTLE": "settling over the launch point",
+}
+
+
+def _friendly_status(line: str):
+    """Turn a machine-readable status response into a human-readable display."""
+    match = _STATUS_RE.search(line)
+    if not match:
+        return None
+
+    status = match.groupdict()
+    phase = status["phase"]
+    rtl = status["rtl"]
+    gate = status["gate"]
+    phase_description = _PHASE_DESCRIPTIONS.get(phase, "in an unknown phase")
+    if phase == "RTL":
+        phase_description += f"; RTL {_RTL_DESCRIPTIONS.get(rtl, 'has an unknown sub-state')}"
+
+    if gate == "NONE":
+        gate_description = "no approval pending"
+    else:
+        gate_description = f"waiting for approval to enter {gate}"
+
+    return f"[STATE] Drone is {phase_description}. Gate: {gate_description}."
+
 def _log_reader():
+    rx_buffer = bytearray()
+    last_display = None
     while True:
         try:
-            raw = ser.readline()
+            # USB CDC is a byte stream. Keep partial data until its newline
+            # arrives instead of treating a serial timeout as end-of-line.
+            raw = ser.read(ser.in_waiting or 1)
             if not raw:
                 continue
-            line = raw.decode("utf-8", errors="replace").rstrip()
-            if not line:
-                continue
-            with log_lock:
-                log_lines.append(line)
-            log_queue.put(line)
-            print(f"[FW] {line!r}", flush=True)
+            for line in _complete_lines(rx_buffer, raw):
+                with log_lock:
+                    log_lines.append(line)
+                log_queue.put(line)
+                display = _friendly_status(line)
+                if display is not None:
+                    if display == last_display:
+                        continue
+                    last_display = display
+                    print(display, flush=True)
+                else:
+                    last_display = None
+                    print(f"[FW] {line!r}", flush=True)
         except Exception as e:
             print(f"[HIL] Log reader error: {e}", flush=True)
             break
@@ -286,7 +349,6 @@ def main():
             if "[HIL] Ready." in line:
                 ready = True
                 break
-            log_queue.put(line)
         except queue.Empty:
             pass
 

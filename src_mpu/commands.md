@@ -98,3 +98,11 @@ grep -E '^(monitor_port|upload_port)' platformio.ini
 HIL tests do not build or flash the firmware. If the runner connects but fails
 before takeoff, upload the current `wokwi_sim` firmware first, then rerun the
 scenario. A failed upload can leave an older firmware image on the board.
+
+
+
+-----
+
+now just
+
+./simulate/run_hil.sh

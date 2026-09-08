@@ -6,13 +6,9 @@ confirm forced RTL, climb, return to launch, settle, land.
 """
 import time
 
-# Establish world state -- sensor loops are already running and will
-# deliver these values to the firmware on their next tick.
+# Establish world state and wait until the GPS loop has delivered the fix.
 set_world(lat=36.123456, lon=-80.123456, fix=True, alt_ft=0.0, heading_deg=90.0)
-send("FIX:1")
-send("LAT:36.123456")
-send("LON:-80.123456")
-time.sleep(0.2)
+assert wait_for_gps_publish(), "GPS loop never published the initial fix"
 
 send("CRSFSTART:1")
 assert wait_for("[CRSF] START switch -- arming and taking off.", timeout=5), \

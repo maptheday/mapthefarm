@@ -21,7 +21,7 @@ for alt in [3, 6, 10, 13, 15]:
     set_world(alt_ft=float(alt))
     time.sleep(1.0)
 
-assert wait_for("[NAV] Takeoff altitude reached, transitioning to HOLD.", timeout=10), \
+assert wait_for_status(phase="HOLD", timeout=10), \
     "Never reached takeoff altitude"
 
 # Kill GPS fix, never restore. Keep barometer and compass honest.
@@ -29,13 +29,15 @@ set_world(fix=False, alt_ft=15.0)
 
 assert wait_for("[SAFETY] GPS fix lost — aborting directly to LANDING.", timeout=8), \
     "GPS loss was not detected within timeout"
+assert wait_for_status(phase="LANDING", timeout=8), \
+    "GPS loss did not transition to LANDING"
 
 # Landing from 15 ft at 1.5 ft/s -> ~10s
 for alt in [12, 9, 6, 3, 0]:
     set_world(alt_ft=float(alt))
     time.sleep(2.0)
 
-assert wait_for("[NAV] Landed — motors disarmed.", timeout=15), \
+assert wait_for_status(phase="LANDED", timeout=15), \
     "Never landed"
 
 # ── Whole-run FORBID checks ──────────────────────────────────────────────
