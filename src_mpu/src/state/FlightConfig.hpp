@@ -6,9 +6,9 @@ const unsigned long PHYSICS_LOOP_MS = 5;
 const float         PHYSICS_LOOP_HZ = 1000.0f / PHYSICS_LOOP_MS;
 const unsigned long NAV_LOOP_MS     = 100;
 
-const unsigned long SSE_GYRO_MS     = 10;
-const unsigned long SSE_ACC_MS      = 200;
-const unsigned long SSE_FLIGHT_MS   = 100;
+// Compass calibration: run it on boot? and how long to collect samples.
+const bool          CALIBRATE_COMPASS_ON_BOOT = false;
+const unsigned long COMPASS_CAL_DURATION_MS   = 30000;
 
 #ifdef WOKWI_SIM
 const unsigned long MAX_FLIGHT_TIME_MS = 60UL * 1000UL;
@@ -39,6 +39,11 @@ const float WAYPOINT_ACCEPT_RADIUS_M = 5.0f;
 const unsigned long MISSION_COMPLETE_HOVER_MS = 10000;
 const float LAND_DESCENT_RATE_FPS = 1.5f;
 const float RAISE_CLIMB_RATE_FPS = 3.0f;
+
+// GPS (BN-880) serial wiring.
+#define GPS_RX_PIN 17
+#define GPS_TX_PIN 18
+#define GPS_BAUD   9600
 
 // CRSF / ELRS radio input configuration.
 #define CRSF_RX_PIN         8

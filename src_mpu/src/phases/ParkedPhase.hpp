@@ -5,9 +5,9 @@
 // This is the safe resting state and the emergency-stop destination.
 // ============================================================================
 
-#include "../IFlightPhase.hpp"
-#include "../PhaseState.hpp"
-#include "../FlightRuntime.hpp"
+#include "IFlightPhase.hpp"
+#include "../state/PhaseState.hpp"
+#include "FlightRuntime.hpp"
 
 class ParkedPhase : public IFlightPhase {
 public:
@@ -29,7 +29,7 @@ public:
     motorController.reset();
     // Disarm every tick so an e-stop never relies on an ESC-side timeout.
     // DShot has no PWM "min throttle" -- disarm() sends the real stop command.
-    disarmAllMotors();
+    motors.disarmAll();
   }
 
   void writeTelemetry(JsonDocument& doc) override {

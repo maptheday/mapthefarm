@@ -20,7 +20,7 @@
 // ============================================================================
 
 #include <ArduinoJson.h>
-#include "FlightModel.hpp"
+#include "../models/FlightModel.hpp"
 
 // Everything a phase needs to set itself up on entry. transitionTo() fills this
 // in ONCE (including carrying the arm-time and launch point forward from the

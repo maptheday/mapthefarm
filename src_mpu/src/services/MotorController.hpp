@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ControlTypes.hpp"
+#include "../models/ControlTypes.hpp"
 #include "PID.hpp"
 
 // Control service: converts targets and measurements into motor commands.

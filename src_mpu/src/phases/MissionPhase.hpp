@@ -6,9 +6,9 @@
 // close enough. After the last waypoint, go to HOVER_SETTLE.
 // ============================================================================
 
-#include "../IFlightPhase.hpp"
-#include "../PhaseState.hpp"
-#include "../FlightRuntime.hpp"
+#include "IFlightPhase.hpp"
+#include "../state/PhaseState.hpp"
+#include "FlightRuntime.hpp"
 
 class MissionPhase : public IFlightPhase {
 public:
@@ -106,7 +106,7 @@ public:
       c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
       r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, r.imu.gyroZ, dt);
 
-    writeMotorMix(mix);
+    motors.writeMix(mix);
 
     withMutex([&]() {
       shared.dashboard_mission.m1              = mix.m1;

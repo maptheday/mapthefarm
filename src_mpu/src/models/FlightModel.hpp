@@ -11,7 +11,10 @@ enum FlightPhase {
   PHASE_RTL,
   PHASE_HOVER_SETTLE,
   PHASE_LANDING,
-  PHASE_LANDED
+  PHASE_LANDED,
+  PHASE_CALIBRATE   // ground maintenance: sensor calibration (motors off)
+  // NOTE: new phases go at the END -- the registry table in PhaseRegistry.hpp
+  // is indexed by this enum's order.
 };
 
 enum TransitionReason {
@@ -25,7 +28,8 @@ enum TransitionReason {
   REASON_RTL_COMPLETE,
   REASON_HOVER_COMPLETE,
   REASON_TOUCHDOWN,
-  REASON_EMERGENCY_STOP
+  REASON_EMERGENCY_STOP,
+  REASON_CALIBRATION_COMPLETE
 };
 
 inline const char* phaseName(FlightPhase phase) {
@@ -38,12 +42,13 @@ inline const char* phaseName(FlightPhase phase) {
     case PHASE_HOVER_SETTLE: return "HOVER_SETTLE";
     case PHASE_LANDING:      return "LANDING";
     case PHASE_LANDED:       return "LANDED";
+    case PHASE_CALIBRATE:    return "CALIBRATE";
   }
   return "UNKNOWN";
 }
 
 inline bool phaseFlightEnabled(FlightPhase phase) {
-  return phase != PHASE_PARKED && phase != PHASE_LANDED;
+  return phase != PHASE_PARKED && phase != PHASE_LANDED && phase != PHASE_CALIBRATE;
 }
 
 inline const char* reasonName(TransitionReason reason) {
@@ -59,6 +64,7 @@ inline const char* reasonName(TransitionReason reason) {
     case REASON_HOVER_COMPLETE:   return "HOVER_COMPLETE";
     case REASON_TOUCHDOWN:        return "TOUCHDOWN";
     case REASON_EMERGENCY_STOP:   return "EMERGENCY_STOP";
+    case REASON_CALIBRATION_COMPLETE: return "CALIBRATION_COMPLETE";
   }
   return "UNKNOWN";
 }

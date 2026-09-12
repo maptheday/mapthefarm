@@ -29,8 +29,8 @@
 #include <Arduino.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
-#include "FlightModel.hpp"
-#include "SensorTypes.hpp"
+#include "../models/FlightModel.hpp"
+#include "../models/SensorTypes.hpp"
 
 // --- PARKED ---
 struct Dashboard_Parked {
@@ -322,6 +322,15 @@ struct Dashboard_Landed {
 struct Cruise_Landed {};
 struct Trip_Landed {};
 
+// --- CALIBRATE (compass) ---
+struct Dashboard_Calibrate {
+  float progressPct = 0.0f;
+};
+struct Cruise_Calibrate {}; // nothing to aim at -- motors are off
+struct Trip_Calibrate {
+  unsigned long enteredAtMs = 0;
+};
+
 // ============================================================================
 // SHARED STATE -- the whole notebook, one struct.
 // ============================================================================
@@ -361,6 +370,10 @@ struct SharedState {
   Dashboard_Landed      dashboard_landed;
   Cruise_Landed         cruise_landed;
   Trip_Landed           trip_landed;
+
+  Dashboard_Calibrate   dashboard_calibrate;
+  Cruise_Calibrate      cruise_calibrate;
+  Trip_Calibrate        trip_calibrate;
 };
 
 // ----------------------------------------------------------------------------

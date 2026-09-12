@@ -5,9 +5,9 @@
 // flight rather than never leaving the ground. START can re-arm from here.
 // ============================================================================
 
-#include "../IFlightPhase.hpp"
-#include "../PhaseState.hpp"
-#include "../FlightRuntime.hpp"
+#include "IFlightPhase.hpp"
+#include "../state/PhaseState.hpp"
+#include "FlightRuntime.hpp"
 
 class LandedPhase : public IFlightPhase {
 public:
@@ -20,7 +20,7 @@ public:
   void physicsTick(float /*dt*/) override {
     motorController.reset();
     // Same reasoning as PARKED: disarm explicitly, don't trust last ESC state.
-    disarmAllMotors();
+    motors.disarmAll();
   }
 
   void writeTelemetry(JsonDocument& doc) override {

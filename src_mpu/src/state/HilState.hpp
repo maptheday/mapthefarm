@@ -1,6 +1,6 @@
 #pragma once
 
-#include "FlightModel.hpp"
+#include "../models/FlightModel.hpp"
 
 // State used only by the WOKWI_SIM serial adapter. Real hardware receives
 // these values from sensors and radio input instead.

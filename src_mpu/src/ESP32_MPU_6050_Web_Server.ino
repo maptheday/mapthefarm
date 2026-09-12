@@ -1,67 +1,27 @@
 #include <Arduino.h>
-#include <WiFi.h>
-#include <AsyncTCP.h>
-#include <ESPAsyncWebServer.h>
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
 #include <ArduinoJson.h>
 #include <MadgwickAHRS.h>
-#include "LittleFS.h"
 #include <TinyGPSPlus.h>
-#include <QMC5883LCompass.h>
-#include <Preferences.h>
 
-#include "EspBarometer.hpp"
-#include "EspESC.hpp"
-#include "FlightConfig.hpp"
-#include "FlightModel.hpp"
-#include "SensorTypes.hpp"
-#include "ControlTypes.hpp"
-#include "PhaseState.hpp"
-#include "HilState.hpp"
-#include "MotorController.hpp"
-#include "PID.hpp"
-#include "IFlightPhase.hpp"
-#include "FlightRuntime.hpp"
-#include "PhaseRegistry.hpp"
+#include "hardware/EspBarometer.hpp"
+#include "state/FlightConfig.hpp"
+#include "models/FlightModel.hpp"
+#include "models/SensorTypes.hpp"
+#include "models/ControlTypes.hpp"
+#include "state/PhaseState.hpp"
+#include "state/HilState.hpp"
+#include "services/MotorController.hpp"
+#include "services/Motors.hpp"
+#include "phases/IFlightPhase.hpp"
+#include "phases/FlightRuntime.hpp"
+#include "phases/PhaseRegistry.hpp"
+#include "phases/PhaseMachine.hpp"   // transitionTo() + HIL gate
+#include "services/Failsafes.hpp"    // checkCoreFailsafes()
 
-const char* ssid     = "SpectrumSetup-C3";
-const char* password = "mellowlemon735";
-
-// ==========================================
-// BN-880 WIRING
-// ==========================================
-#define GPS_RX_PIN 17
-#define GPS_TX_PIN 18
-#define GPS_BAUD   9600
-
-// ==========================================
-// COMPASS CALIBRATION
-// ==========================================
-const bool          CALIBRATE_COMPASS_ON_BOOT = false;
-const unsigned long COMPASS_CAL_DURATION_MS   = 30000;
-
-Preferences compassPrefs;
-float compassOffsetX = 0;
-float compassOffsetY = 0;
-float compassOffsetZ = 0;
-float compassScaleX  = 1;
-float compassScaleY  = 1;
-float compassScaleZ  = 1;
-
-// ==========================================
-// ESC (DShot600, via EspESC.hpp)
-// ==========================================
-// EspESC.hpp is DShot600 (digital, no calibration step, no PWM pulse
-// width concept). ESC_PULSE_MAX_US/MIN_US/ARM_US below were written for
-// analog/OneShot PWM ESCs and don't apply -- kept only so nothing else
-// in this file that might still reference them breaks; DShot's real
-// throttle range (48-2047) is handled internally by EspESC::write().
-// "Disarmed" is motors[i].disarm() (DShot command 0), not a min-throttle
-// float constant -- there's no PWM-style minimum to hold in DShot.
-const int   ESC_PULSE_MAX_US = 2000;  // unused -- DShot has no PWM pulse width
-const int   ESC_PULSE_MIN_US = 1000;  // unused -- DShot has no PWM pulse width
-const int   ESC_PULSE_ARM_US = 1000;  // unused -- DShot has no arm-pulse step
+// Pin/timing config lives in FlightConfig.hpp; sensors + motors live behind
+// their services (Compass, Gps parsing in the nav task for now, Motors).
 
 // ==========================================
 // CRSF / ELRS RC INPUT
@@ -101,67 +61,15 @@ Adafruit_MPU6050 mpu;
 Madgwick         filter;
 EspBarometer     barometer;
 TinyGPSPlus      gps;
-QMC5883LCompass  compass;
 
-#ifndef WOKWI_SIM
-AsyncWebServer    server(80);
-// SSE endpoint for live telemetry -- was never declared, so getGyroReadings()/
-// getAccReadings()/getFlightReadings() had no way to reach the frontend.
-// NOTE: event names below ("gyro","acc","flight") are a best guess from the
-// formatter function names -- verify against your frontend's EventSource
-// listener names (data/*.js) before relying on this.
-AsyncEventSource  events("/events");
-#endif
-
-// EspESC.hpp is instance-based (one object per motor), not static calls --
-// the previous EspESC::begin()/writeAllMicroseconds()/writeMotor() calls
-// throughout this file don't exist on that class and wouldn't have compiled.
-// Pins and M1-M4 ordering are exactly what EspESC.hpp's own header comment
-// documents; RMT_CHANNEL_0-3 are the 4 channels this legacy driver/rmt.h
-// API exposes on ESP32-S3. writeMotorMix()/disarmAllMotors() are defined
-// further down, right after the MotorMix struct they depend on.
-EspESC motors[4]; // index 0=M1, 1=M2, 2=M3, 3=M4
-const int         MOTOR_PINS[4]     = { 4, 5, 6, 7 };
-const rmt_channel_t MOTOR_RMT_CH[4] = { RMT_CHANNEL_0, RMT_CHANNEL_1, RMT_CHANNEL_2, RMT_CHANNEL_3 };
-
+// The service instances (declared extern in FlightRuntime.hpp so phases can
+// use them). Motors owns the 4 ESCs; Compass owns the magnetometer.
+Motors          motors;
 MotorController motorController;
+Compass         compass;
 
 // ==========================================
-// PANIC (macro now in FlightRuntime.hpp)
-// ==========================================
-#define ASSERT_MOTORS_INITIALIZED(d) \
-  do { if ((d).m1 == 0.0f && (d).m2 == 0.0f && (d).m3 == 0.0f && (d).m4 == 0.0f) \
-    PANIC("control decision on uninitialized motor outputs"); } while(0)
-
-// transitionTo() is declared in FlightRuntime.hpp (with its default argument).
-
-#ifdef WOKWI_SIM
-bool hilGateAllows(FlightPhase next, TransitionReason reason) {
-  if (!hilGatePending) {
-    hilGatePending = true;
-    hilGateApproved = false;
-    hilGateNext = next;
-    hilGateReason = reason;
-    logLine(String("[HIL_GATE] request=") + phaseName(next) +
-            " reason=" + reasonName(reason));
-    return false;
-  }
-  return hilGateNext == next && hilGateApproved;
-}
-
-bool hilGateBlocked() {
-  if (!hilGatePending) return false;
-  if (hilGateApproved) {
-    FlightPhase next = hilGateNext;
-    TransitionReason reason = hilGateReason;
-    transitionTo(next, reason);
-    hilGatePending = false;
-    hilGateApproved = false;
-    hilGateReason = REASON_NONE;
-  }
-  return true;
-}
-#endif
+// The phase machine (transitionTo) + HIL gate live in phases/PhaseMachine.hpp.
 
 // ==========================================
 // SHARED STATE (repository)
@@ -176,181 +84,9 @@ SemaphoreHandle_t serialMutex;
 volatile SharedState shared;
 float groundAltitudeFt = 0;
 
-void logLine(const String& msg) {
-  if (xSemaphoreTake(serialMutex, portMAX_DELAY) == pdTRUE) {
-    Serial.println(msg);
-    Serial.flush(); // block until this line is actually on the wire before
-                     // releasing the mutex -- USB CDC buffers writes
-                     // asynchronously, so without this a second task can
-                     // start writing while this line is still draining,
-                     // tearing the two messages together.
-    xSemaphoreGive(serialMutex);
-  }
-}
-
-// ==========================================
-// GPS / NAVIGATION MATH HELPERS
-// ==========================================
-float gpsDistanceMeters(double lat1, double lon1, double lat2, double lon2) {
-  const float R = 6371000.0f;
-  float dLat = radians(lat2 - lat1);
-  float dLon = radians(lon2 - lon1);
-  float a = sin(dLat/2)*sin(dLat/2) + cos(radians(lat1))*cos(radians(lat2))*sin(dLon/2)*sin(dLon/2);
-  return R * 2.0f * atan2(sqrt(a), sqrt(1.0f - a));
-}
-
-float gpsBearing(double lat1, double lon1, double lat2, double lon2) {
-  float dLon = radians(lon2 - lon1);
-  float y    = sin(dLon) * cos(radians(lat2));
-  float x    = cos(radians(lat1)) * sin(radians(lat2)) - sin(radians(lat1)) * cos(radians(lat2)) * cos(dLon);
-  return fmod(degrees(atan2(y, x)) + 360.0f, 360.0f);
-}
-
-void bearingToNorthEast(float distM, float bearingDeg, float& northM, float& eastM) {
-  float rad = radians(bearingDeg);
-  northM = distM * cos(rad);
-  eastM  = distM * sin(rad);
-}
-
-Waypoint getMissionWaypoint(int index, double launchLat, double launchLon) {
-  if (index < WAYPOINT_COUNT) return WAYPOINTS[index];
-  float holdAlt = WAYPOINT_COUNT > 0 ? WAYPOINTS[WAYPOINT_COUNT - 1].altFt : 10.0f;
-  return { launchLat, launchLon, holdAlt };
-}
-
-// Sends a computed MotorMix straight to all 4 ESCs. Every flying phase's
-// physicsTick() calls this right after MotorController computes the mix.
-void writeMotorMix(const MotorMix& mix) {
-#ifndef WOKWI_SIM
-  motors[0].write(mix.m1);
-  motors[1].write(mix.m2);
-  motors[2].write(mix.m3);
-  motors[3].write(mix.m4);
-#else
-  (void)mix;
-#endif
-}
-// Cuts all 4 motors immediately. Used by the Parked/Landed phases instead
-// of a PWM "min throttle" concept that doesn't exist in DShot.
-void disarmAllMotors() {
-#ifndef WOKWI_SIM
-  for (int i = 0; i < 4; i++) motors[i].disarm();
-#endif
-}
-
-// ==========================================
-// FUNCTIONAL STATE SETTERS / TRANSITIONS
-// ==========================================
-void transitionTo(FlightPhase next, TransitionReason reason) {
-#ifdef WOKWI_SIM
-  if (!hilGateAllows(next, reason)) return;
-#endif
-  withMutex([&]() {
-    // Build the entry context ONCE here (the orchestrator's job), including
-    // carrying the arm time + launch point forward from the previous flight
-    // phase. Each phase's onEnter() then only sets up its OWN state.
-    EnterContext ctx;
-    ctx.prevPhase         = shared.phase;
-    ctx.now               = millis();
-    ctx.currentAltFt      = shared.raw.baroAltitudeFt;
-    ctx.currentHeadingDeg = shared.raw.compassHeadingDeg;
-    ctx.currentLat        = shared.raw.gps.lat;
-    ctx.currentLon        = shared.raw.gps.lon;
-  #ifdef WOKWI_SIM
-    ctx.currentLat        = simGpsLat;
-    ctx.currentLon        = simGpsLon;
-  #endif
-
-    switch (ctx.prevPhase) {
-      case PHASE_RAISE:
-        ctx.carriedArmedAtMs = shared.trip_raise.armedAtMs;
-        ctx.carriedLaunchLat = shared.trip_raise.launchLat;
-        ctx.carriedLaunchLon = shared.trip_raise.launchLon;
-        break;
-      case PHASE_HOLD:
-        ctx.carriedArmedAtMs = shared.trip_hold.armedAtMs;
-        ctx.carriedLaunchLat = shared.trip_hold.launchLat;
-        ctx.carriedLaunchLon = shared.trip_hold.launchLon;
-        break;
-      case PHASE_MISSION:
-        ctx.carriedArmedAtMs = shared.trip_mission.armedAtMs;
-        ctx.carriedLaunchLat = shared.trip_mission.launchLat;
-        ctx.carriedLaunchLon = shared.trip_mission.launchLon;
-        break;
-      case PHASE_RTL:
-        ctx.carriedArmedAtMs = shared.trip_rtl.armedAtMs;
-        ctx.carriedLaunchLat = shared.trip_rtl.launchLat;
-        ctx.carriedLaunchLon = shared.trip_rtl.launchLon;
-        break;
-      default: break;
-    }
-
-    // Hand off to the phase we're entering. onEnter runs under this lock.
-    phaseFor(next)->onEnter(ctx);
-
-    shared.phase = next;
-    shared.transitionReason = reason;
-  });
-}
-
-// Safety wrapper to avoid repetitive checks
-void checkCoreFailsafes(unsigned long armedAtMs, double launchLat, double launchLon) {
-  bool tripRTL = false;
-  TransitionReason rtlReason = REASON_NONE;
-  
-  // 1. Max Flight Time
-  if (armedAtMs > 0 && (millis() - armedAtMs) >= MAX_FLIGHT_TIME_MS) {
-    logLine("[SAFETY] Max flight time reached — forcing RTL.");
-    tripRTL = true;
-    rtlReason = REASON_MAX_FLIGHT_TIME;
-  }
-  
-  // 2. Geofence
-  bool fix;
-  double lat;
-  double lon;
-  unsigned long lastFix;
-  
-  withMutex([&]() { 
-    fix     = shared.raw.gps.fix; 
-    lat     = shared.raw.gps.lat; 
-    lon     = shared.raw.gps.lon; 
-    lastFix = shared.raw.gps.lastFixMs; 
-  });
-#ifdef WOKWI_SIM
-  fix      = simGpsFix;
-  lat      = simGpsLat;
-  lon      = simGpsLon;
-  lastFix  = fix ? millis() : lastFix;
-#endif
-  
-#ifdef WOKWI_SIM
-  if (launchLat != 0.0) {
-#else
-  if (fix && launchLat != 0.0) {
-#endif
-    if (gpsDistanceMeters(lat, lon, launchLat, launchLon) > GEOFENCE_RADIUS_M) {
-      logLine("[SAFETY] Geofence exceeded — forcing RTL.");
-      tripRTL = true;
-      if (rtlReason == REASON_NONE) rtlReason = REASON_GEOFENCE;
-    }
-  }
-
-  // 3. GPS Loss
-  if (!fix && lastFix > 0 && (millis() - lastFix) >= GPS_LOSS_ABORT_MS) {
-      logLine("[SAFETY] GPS fix lost — aborting directly to LANDING.");
-      transitionTo(PHASE_LANDING, REASON_GPS_LOSS); // Can't RTL without GPS
-      return;
-  }
-
-  FlightPhase phase;
-  withMutex([&]() { phase = shared.phase; });
-
-  if (tripRTL && phase != PHASE_RTL && phase != PHASE_LANDING && phase != PHASE_LANDED) {
-    transitionTo(PHASE_RTL, rtlReason);
-  }
-}
-
+// logLine() -> services/Log.hpp | GPS/nav math -> services/NavMath.hpp
+// motor output -> services/Motors.hpp | phase machine -> phases/PhaseMachine.hpp
+// core failsafes -> services/Failsafes.hpp
 
 // ==========================================
 // TASKS
@@ -389,8 +125,7 @@ void navigationTask(void* parameter) {
     } else {
       withMutex([&]() { shared.raw.gps.fix = false; });
     }
-    compass.read();
-    float heading = compass.getAzimuth();
+    float heading = compass.readHeadingDeg();
     withMutex([&]() { shared.raw.compassHeadingDeg = heading; });
 #endif
 
@@ -463,70 +198,6 @@ void physicsTask(void* parameter) {
 }
 
 // ==========================================
-// WEB FORMATTERS
-// ==========================================
-String getGyroReadings() {
-  float roll;
-  float pitch;
-  float yaw;
-  withMutex([&]() { 
-    roll  = shared.raw.imu.gyroX; 
-    pitch = shared.raw.imu.gyroY; 
-    yaw   = shared.raw.imu.gyroZ; 
-  });
-
-  JsonDocument doc;
-  doc["gyroX"] = roll; 
-  doc["gyroY"] = pitch; 
-  doc["gyroZ"] = yaw;
-  
-  String out; 
-  serializeJson(doc, out); 
-  return out;
-}
-
-String getAccReadings() {
-  float ax;
-  float ay;
-  float az;
-  withMutex([&]() { 
-    ax = shared.raw.imu.accX; 
-    ay = shared.raw.imu.accY; 
-    az = shared.raw.imu.accZ; 
-  });
-
-  JsonDocument doc;
-  doc["accX"] = ax; 
-  doc["accY"] = ay; 
-  doc["accZ"] = az;
-  
-  String out; 
-  serializeJson(doc, out); 
-  return out;
-}
-
-String getFlightReadings() {
-  FlightPhase phase;
-  float baroAlt;
-  withMutex([&]() { 
-    phase   = shared.phase; 
-    baroAlt = shared.raw.baroAltitudeFt;
-  });
-
-  JsonDocument readings;
-  readings["flightPhase"]   = phaseName(phase);
-  readings["flightEnabled"] = phaseFlightEnabled(phase);
-  readings["altFt"]         = baroAlt;
-
-  // Each phase fills in its own telemetry fields.
-  phaseFor(phase)->writeTelemetry(readings);
-
-  String out;
-  serializeJson(readings, out);
-  return out;
-}
-
-// ==========================================
 // INIT HELPERS
 // ==========================================
 void initMPU() {
@@ -538,132 +209,11 @@ void initMPU() {
   logLine("[IMU] MPU6050 ready.");
 }
 
-void loadCompassCalibration() {
-  compassPrefs.begin("compass", true);
-  bool hasCal = compassPrefs.isKey("offX");
-  if (hasCal) {
-    compassOffsetX = compassPrefs.getFloat("offX", 0);
-    compassOffsetY = compassPrefs.getFloat("offY", 0);
-    compassOffsetZ = compassPrefs.getFloat("offZ", 0);
-    compassScaleX = compassPrefs.getFloat("sclX", 1);
-    compassScaleY = compassPrefs.getFloat("sclY", 1);
-    compassScaleZ = compassPrefs.getFloat("sclZ", 1);
-  }
-  compassPrefs.end();
-  compass.setCalibration(compassOffsetX, compassOffsetY, compassOffsetZ,
-                         compassScaleX, compassScaleY, compassScaleZ);
-}
+// Compass bring-up + calibration now live in the Compass service; live
+// calibration is the CalibratePhase (triggered on boot below if configured).
 
-void runCompassCalibration() {
-  logLine("[COMPASS] Calibration starting — rotate drone slowly through all axes now...");
-  int16_t minX = 32767;
-  int16_t maxX = -32768;
-  int16_t minY = 32767;
-  int16_t maxY = -32768;
-  int16_t minZ = 32767;
-  int16_t maxZ = -32768;
-  
-  unsigned long start = millis();
-  while (millis() - start < COMPASS_CAL_DURATION_MS) {
-    compass.read();
-    int16_t x = compass.getX();
-    int16_t y = compass.getY();
-    int16_t z = compass.getZ();
-    
-    minX = min(minX, x); 
-    maxX = max(maxX, x); 
-    minY = min(minY, y); 
-    maxY = max(maxY, y); 
-    minZ = min(minZ, z); 
-    maxZ = max(maxZ, z);
-    
-    delay(50);
-  }
-  
-  compassOffsetX = (minX + maxX) / 2.0f; 
-  compassOffsetY = (minY + maxY) / 2.0f; 
-  compassOffsetZ = (minZ + maxZ) / 2.0f;
-  
-  float rangeX = (maxX - minX) / 2.0f;
-  float rangeY = (maxY - minY) / 2.0f;
-  float rangeZ = (maxZ - minZ) / 2.0f;
-  float avg    = (rangeX + rangeY + rangeZ) / 3.0f;
-  
-  compassScaleX = (rangeX > 0) ? (avg / rangeX) : 1.0f; 
-  compassScaleY = (rangeY > 0) ? (avg / rangeY) : 1.0f; 
-  compassScaleZ = (rangeZ > 0) ? (avg / rangeZ) : 1.0f;
-  
-  compass.setCalibration(compassOffsetX, compassOffsetY, compassOffsetZ, compassScaleX, compassScaleY, compassScaleZ);
-  
-  compassPrefs.begin("compass", false);
-  compassPrefs.putFloat("offX", compassOffsetX); 
-  compassPrefs.putFloat("offY", compassOffsetY); 
-  compassPrefs.putFloat("offZ", compassOffsetZ);
-  compassPrefs.putFloat("sclX", compassScaleX); 
-  compassPrefs.putFloat("sclY", compassScaleY); 
-  compassPrefs.putFloat("sclZ", compassScaleZ);
-  compassPrefs.end();
-  
-  logLine("[COMPASS] Calibration saved.");
-}
-
-void initCompass() {
-  logLine("[COMPASS] Initializing QMC5883L...");
-  compass.init(); 
-  compass.setMode(0x01, 0x0C, 0x10, 0xC0);
-  
-  if (CALIBRATE_COMPASS_ON_BOOT) {
-    runCompassCalibration(); 
-  } else {
-    loadCompassCalibration();
-  }
-  
-  logLine("[COMPASS] QMC5883L ready.");
-}
-
-void initGPS() { 
-  Serial2.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN); 
-}
-
-// DShot600 init runs every boot: bring up each motor's RMT channel,
-// then send an explicit disarm. No calibration/beep sequence -- that
-// was a leftover PWM-ESC description; DShot has no equivalent step.
-void initESC() {
-  // DShot600 has NO calibration step -- the previous "send max, then
-  // min, then arm" sequence is an analog/OneShot PWM ESC ritual and
-  // does nothing meaningful (or could be actively wrong) on a DShot ESC.
-  // All that's needed is bringing up each motor's RMT channel and
-  // sending an explicit disarm so they're confirmed at zero before
-  // anything else runs.
-  for (int i = 0; i < 4; i++) {
-    motors[i].init(MOTOR_PINS[i], MOTOR_RMT_CH[i]);
-  }
-  disarmAllMotors();
-  logLine("[ESC] DShot600 channels initialized, all motors disarmed.");
-}
-
-void initLittleFS() {
-  if (!LittleFS.begin(false, "/littlefs", 10, "spiffs")) {
-    logLine("[FS] LittleFS mount failed — formatting and retrying...");
-    LittleFS.format();
-    if (!LittleFS.begin(false, "/littlefs", 10, "spiffs")) {
-      PANIC("LittleFS failed to mount after format");
-    }
-  }
-}
-
-void initWiFi() {
-  WiFi.mode(WIFI_STA); 
-  WiFi.begin(ssid, password);
-  logLine("[WIFI] Connecting...");
-  unsigned long wifiStart = millis();
-  while (WiFi.status() != WL_CONNECTED) {
-    if (millis() - wifiStart > 15000) {
-      PANIC("WiFi failed to connect within 15 s — check SSID/password");
-    }
-    delay(500);
-  }
-  logLine(String("[WIFI] Connected, IP: ") + WiFi.localIP().toString());
+void initGPS() {
+  Serial2.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
 }
 
 // ==========================================
@@ -677,19 +227,18 @@ void crsfHandleStart();
 void crsfHandleStop();
 
 void resetSimState() {
-  simGpsFix = false;
-  hilGatePending = false;
+  // HIL gate + injected sensor inputs (the sim-only globals).
+  simGpsFix       = false;
+  hilGatePending  = false;
   hilGateApproved = false;
-  hilGateNext = PHASE_PARKED;
-  hilGateReason = REASON_NONE;
-  withMutex([&]() {
-    shared.phase = PHASE_PARKED;
-    shared.transitionReason = REASON_NONE;
-    shared.raw.gps.fix = false;
-    shared.raw.gps.lastFixMs = 0;
-    shared.trip_mission.currentWP = 0;
-    shared.trip_mission.active = false;
-  });
+  hilGateNext     = PHASE_PARKED;
+  hilGateReason   = REASON_NONE;
+
+  // Reset the WHOLE shared state to its struct defaults in one shot. Doing it
+  // field-by-field is how stale per-phase state used to leak between scenarios
+  // -- assigning a fresh SharedState guarantees nothing is forgotten.
+  withMutex([&]() { const_cast<SharedState&>(shared) = SharedState{}; });
+
   logLine("[HIL] State reset.");
 }
 
@@ -935,17 +484,12 @@ void setup() {
 #endif
 #ifndef WOKWI_SIM
   Wire.begin(16, 15);
-  initWiFi();
-#else
-  logLine("[WIFI] Sim mode — skipping WiFi, HIL runner talks over serial only.");
-#endif
-
-#ifndef WOKWI_SIM
-  initLittleFS();
   initMPU();
-  initCompass();
+  compass.begin();
+  logLine("[COMPASS] QMC5883L ready.");
   initGPS();
-  initESC();
+  motors.begin();
+  logLine("[ESC] DShot600 channels initialized, all motors disarmed.");
 #endif
 #ifndef WOKWI_SIM
   barometer.initialize();
@@ -980,151 +524,26 @@ void setup() {
   // instead. TODO(hardware): CRSF_RX_PIN == 16 == Wire SDA. Move CRSF_RX_PIN
   // to a free GPIO once EspESC.hpp's pin usage is confirmed.
   xTaskCreatePinnedToCore(crsfTask,       "CRSFTask",    4096, NULL, 1, NULL, 0);
-#endif
 
-#ifndef WOKWI_SIM
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest* r) { 
-#ifdef WOKWI_SIM
-    r->send(200, "text/plain", "Wokwi simulation");
-#else
-    r->send(LittleFS, "/index.html", "text/html"); 
-#endif
-  });
-  
-#ifndef WOKWI_SIM
-  server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
-#endif
-  server.addHandler(&events);
-
-  server.on("/takeoff", HTTP_GET, [](AsyncWebServerRequest* r) {
-    bool hasFix; 
-    withMutex([&]() { hasFix = shared.raw.gps.fix; });
-    if (!hasFix) { 
-      r->send(400, "text/plain", "NO GPS FIX — lock needed before arming"); 
-      return; 
-    }
-    transitionTo(PHASE_RAISE);
-    logLine("[FLIGHT] Takeoff requested. Drone Armed.");
-    r->send(200, "text/plain", "TAKEOFF INITIATED");
-  });
-
-  server.on("/start-waypoint-nav", HTTP_GET, [](AsyncWebServerRequest* r) {
-    FlightPhase currentPhase; 
-    withMutex([&]() { currentPhase = shared.phase; });
-    if (currentPhase != PHASE_HOLD) { 
-      r->send(400, "text/plain", "Drone must be in HOLD to start mission"); 
-      return; 
-    }
-    transitionTo(PHASE_MISSION);
-    logLine("[FLIGHT] Mission Started.");
-    r->send(200, "text/plain", "WAYPOINT NAVIGATION STARTED");
-  });
-
-  server.on("/rtl", HTTP_GET, [](AsyncWebServerRequest* r) {
-    FlightPhase currentPhase;
-    withMutex([&]() { currentPhase = shared.phase; });
-    if (currentPhase == PHASE_PARKED || currentPhase == PHASE_LANDED) {
-      r->send(400, "text/plain", "Cannot RTL — drone is not airborne");
-      return;
-    }
-    transitionTo(PHASE_RTL);
-    logLine("[FLIGHT] Return to Launch triggered.");
-    r->send(200, "text/plain", "RTL INITIATED");
-  });
-
-  server.on("/abort", HTTP_GET, [](AsyncWebServerRequest* r) {
-    FlightPhase currentPhase; 
-    withMutex([&]() { currentPhase = shared.phase; });
-    if (currentPhase == PHASE_MISSION || currentPhase == PHASE_RTL) {
-      transitionTo(PHASE_HOLD);
-    }
-    logLine("[MISSION] Aborted — holding position.");
-    r->send(200, "text/plain", "ABORTED — HOLDING");
-  });
-
-  server.on("/land", HTTP_GET, [](AsyncWebServerRequest* r) {
-    transitionTo(PHASE_LANDING);
-    logLine("[FLIGHT] Manual landing requested.");
-    r->send(200, "text/plain", "LANDING");
-  });
-
-  server.on("/stop", HTTP_GET, [](AsyncWebServerRequest* r) {
-    transitionTo(PHASE_PARKED);
-    logLine("[FLIGHT] EMERGENCY STOP — motors cut.");
-    r->send(200, "text/plain", "STOPPED");
-  });
-
-  // Motor test endpoint — PROPS OFF, drone must be PARKED.
-  // Usage: GET /motor-test?motor=1&pct=15
-  //   motor: 1-4 (matches M1-M4 layout in your frame)
-  //   pct:   0-30 (throttle percentage — capped at 30% for bench safety)
-  // The motor spins for 2 seconds then stops automatically.
-  // Use this to verify spin direction and motor-to-ESC wiring before first flight.
-  server.on("/motor-test", HTTP_GET, [](AsyncWebServerRequest* r) {
-    FlightPhase currentPhase;
-    withMutex([&]() { currentPhase = shared.phase; });
-    if (currentPhase != PHASE_PARKED) {
-      r->send(400, "text/plain", "Motor test only allowed while PARKED");
-      return;
-    }
-    if (!r->hasParam("motor") || !r->hasParam("pct")) {
-      r->send(400, "text/plain", "Required params: motor=1-4 & pct=0-30");
-      return;
-    }
-
-    int motor = r->getParam("motor")->value().toInt();
-    int pct   = r->getParam("pct")->value().toInt();
-
-    if (motor < 1 || motor > 4) {
-      r->send(400, "text/plain", "motor must be 1-4");
-      return;
-    }
-    // Hard cap at 30% — enough to confirm spin, not enough to lift off.
-    pct = constrain(pct, 0, 30);
-    float throttle = pct / 100.0f;
-
-    logLine(String("[MOTOR TEST] M") + motor + " at " + pct + "% for 2 s — PROPS OFF?");
-
-    // Spin the requested motor for 2 s then cut.
-    motors[motor - 1].write(throttle); // 0-indexed
-    delay(2000);
-    motors[motor - 1].disarm();
-
-    logLine(String("[MOTOR TEST] M") + motor + " stopped.");
-    r->send(200, "text/plain",
-      String("M") + motor + " ran at " + pct + "% for 2 s — check spin direction in log");
-  });
-
-  server.begin();
-  logLine("[WEB] Server started.");
+  // Optional compass calibration on boot. It's a normal phase now: the nav/
+  // physics tasks (just started) run CalibratePhase, which returns to PARKED
+  // when done. Motors stay disarmed throughout.
+  if (CALIBRATE_COMPASS_ON_BOOT) {
+    transitionTo(PHASE_CALIBRATE);
+  }
 #endif
 }
 
 // ==========================================
-// LOOP (Core 0 — SSE dispatch only)
+// LOOP (Core 0)
 // ==========================================
-unsigned long lastGyroSend   = 0;
-unsigned long lastAccSend    = 0;
-unsigned long lastFlightSend = 0;
-
 void loop() {
 #ifdef WOKWI_SIM
+  // In sim, the HIL runner drives the drone over serial.
   parseSimInput();
 #else
-  // Was declared (lastGyroSend/lastAccSend/lastFlightSend, SSE_*_MS) but
-  // never actually used anywhere -- the dashboard had no live data feed.
-  unsigned long now = millis();
-  if (now - lastGyroSend >= SSE_GYRO_MS) {
-    events.send(getGyroReadings().c_str(), "gyro", now);
-    lastGyroSend = now;
-  }
-  if (now - lastAccSend >= SSE_ACC_MS) {
-    events.send(getAccReadings().c_str(), "acc", now);
-    lastAccSend = now;
-  }
-  if (now - lastFlightSend >= SSE_FLIGHT_MS) {
-    events.send(getFlightReadings().c_str(), "flight", now);
-    lastFlightSend = now;
-  }
+  // On real hardware everything runs in the nav/physics/CRSF tasks;
+  // the Arduino loop has nothing to do.
+  vTaskDelay(pdMS_TO_TICKS(100));
 #endif
 }
