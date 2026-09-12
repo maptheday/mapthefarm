@@ -1,5 +1,7 @@
-Run log: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/hil_20260907_193305_Zj06oS.log
+Run log: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/hil_20260912_114623_1liZW6.log
 Auto-discovered ESP32 port: /dev/cu.usbmodem14201
+== Selected HIL scenarios ==
+  full_flight_test.py
 == Uploading WOKWI_SIM firmware to /dev/cu.usbmodem14201 ==
 Processing wokwi_sim (platform: espressif32; board: esp32-s3-devkitc-1-n16r8; framework: arduino)
 --------------------------------------------------------------------------------
@@ -41,8 +43,8 @@ Compiling .pio/build/wokwi_sim/src/ESP32_MPU_6050_Web_Server.ino.cpp.o
 Retrieving maximum program size .pio/build/wokwi_sim/firmware.elf
 Checking size .pio/build/wokwi_sim/firmware.elf
 Advanced Memory Usage is available via "PlatformIO Home > Project Inspect"
-RAM:   [=         ]   6.5% (used 21228 bytes from 327680 bytes)
-Flash: [=         ]   5.6% (used 364065 bytes from 6553600 bytes)
+RAM:   [=         ]   6.5% (used 21236 bytes from 327680 bytes)
+Flash: [=         ]   5.6% (used 364797 bytes from 6553600 bytes)
 Configuring upload protocol...
 AVAILABLE: cmsis-dap, esp-bridge, esp-builtin, esp-prog, espota, esptool, iot-bus-jtag, jlink, minimodule, olimex-arm-usb-ocd, olimex-arm-usb-ocd-h, olimex-arm-usb-tiny-h, olimex-jtag-tiny, tumpa
 CURRENT: upload_protocol = esptool
@@ -66,92 +68,97 @@ Configuring flash size...
 Flash will be erased from 0x00000000 to 0x00003fff...
 Flash will be erased from 0x00008000 to 0x00008fff...
 Flash will be erased from 0x0000e000 to 0x0000ffff...
-Flash will be erased from 0x00010000 to 0x00068fff...
+Flash will be erased from 0x00010000 to 0x00069fff...
 SHA digest in image updated
 Compressed 15104 bytes to 10429...
 Writing at 0x00000000... (100 %)
-Wrote 15104 bytes (10429 compressed) at 0x00000000 in 0.2 seconds (effective 665.0 kbit/s)...
+Wrote 15104 bytes (10429 compressed) at 0x00000000 in 0.2 seconds (effective 669.1 kbit/s)...
 Hash of data verified.
 Compressed 3072 bytes to 146...
 Writing at 0x00008000... (100 %)
-Wrote 3072 bytes (146 compressed) at 0x00008000 in 0.0 seconds (effective 704.3 kbit/s)...
+Wrote 3072 bytes (146 compressed) at 0x00008000 in 0.0 seconds (effective 669.7 kbit/s)...
 Hash of data verified.
 Compressed 8192 bytes to 47...
 Writing at 0x0000e000... (100 %)
-Wrote 8192 bytes (47 compressed) at 0x0000e000 in 0.1 seconds (effective 944.1 kbit/s)...
+Wrote 8192 bytes (47 compressed) at 0x0000e000 in 0.1 seconds (effective 961.3 kbit/s)...
 Hash of data verified.
-Compressed 364432 bytes to 206671...
+Compressed 365168 bytes to 207157...
 Writing at 0x00010000... (7 %)
-Writing at 0x0001b9ce... (15 %)
-Writing at 0x0002872d... (23 %)
-Writing at 0x0002dba5... (30 %)
-Writing at 0x000338ad... (38 %)
-Writing at 0x000393c5... (46 %)
-Writing at 0x0003ef35... (53 %)
-Writing at 0x000445fb... (61 %)
-Writing at 0x0004996f... (69 %)
-Writing at 0x0004f3c3... (76 %)
-Writing at 0x00054a1a... (84 %)
-Writing at 0x0005d1d4... (92 %)
-Writing at 0x000654ae... (100 %)
-Wrote 364432 bytes (206671 compressed) at 0x00010000 in 2.3 seconds (effective 1290.4 kbit/s)...
+Writing at 0x0001b955... (15 %)
+Writing at 0x00028743... (23 %)
+Writing at 0x0002dbc6... (30 %)
+Writing at 0x000338c6... (38 %)
+Writing at 0x0003943e... (46 %)
+Writing at 0x0003efa0... (53 %)
+Writing at 0x0004464f... (61 %)
+Writing at 0x000499de... (69 %)
+Writing at 0x0004f40b... (76 %)
+Writing at 0x00054aab... (84 %)
+Writing at 0x0005cdec... (92 %)
+Writing at 0x0006543c... (100 %)
+Wrote 365168 bytes (207157 compressed) at 0x00010000 in 2.3 seconds (effective 1267.7 kbit/s)...
 Hash of data verified.
 
 Leaving...
 Hard resetting via RTS pin...
-========================= [SUCCESS] Took 10.62 seconds =========================
+========================= [SUCCESS] Took 9.97 seconds =========================
 
 Environment    Status    Duration
 -------------  --------  ------------
-wokwi_sim      SUCCESS   00:00:10.623
-========================= 1 succeeded in 00:00:10.623 =========================
-== Running HIL scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/edge_geofence_breach.py ==
+wokwi_sim      SUCCESS   00:00:09.972
+========================= 1 succeeded in 00:00:09.972 =========================
+== Running HIL scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/full_flight_test.py ==
 [HIL] Opening /dev/cu.usbmodem14201...
 [HIL] Waiting for firmware (PING handshake)...
 [FW] '[WIFI] Sim mode — skipping WiFi, HIL runner talks over serial only.'
 [FW] '[BARO] Sim mode -- barometer driven by HIL runner (ALT: commands).'
 [FW] '[HIL] Ready.'
-[HIL] Firmware ready. Loading scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/edge_geofence_breach.py
+[HIL] Firmware ready. Loading scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/full_flight_test.py
 [FW] '[HIL] Ready.'
 [FW] '[HIL] Ready.'
-[FW] '[HIL] Ready.'
+[STATE] Drone is on the ground and ready. Gate: no approval pending.
 [FW] '[CRSF] START switch -- arming and taking off.'
-[FW] '[HIL_GATE] request=RAISE'
+[FW] '[HIL_GATE] request=RAISE reason=OPERATOR_START'
 [STATE] Drone is on the ground and ready. Gate: waiting for approval to enter RAISE.
 [HIL] Approved phase transition to RAISE
 [FW] '[HIL_GATE] approved=RAISE'
+[STATE] Drone is on the ground and ready. Gate: waiting for approval to enter RAISE.
 [STATE] Drone is climbing to takeoff altitude. Gate: no approval pending.
-[FW] '[NAV] Takeoff altitude reached, transitioning to HOLD.'
-[FW] '[HIL_GATE] request=HOLD'
+[FW] '[CRSF] START ignored -- already flying/busy (phase: RAISE)'
+[STATE] Drone is climbing to takeoff altitude. Gate: no approval pending.
+[FW] 'oning to HOLD.'
+[FW] '[HIL_GATE] request=HOLD reason=TAKEOFF_COMPLETE'
 [STATE] Drone is climbing to takeoff altitude. Gate: waiting for approval to enter HOLD.
 [HIL] Approved phase transition to HOLD
 [FW] '[HIL_GATE] approved=HOLD'
+[STATE] Drone is climbing to takeoff altitude. Gate: waiting for approval to enter HOLD.
 [STATE] Drone is hovering in place. Gate: no approval pending.
-[FW] '[HIL_GATE] request=RTL'
-[STATE] Drone is hovering in place. Gate: waiting for approval to enter RTL.
-[HIL] Approved phase transition to RTL
-[FW] '[HIL_GATE] approved=RTL'
-[STATE] Drone is returning to the launch point; RTL climbing to RTL altitude. Gate: no approval pending.
-[FW] '[MOTOR] base=1.00 roll=0.000 pitch=0.000'
-[FW] '[RTL] Climb complete. Returning to launch.'
-[STATE] Drone is returning to the launch point; RTL flying toward the launch point. Gate: no approval pending.
-[FW] '[MOTOR] base=0.51 roll=-0.000 pitch=-0.154'
-[FW] '[MOTOR] base=0.50 roll=-0.000 pitch=-0.170'
-[FW] '[RTL] Arrived over launch pad. Settling.'
-[FW] '[MOTOR] base=0.48 roll=-0.000 pitch=-0.036'
-[FW] '[MOTOR] base=0.46 roll=-0.000 pitch=-0.036'
-[STATE] Drone is returning to the launch point; RTL settling over the launch point. Gate: no approval pending.
-[FW] '[RTL] Settle complete. Beginning landing.'
-[FW] '[HIL_GATE] request=LANDING'
-[STATE] Drone is returning to the launch point; RTL settling over the launch point. Gate: waiting for approval to enter LANDING.
-[HIL] Approved phase transition to LANDING
-[FW] '[HIL_GATE] approved=LANDING'
-[STATE] Drone is descending to land. Gate: no approval pending.
-[FW] '[HIL_GATE] request=LANDED'
-[STATE] Drone is descending to land. Gate: waiting for approval to enter LANDED.
-[HIL] Approved phase transition to LANDED
-[FW] '[NAV] Landed — motors disarmed.'
-[FW] '[HIL_GATE] approved=LANDED'
-[STATE] Drone is on the ground with motors disarmed. Gate: no approval pending.
+[FW] '[CRSF] START switch -- starting waypoint mission.'
+[FW] '[HIL_GATE] request=MISSION reason=OPERATOR_START'
+[STATE] Drone is hovering in place. Gate: waiting for approval to enter MISSION.
+[HIL] Approved phase transition to MISSION
+[FW] '[HIL_GATE] approved=MISSION'
+[STATE] Drone is hovering in place. Gate: waiting for approval to enter MISSION.
+[STATE] Drone is following the mission route. Gate: no approval pending.
+[FW] '[NAV] Reached waypoint 0 — advancing.'
+[STATE] Drone is following the mission route. Gate: no approval pending.
+Traceback (most recent call last):
+  File "/Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/hil_runner.py", line 422, in run_scenario
+    spec.loader.exec_module(mod)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "<frozen importlib._bootstrap_external>", line 759, in exec_module
+  File "<frozen importlib._bootstrap>", line 491, in _call_with_frames_removed
+  File "/Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/full_flight_test.py", line 42, in <module>
+    assert wait_for_status(phase="MISSION", wp=1, timeout=10), "Never reached WP0"
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/hil_runner.py", line 264, in wait_for_status
+    _matches(status["wp"], wp):
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "/Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/hil_runner.py", line 252, in _matches
+    return actual in set(expected)
+                     ~~~^^^^^^^^^^
+TypeError: 'int' object is not iterable
 
-RESULT: PASS
+[HIL] Scenario error: 'int' object is not iterable
+
+RESULT: FAIL

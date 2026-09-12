@@ -10,8 +10,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PORT="${ESP_PORT:-}"
-# SCENARIO="${1:-edge_geofence_breach.py}"
-SCENARIO="${1:-edge_gps_permanent_loss.py}"
+# Comment out scenarios you do not want to run.
+SCENARIOS=(
+    # "edge_geofence_breach.py"
+    # "edge_gps_permanent_loss.py"
+    "edge_max_flight_timeout.py"
+    "full_flight_test.py"
+)
+
+# Passing a scenario keeps the convenient single-scenario debugging mode:
+#   ./simulate/run_hil.sh edge_gps_permanent_loss.py
+if [[ $# -gt 0 ]]; then
+    SCENARIOS=("$1")
+fi
 LOG_DIR="$SCRIPT_DIR/logs"
 mkdir -p "$LOG_DIR"
 LOG_FILE_BASE="$(mktemp "$LOG_DIR/hil_$(date +%Y%m%d_%H%M%S)_XXXXXX")"
@@ -49,16 +60,20 @@ if [[ -z "$PORT" ]]; then
     fi
 fi
 
-if [[ "$SCENARIO" == */* ]]; then
-    SCENARIO_PATH="$SCENARIO"
-else
-    SCENARIO_PATH="$SCRIPT_DIR/scenarios/$SCENARIO"
-fi
+SCENARIO_PATHS=()
+for scenario in "${SCENARIOS[@]}"; do
+    if [[ "$scenario" == */* ]]; then
+        scenario_path="$scenario"
+    else
+        scenario_path="$SCRIPT_DIR/scenarios/$scenario"
+    fi
 
-if [[ ! -f "$SCENARIO_PATH" ]]; then
-    echo "ERROR: scenario not found: $SCENARIO_PATH" >&2
-    exit 2
-fi
+    if [[ ! -f "$scenario_path" ]]; then
+        echo "ERROR: scenario not found: $scenario_path" >&2
+        exit 2
+    fi
+    SCENARIO_PATHS+=("$scenario_path")
+done
 
 if [[ -n "${PIO_BIN:-}" ]]; then
     PIO="$PIO_BIN"
@@ -80,10 +95,18 @@ fi
 
 cd "$PROJECT_ROOT"
 
+echo "== Selected HIL scenarios =="
+printf '  %s\n' "${SCENARIOS[@]}"
+
 echo "== Uploading WOKWI_SIM firmware to $PORT =="
 "$PIO" run -e wokwi_sim --target upload --upload-port "$PORT"
 
-echo "== Running HIL scenario: $SCENARIO_PATH =="
-exec python3 "$SCRIPT_DIR/hil_runner.py" \
-    --port "$PORT" \
-    --scenario "$SCENARIO_PATH"
+for scenario_path in "${SCENARIO_PATHS[@]}"; do
+    echo "== Running HIL scenario: $scenario_path =="
+    python3 "$SCRIPT_DIR/hil_runner.py" \
+        --port "$PORT" \
+        --scenario "$scenario_path"
+    echo "== Passed HIL scenario: $scenario_path =="
+done
+
+echo "== All selected HIL scenarios passed =="

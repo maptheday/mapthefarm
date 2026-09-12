@@ -33,7 +33,7 @@ const unsigned long SSE_FLIGHT_MS   = 100;
 // SAFETY CONFIGURATION
 // ==========================================
 #ifdef WOKWI_SIM
-const unsigned long MAX_FLIGHT_TIME_MS  = 20UL * 1000UL;   // shortened for sim test runtime
+const unsigned long MAX_FLIGHT_TIME_MS  = 60UL * 1000UL;   // shortened for sim test runtime
 #else
 const unsigned long MAX_FLIGHT_TIME_MS  = 5UL * 60UL * 1000UL;
 #endif
@@ -231,10 +231,25 @@ enum FlightPhase {
   PHASE_LANDED
 };
 
+enum TransitionReason {
+  REASON_NONE,
+  REASON_OPERATOR_START,
+  REASON_TAKEOFF_COMPLETE,
+  REASON_MAX_FLIGHT_TIME,
+  REASON_GEOFENCE,
+  REASON_GPS_LOSS,
+  REASON_MISSION_COMPLETE,
+  REASON_RTL_COMPLETE,
+  REASON_HOVER_COMPLETE,
+  REASON_TOUCHDOWN,
+  REASON_EMERGENCY_STOP
+};
+
 #ifdef WOKWI_SIM
 volatile bool        hilGatePending  = false;
 volatile bool        hilGateApproved = false;
 volatile FlightPhase hilGateNext     = PHASE_PARKED;
+volatile TransitionReason hilGateReason = REASON_NONE;
 #endif
 
 const char* phaseName(FlightPhase p) {
@@ -256,15 +271,34 @@ bool phaseFlightEnabled(FlightPhase phase) {
   return phase != PHASE_PARKED && phase != PHASE_LANDED;
 }
 
-#ifdef WOKWI_SIM
-void transitionTo(FlightPhase next);
+const char* reasonName(TransitionReason reason) {
+  switch (reason) {
+    case REASON_NONE:             return "NONE";
+    case REASON_OPERATOR_START:   return "OPERATOR_START";
+    case REASON_TAKEOFF_COMPLETE: return "TAKEOFF_COMPLETE";
+    case REASON_MAX_FLIGHT_TIME:  return "MAX_FLIGHT_TIME";
+    case REASON_GEOFENCE:         return "GEOFENCE";
+    case REASON_GPS_LOSS:         return "GPS_LOSS";
+    case REASON_MISSION_COMPLETE: return "MISSION_COMPLETE";
+    case REASON_RTL_COMPLETE:     return "RTL_COMPLETE";
+    case REASON_HOVER_COMPLETE:   return "HOVER_COMPLETE";
+    case REASON_TOUCHDOWN:        return "TOUCHDOWN";
+    case REASON_EMERGENCY_STOP:   return "EMERGENCY_STOP";
+  }
+  return "UNKNOWN";
+}
 
-bool hilGateAllows(FlightPhase next) {
+void transitionTo(FlightPhase next, TransitionReason reason = REASON_NONE);
+
+#ifdef WOKWI_SIM
+bool hilGateAllows(FlightPhase next, TransitionReason reason) {
   if (!hilGatePending) {
     hilGatePending = true;
     hilGateApproved = false;
     hilGateNext = next;
-    logLine(String("[HIL_GATE] request=") + phaseName(next));
+    hilGateReason = reason;
+    logLine(String("[HIL_GATE] request=") + phaseName(next) +
+            " reason=" + reasonName(reason));
     return false;
   }
   return hilGateNext == next && hilGateApproved;
@@ -274,9 +308,11 @@ bool hilGateBlocked() {
   if (!hilGatePending) return false;
   if (hilGateApproved) {
     FlightPhase next = hilGateNext;
-    transitionTo(next);
+    TransitionReason reason = hilGateReason;
+    transitionTo(next, reason);
     hilGatePending = false;
     hilGateApproved = false;
+    hilGateReason = REASON_NONE;
   }
   return true;
 }
@@ -634,6 +670,7 @@ struct Trip_Landed {};
 // ==========================================
 struct SharedState {
   FlightPhase phase = PHASE_PARKED;
+  TransitionReason transitionReason = REASON_NONE;
   RawSensors  raw;
 
   Dashboard_Parked      dashboard_parked;
@@ -790,9 +827,9 @@ void disarmAllMotors() {
 // ==========================================
 // FUNCTIONAL STATE SETTERS / TRANSITIONS
 // ==========================================
-void transitionTo(FlightPhase next) {
+void transitionTo(FlightPhase next, TransitionReason reason) {
 #ifdef WOKWI_SIM
-  if (!hilGateAllows(next)) return;
+  if (!hilGateAllows(next, reason)) return;
 #endif
   withMutex([&]() {
     FlightPhase prev     = shared.phase;
@@ -926,17 +963,20 @@ void transitionTo(FlightPhase next) {
       case PHASE_LANDED: break;
     }
     shared.phase = next;
+    shared.transitionReason = reason;
   });
 }
 
 // Safety wrapper to avoid repetitive checks
 void checkCoreFailsafes(unsigned long armedAtMs, double launchLat, double launchLon) {
   bool tripRTL = false;
+  TransitionReason rtlReason = REASON_NONE;
   
   // 1. Max Flight Time
   if (armedAtMs > 0 && (millis() - armedAtMs) >= MAX_FLIGHT_TIME_MS) {
     logLine("[SAFETY] Max flight time reached — forcing RTL.");
     tripRTL = true;
+    rtlReason = REASON_MAX_FLIGHT_TIME;
   }
   
   // 2. Geofence
@@ -966,13 +1006,14 @@ void checkCoreFailsafes(unsigned long armedAtMs, double launchLat, double launch
     if (gpsDistanceMeters(lat, lon, launchLat, launchLon) > GEOFENCE_RADIUS_M) {
       logLine("[SAFETY] Geofence exceeded — forcing RTL.");
       tripRTL = true;
+      if (rtlReason == REASON_NONE) rtlReason = REASON_GEOFENCE;
     }
   }
 
   // 3. GPS Loss
   if (!fix && lastFix > 0 && (millis() - lastFix) >= GPS_LOSS_ABORT_MS) {
       logLine("[SAFETY] GPS fix lost — aborting directly to LANDING.");
-      transitionTo(PHASE_LANDING); // Can't RTL without GPS
+      transitionTo(PHASE_LANDING, REASON_GPS_LOSS); // Can't RTL without GPS
       return;
   }
 
@@ -980,7 +1021,7 @@ void checkCoreFailsafes(unsigned long armedAtMs, double launchLat, double launch
   withMutex([&]() { phase = shared.phase; });
 
   if (tripRTL && phase != PHASE_RTL && phase != PHASE_LANDING && phase != PHASE_LANDED) {
-    transitionTo(PHASE_RTL);
+    transitionTo(PHASE_RTL, rtlReason);
   }
 }
 
@@ -1019,7 +1060,7 @@ void navTick_Raise(float navDt) {
 
   if (ready) {
     logLine("[NAV] Takeoff altitude reached, transitioning to HOLD.");
-    transitionTo(PHASE_HOLD);
+    transitionTo(PHASE_HOLD, REASON_TAKEOFF_COMPLETE);
   }
 }
 
@@ -1069,7 +1110,7 @@ void navTick_Mission(float navDt) {
   if (!trip.active) return;
 
   if (trip.currentWP >= trip.waypointCount) {
-    transitionTo(PHASE_HOVER_SETTLE);
+    transitionTo(PHASE_HOVER_SETTLE, REASON_MISSION_COMPLETE);
     logLine("[NAV] Mission complete — hovering before landing.");
     return;
   }
@@ -1159,7 +1200,7 @@ void navTick_RTL(float navDt) {
   else if (trip.state == RTL_SETTLE) {
     if (millis() - trip.settleStartMs >= 3000) {
       logLine("[RTL] Settle complete. Beginning landing.");
-      transitionTo(PHASE_LANDING);
+      transitionTo(PHASE_LANDING, REASON_RTL_COMPLETE);
     }
   }
 }
@@ -1177,7 +1218,7 @@ void navTick_HoverSettle(float /*navDt*/) {
   withMutex([&]() { enteredAt = shared.trip_hoverSettle.enteredAtMs; });
   
   if (millis() - enteredAt >= MISSION_COMPLETE_HOVER_MS) {
-    transitionTo(PHASE_LANDING);
+    transitionTo(PHASE_LANDING, REASON_HOVER_COMPLETE);
     logLine("[NAV] Hover complete — beginning automatic landing.");
   }
 }
@@ -1203,7 +1244,7 @@ void navTick_Landing(float navDt) {
   });
 
   if (landed) {
-    transitionTo(PHASE_LANDED);
+    transitionTo(PHASE_LANDED, REASON_TOUCHDOWN);
     logLine("[NAV] Landed — motors disarmed.");
   }
 }
@@ -1912,6 +1953,23 @@ void initWiFi() {
 void crsfHandleStart();
 void crsfHandleStop();
 
+void resetSimState() {
+  simGpsFix = false;
+  hilGatePending = false;
+  hilGateApproved = false;
+  hilGateNext = PHASE_PARKED;
+  hilGateReason = REASON_NONE;
+  withMutex([&]() {
+    shared.phase = PHASE_PARKED;
+    shared.transitionReason = REASON_NONE;
+    shared.raw.gps.fix = false;
+    shared.raw.gps.lastFixMs = 0;
+    shared.trip_mission.currentWP = 0;
+    shared.trip_mission.active = false;
+  });
+  logLine("[HIL] State reset.");
+}
+
 void parseSimInput() {
   static String buf = "";
   while (Serial.available()) {
@@ -1952,6 +2010,9 @@ void parseSimInput() {
       else if (buf.startsWith("PING:")) {
         logLine("[HIL] Ready.");
       }
+      else if (buf.startsWith("RESET:")) {
+        resetSimState();
+      }
       else if (buf.startsWith("ALLOW:")) {
         String allowed = buf.substring(6);
         for (int i = PHASE_PARKED; i <= PHASE_LANDED; ++i) {
@@ -1977,20 +2038,30 @@ void parseSimInput() {
       // control protocol because a dropped CDC byte can make a real event
       // indistinguishable from a missing event.
       else if (buf.startsWith("STATUS?")) {
+        String requestId = buf.substring(7);
+        if (requestId.length() == 0) requestId = "0";
         FlightPhase phase;
         RTLState rtlState;
         bool gatePending;
         FlightPhase gateNext;
+        TransitionReason transitionReason;
+        int waypoint;
         withMutex([&]() {
           phase = shared.phase;
           rtlState = shared.trip_rtl.state;
           gatePending = hilGatePending;
           gateNext = hilGateNext;
+          transitionReason = shared.transitionReason;
+          waypoint = shared.trip_mission.currentWP;
         });
-        logLine("[STATUS] phase=" + String(phaseName(phase)) +
+        TransitionReason reason = gatePending ? hilGateReason : transitionReason;
+        logLine("[STATUS] id=" + requestId +
+                " phase=" + String(phaseName(phase)) +
                 " rtl=" + String(rtlState == RTL_CLIMB ? "CLIMB" :
                                     rtlState == RTL_RETURN ? "RETURN" : "SETTLE") +
-                " gate=" + String(gatePending ? phaseName(gateNext) : "NONE"));
+                " gate=" + String(gatePending ? phaseName(gateNext) : "NONE") +
+                " reason=" + reasonName(reason) +
+                " wp=" + String(waypoint));
       }
       buf = "";
     } else if (c != '\r') { 
@@ -2033,7 +2104,7 @@ void crsfHandleStop() {
   withMutex([&]() { phase = shared.phase; });
   if (phase != PHASE_PARKED && phase != PHASE_LANDED) {
     logLine("[CRSF] STOP switch -- emergency stop.");
-    transitionTo(PHASE_PARKED);
+    transitionTo(PHASE_PARKED, REASON_EMERGENCY_STOP);
   }
 }
 
@@ -2053,11 +2124,11 @@ void crsfHandleStart() {
       logLine("[CRSF] START ignored -- no GPS fix.");
     } else {
       logLine("[CRSF] START switch -- arming and taking off.");
-      transitionTo(PHASE_RAISE);
+      transitionTo(PHASE_RAISE, REASON_OPERATOR_START);
     }
   } else if (phase == PHASE_HOLD) {
      logLine("[CRSF] START switch -- starting waypoint mission.");
-     transitionTo(PHASE_MISSION);
+     transitionTo(PHASE_MISSION, REASON_OPERATOR_START);
   } else {
     logLine("[CRSF] START ignored -- already flying/busy (phase: "
             + String(phaseName(phase)) + ")");

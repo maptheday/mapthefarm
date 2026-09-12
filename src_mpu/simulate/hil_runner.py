@@ -16,7 +16,6 @@ The firmware must be built with WOKWI_SIM defined:
 
 import argparse
 import importlib.util
-import queue
 import sys
 import threading
 import time
@@ -51,9 +50,10 @@ def send(line: str):
 # ---------------------------------------------------------------------------
 # Log capture
 # ---------------------------------------------------------------------------
-log_queue: queue.Queue = queue.Queue()
-log_lines: list = []
-log_lock  = threading.Lock()
+log_lines: list[str] = []
+log_condition = threading.Condition()
+status_request_lock = threading.Lock()
+next_status_request_id = 0
 
 
 def _complete_lines(rx_buffer: bytearray, raw: bytes):
@@ -119,9 +119,9 @@ def _log_reader():
             if not raw:
                 continue
             for line in _complete_lines(rx_buffer, raw):
-                with log_lock:
+                with log_condition:
                     log_lines.append(line)
-                log_queue.put(line)
+                    log_condition.notify_all()
                 display = _friendly_status(line)
                 if display is not None:
                     if display == last_display:
@@ -137,23 +137,28 @@ def _log_reader():
 
 def wait_for(substring: str, timeout: float = 60.0) -> bool:
     deadline = time.monotonic() + timeout
+    with log_condition:
+        next_line = len(log_lines)
     while time.monotonic() < deadline:
-        remaining = deadline - time.monotonic()
-        try:
-            line = log_queue.get(timeout=min(remaining, 0.5))
-            if substring in line:
-                return True
-        except queue.Empty:
-            pass
+        with log_condition:
+            while next_line == len(log_lines):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                log_condition.wait(timeout=remaining)
+            new_lines = log_lines[next_line:]
+            next_line = len(log_lines)
+        if any(substring in line for line in new_lines):
+            return True
     return False
 
 def forbid(substring: str):
-    with log_lock:
+    with log_condition:
         hits = [l for l in log_lines if substring in l]
     assert not hits, f"FORBID violated: '{substring}' found in log: {hits[0]!r}"
 
 def forbid_count_gt_1(substring: str):
-    with log_lock:
+    with log_condition:
         count = sum(1 for l in log_lines if substring in l)
     assert count <= 1, f"FORBID_COUNT_GT_1 violated: '{substring}' appeared {count} times"
 
@@ -170,8 +175,9 @@ _MOTOR_RE = _re.compile(
     r"pitch=(?P<pitch>-?[\d.]+)"
 )
 _STATUS_RE = _re.compile(
-    r"\[STATUS\] phase=(?P<phase>[A-Z_]+) rtl=(?P<rtl>[A-Z]+) "
-    r"gate=(?P<gate>[A-Z_]+)"
+    r"\[STATUS\] id=(?P<id>\d+) phase=(?P<phase>[A-Z_]+) "
+    r"rtl=(?P<rtl>[A-Z]+) gate=(?P<gate>[A-Z_]+) "
+    r"reason=(?P<reason>[A-Z_]+) wp=(?P<wp>\d+)"
 )
 
 def query_motor(timeout: float = 3.0):
@@ -183,17 +189,23 @@ def query_motor(timeout: float = 3.0):
     motors (climb throttle, steering correction) rather than only
     transitioning phases on scripted sensor values.
     """
+    with log_condition:
+        next_line = len(log_lines)
     send("MOTOR?")
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        remaining = deadline - time.monotonic()
-        try:
-            line = log_queue.get(timeout=min(remaining, 0.5))
-        except queue.Empty:
-            continue
-        m = _MOTOR_RE.search(line)
-        if m:
-            return {k: float(v) for k, v in m.groupdict().items()}
+        with log_condition:
+            while next_line == len(log_lines):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                log_condition.wait(timeout=remaining)
+            new_lines = log_lines[next_line:]
+            next_line = len(log_lines)
+        for line in new_lines:
+            m = _MOTOR_RE.search(line)
+            if m:
+                return {k: float(v) for k, v in m.groupdict().items()}
     return None
 
 def wait_for_motor_base(minimum: float, timeout: float = 3.0):
@@ -206,35 +218,62 @@ def wait_for_motor_base(minimum: float, timeout: float = 3.0):
     return None
 
 def query_status(timeout: float = 1.0):
-    """Request firmware state; tolerate a lost response by letting callers retry."""
-    send("STATUS?")
+    """Return a status snapshot correlated to this request, without side effects."""
+    global next_status_request_id
+    with status_request_lock:
+        next_status_request_id += 1
+        request_id = next_status_request_id
+    with log_condition:
+        next_line = len(log_lines)
+    send(f"STATUS?{request_id}")
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        try:
-            line = log_queue.get(timeout=min(deadline - time.monotonic(), 0.25))
-        except queue.Empty:
-            continue
-        match = _STATUS_RE.search(line)
-        if match:
-            status = match.groupdict()
-            if status["gate"] != "NONE":
-                send(f"ALLOW:{status['gate']}")
-                print(f"[HIL] Approved phase transition to {status['gate']}", flush=True)
-            return status
+        with log_condition:
+            while next_line == len(log_lines):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                log_condition.wait(timeout=remaining)
+            new_lines = log_lines[next_line:]
+            next_line = len(log_lines)
+        for line in new_lines:
+            match = _STATUS_RE.search(line)
+            if match and int(match.group("id")) == request_id:
+                status = match.groupdict()
+                status["wp"] = int(status["wp"])
+                return status
     return None
 
-def wait_for_status(phase=None, rtl=None, timeout=10.0):
-    """Poll state instead of depending on a potentially truncated log line."""
+def _matches(actual, expected):
+    if expected is None:
+        return True
+    if isinstance(expected, (str, int, float, bool)):
+        return actual == expected
+    return actual in set(expected)
+
+def wait_for_status(phase=None, rtl=None, gate=None, reason=None, wp=None, timeout=10.0):
+    """Poll a durable firmware snapshot without modifying firmware state."""
     deadline = time.monotonic() + timeout
-    phases = {phase} if isinstance(phase, str) else set(phase or ())
     while time.monotonic() < deadline:
         remaining = deadline - time.monotonic()
         status = query_status(timeout=min(1.0, remaining))
-        if status and (phase is None or status["phase"] in phases) and \
-                      (rtl is None or status["rtl"] == rtl):
+        if status and _matches(status["phase"], phase) and \
+                      _matches(status["rtl"], rtl) and \
+                      _matches(status["gate"], gate) and \
+                      _matches(status["reason"], reason) and \
+                      _matches(status["wp"], wp):
             return status
         time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
     return None
+
+def approve_gate(phase: str, reason=None, timeout: float = 10.0):
+    """Explicitly approve one expected transition and confirm it completed."""
+    status = wait_for_status(gate=phase, reason=reason, timeout=timeout)
+    if status is None:
+        return None
+    send(f"ALLOW:{phase}")
+    print(f"[HIL] Approved phase transition to {phase}", flush=True)
+    return wait_for_status(phase=phase, gate="NONE", timeout=timeout)
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +343,7 @@ def set_world(**kwargs):
 
 def arm_and_takeoff(takeoff_timeout: float = 15.0) -> bool:
     send("CRSFSTART:1")
-    return wait_for("[NAV] Takeoff altitude reached, transitioning to HOLD.", timeout=takeoff_timeout)
+    return approve_gate("RAISE", timeout=takeoff_timeout) is not None
 
 def start_mission() -> bool:
     send("CRSFSTART:1")
@@ -344,16 +383,19 @@ def main():
     ready = False
     for _ in range(40):
         send("PING:")
-        try:
-            line = log_queue.get(timeout=0.5)
-            if "[HIL] Ready." in line:
-                ready = True
-                break
-        except queue.Empty:
-            pass
+        if wait_for("[HIL] Ready.", timeout=0.5):
+            ready = True
+            break
 
     if not ready:
         print("[HIL] No PING response -- check port and that WOKWI_SIM firmware is flashed.")
+        sys.exit(1)
+
+    # Serial reconnects do not reliably reset every ESP32-S3 USB session.
+    # Reset the simulation state explicitly so scenarios can run in a loop.
+    send("RESET:")
+    if not wait_for("[HIL] State reset.", timeout=2.0):
+        print("[HIL] State reset was not acknowledged.")
         sys.exit(1)
 
     print(f"[HIL] Firmware ready. Loading scenario: {args.scenario}")
@@ -364,7 +406,7 @@ def main():
     mod.world             = world
     mod.world_lock        = world_lock
     mod.log_lines         = log_lines
-    mod.log_lock          = log_lock
+    mod.log_lock          = log_condition
     mod.set_world         = set_world
     mod.wait_for          = wait_for
     mod.wait_for_gps_publish = wait_for_gps_publish
@@ -374,6 +416,7 @@ def main():
     mod.wait_for_motor_base = wait_for_motor_base
     mod.query_status      = query_status
     mod.wait_for_status   = wait_for_status
+    mod.approve_gate      = approve_gate
     mod.send              = send
     mod.arm_and_takeoff   = arm_and_takeoff
     mod.start_mission     = start_mission

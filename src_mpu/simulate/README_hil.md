@@ -28,7 +28,7 @@ pio run -e wokwi_sim --target upload
 This compiles with `WOKWI_SIM` defined, which:
 - Activates `parseSimInput()` so the ESP32 reads sensor values from Serial
   instead of the real I2C sensors
-- Shortens `MAX_FLIGHT_TIME_MS` to 20s for the timeout scenario
+- Shortens `MAX_FLIGHT_TIME_MS` to 60s for the timeout scenario
 
 ---
 
@@ -47,8 +47,9 @@ python3 hil_runner.py \
   --scenario scenarios/edge_geofence_breach.py
 ```
 
-Opening the serial port hardware-resets the ESP32, so every scenario
-gets a clean boot automatically.
+The runner sends an explicit `RESET:` command after the firmware handshake, so
+every scenario starts from `PARKED` with GPS fix disabled even when the ESP32
+USB connection does not perform a hardware reset between runs.
 
 ---
 
@@ -98,7 +99,7 @@ scenarios/
   full_flight_test.py       # full 4-waypoint mission with e-stop + re-arm
   edge_geofence_breach.py   # GPS outside fence -> RTL -> land
   edge_gps_permanent_loss.py # kill fix, never restore -> direct LANDING
-  edge_max_flight_timeout.py # wait for 20s timer -> RTL -> land
+  edge_max_flight_timeout.py # wait for 60s timer -> RTL -> land
 ```
 
 ---

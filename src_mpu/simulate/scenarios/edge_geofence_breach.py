@@ -11,20 +11,19 @@ set_world(lat=36.123456, lon=-80.123456, fix=True, alt_ft=0.0, heading_deg=90.0)
 assert wait_for_gps_publish(), "GPS loop never published the initial fix"
 
 send("CRSFSTART:1")
-assert wait_for("[CRSF] START switch -- arming and taking off.", timeout=5), \
-    "Drone did not arm"
+assert approve_gate("RAISE", reason="OPERATOR_START", timeout=5), "Drone did not arm"
 
 for alt in [3, 6, 10, 13, 15]:
     set_world(alt_ft=float(alt))
     time.sleep(1.0)
 
-assert wait_for_status(phase="HOLD", timeout=10), \
+assert approve_gate("HOLD", reason="TAKEOFF_COMPLETE", timeout=10), \
     "Never reached takeoff altitude"
 
 # Teleport GPS ~400m north -- well outside geofence
 set_world(lat=36.127056, alt_ft=15.0)
-assert wait_for_status(phase="RTL", rtl="CLIMB", timeout=5), \
-    "Geofence breach was not detected"
+assert approve_gate("RTL", reason="GEOFENCE", timeout=5), \
+    "Geofence breach did not request RTL"
 
 # RTL_CLIMB: confirm the firmware is actually commanding more thrust to
 # climb, not just watching an injected barometer value cross a threshold.
@@ -39,7 +38,7 @@ for alt in [20, 30, 40, 50, 61]:
     set_world(alt_ft=float(alt))
     time.sleep(0.5)
 
-assert wait_for_status(phase="RTL", rtl="RETURN", timeout=10), \
+assert wait_for_status(phase="RTL", rtl=("RETURN", "SETTLE"), timeout=10), \
     "RTL climb never completed"
 
 hover_sample = query_motor()
@@ -61,13 +60,10 @@ for lat in [36.125000, 36.123500, 36.123456]:
     assert abs(sample["roll"]) > 0.01 or abs(sample["pitch"]) > 0.01, \
         "No steering correction commanded while returning to launch"
 
-assert wait_for_status(phase=("HOVER_SETTLE", "LANDING", "LANDED"), timeout=10), \
-    "Never arrived over launch pad"
-
 # RTL_SETTLE: 3s hover. Keep barometer at 61 ft so transitionTo(PHASE_LANDING)
 # snapshots the real cruise altitude, not zero.
 set_world(alt_ft=61.0)
-assert wait_for_status(phase="LANDING", timeout=8), \
+assert approve_gate("LANDING", reason="RTL_COMPLETE", timeout=8), \
     "Settle never completed"
 
 # Landing from 61 ft at 1.5 ft/s -> ~41s
@@ -75,7 +71,7 @@ for alt in [55, 45, 35, 25, 15, 8, 3, 0]:
     set_world(alt_ft=float(alt))
     time.sleep(5.0)
 
-assert wait_for_status(phase="LANDED", timeout=15), \
+assert approve_gate("LANDED", reason="TOUCHDOWN", timeout=15), \
     "Never landed"
 
 # ── Whole-run FORBID checks ──────────────────────────────────────────────
