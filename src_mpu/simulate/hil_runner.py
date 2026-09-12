@@ -393,8 +393,16 @@ def main():
 
     # Serial reconnects do not reliably reset every ESP32-S3 USB session.
     # Reset the simulation state explicitly so scenarios can run in a loop.
-    send("RESET:")
-    if not wait_for("[HIL] State reset.", timeout=2.0):
+    # Right after an upload the firmware is still draining the boot-time
+    # backlog of buffered sensor lines, so a single RESET can miss its ack --
+    # retry it the same way the PING handshake above does.
+    reset_ok = False
+    for _ in range(10):
+        send("RESET:")
+        if wait_for("[HIL] State reset.", timeout=1.0):
+            reset_ok = True
+            break
+    if not reset_ok:
         print("[HIL] State reset was not acknowledged.")
         sys.exit(1)
 

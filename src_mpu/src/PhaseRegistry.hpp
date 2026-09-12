@@ -1,0 +1,45 @@
+#pragma once
+
+// ============================================================================
+// THE REGISTRY -- the board every phase "tool" plugs into.
+// ----------------------------------------------------------------------------
+// This is the ONLY place that lists all phases. The two RTOS loops and the
+// telemetry formatter just call phaseFor(currentPhase)->whatever(), so adding
+// or renaming a phase means editing exactly one file (plus its own).
+// ============================================================================
+
+#include "IFlightPhase.hpp"
+#include "phases/ParkedPhase.hpp"
+#include "phases/RaisePhase.hpp"
+#include "phases/HoldPhase.hpp"
+#include "phases/MissionPhase.hpp"
+#include "phases/RtlPhase.hpp"
+#include "phases/HoverSettlePhase.hpp"
+#include "phases/LandingPhase.hpp"
+#include "phases/LandedPhase.hpp"
+
+// One instance of each phase (they hold no state of their own -- all state
+// lives in the shared repository -- so a single shared instance is fine).
+inline IFlightPhase* phaseFor(FlightPhase phase) {
+  static ParkedPhase      parked;
+  static RaisePhase       raise;
+  static HoldPhase        hold;
+  static MissionPhase     mission;
+  static RtlPhase         rtl;
+  static HoverSettlePhase hoverSettle;
+  static LandingPhase     landing;
+  static LandedPhase      landed;
+
+  // Table order MUST match the FlightPhase enum order in FlightModel.hpp.
+  static IFlightPhase* table[] = {
+    &parked,       // PHASE_PARKED
+    &raise,        // PHASE_RAISE
+    &hold,         // PHASE_HOLD
+    &mission,      // PHASE_MISSION
+    &rtl,          // PHASE_RTL
+    &hoverSettle,  // PHASE_HOVER_SETTLE
+    &landing,      // PHASE_LANDING
+    &landed,       // PHASE_LANDED
+  };
+  return table[phase];
+}
