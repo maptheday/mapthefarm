@@ -84,26 +84,4 @@ public:
       shared.dashboard_raise.pitchCorrection = mix.pitchCorrection;
     });
   }
-
-  void writeTelemetry(JsonDocument& doc) override {
-    Cruise_Raise    c;
-    Dashboard_Raise db;
-    float heading;
-    withMutex([&]() {
-      c       = shared.cruise_raise;
-      db      = shared.dashboard_raise;
-      heading = shared.raw.compassHeadingDeg;
-    });
-
-    doc["targetFt"]        = c.targetAltFt;
-    doc["m1"]              = (int)(db.m1 * 100);
-    doc["m2"]              = (int)(db.m2 * 100);
-    doc["m3"]              = (int)(db.m3 * 100);
-    doc["m4"]              = (int)(db.m4 * 100);
-    doc["baseThrottle"]    = (int)(db.baseThrottle * 100);
-    doc["rollCorrection"]  = (int)(db.rollCorrection * 100);
-    doc["pitchCorrection"] = (int)(db.pitchCorrection * 100);
-    doc["compassHeading"]  = heading;
-    doc["navActive"]       = false;
-  }
 };

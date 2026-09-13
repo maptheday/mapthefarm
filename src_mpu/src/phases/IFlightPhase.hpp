@@ -11,15 +11,13 @@
 // methods from scratch. That is deliberate -- a bug in one phase cannot leak
 // into another, and you can open a single phase file and understand it alone.
 //
-// Four things a phase can do:
+// Three things a phase can do:
 //   onEnter()       once, the moment the drone switches into this phase
 //   navTick()       ~10 Hz  -> navigation decisions, failsafes, transitions
 //   physicsTick()   ~200 Hz -> read targets, run PID, drive the motors
-//   writeTelemetry()          -> fill the JSON the web page / HIL reads
 // Any method a phase doesn't need it simply leaves as the empty default.
 // ============================================================================
 
-#include <ArduinoJson.h>
 #include "../models/FlightModel.hpp"
 
 // Everything a phase needs to set itself up on entry. transitionTo() fills this
@@ -53,8 +51,4 @@ public:
   // Called without the lock held -- use withMutex() when you touch `shared`.
   virtual void navTick(float dt) {}
   virtual void physicsTick(float dt) {}
-
-  // Fill in the phase-specific telemetry fields. The shared fields
-  // (flightPhase / flightEnabled / altFt) are already set by the caller.
-  virtual void writeTelemetry(JsonDocument& doc) {}
 };

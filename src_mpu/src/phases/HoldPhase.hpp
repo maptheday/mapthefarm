@@ -76,36 +76,4 @@ public:
       shared.dashboard_hold.pitchCorrection = mix.pitchCorrection;
     });
   }
-
-  void writeTelemetry(JsonDocument& doc) override {
-    Cruise_Hold    c;
-    Dashboard_Hold db;
-    Trip_Hold      t;
-    RawGpsReading  g;
-    float heading;
-    withMutex([&]() {
-      c       = shared.cruise_hold;
-      db      = shared.dashboard_hold;
-      t       = shared.trip_hold;
-      g       = shared.raw.gps;
-      heading = shared.raw.compassHeadingDeg;
-    });
-
-    doc["targetFt"]           = c.targetAltFt;
-    doc["m1"]                 = (int)(db.m1 * 100);
-    doc["m2"]                 = (int)(db.m2 * 100);
-    doc["m3"]                 = (int)(db.m3 * 100);
-    doc["m4"]                 = (int)(db.m4 * 100);
-    doc["baseThrottle"]       = (int)(db.baseThrottle * 100);
-    doc["rollCorrection"]     = (int)(db.rollCorrection * 100);
-    doc["pitchCorrection"]    = (int)(db.pitchCorrection * 100);
-    doc["compassHeading"]     = heading;
-    doc["gpsFix"]             = g.fix;
-    doc["gpsLat"]             = g.lat;
-    doc["gpsLon"]             = g.lon;
-    doc["gpsSats"]            = g.sats;
-    doc["flightSecRemaining"] = t.armedAtMs > 0
-      ? max(0L, (long)((MAX_FLIGHT_TIME_MS - (millis() - t.armedAtMs)) / 1000))
-      : (long)(MAX_FLIGHT_TIME_MS / 1000);
-  }
 };

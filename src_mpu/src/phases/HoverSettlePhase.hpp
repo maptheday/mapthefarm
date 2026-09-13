@@ -71,23 +71,4 @@ public:
       shared.dashboard_hoverSettle.pitchCorrection = mix.pitchCorrection;
     });
   }
-
-  void writeTelemetry(JsonDocument& doc) override {
-    Cruise_HoverSettle    c;
-    Dashboard_HoverSettle db;
-    float heading;
-    withMutex([&]() {
-      c       = shared.cruise_hoverSettle;
-      db      = shared.dashboard_hoverSettle;
-      heading = shared.raw.compassHeadingDeg;
-    });
-
-    doc["targetFt"]       = c.targetAltFt;
-    doc["m1"]             = (int)(db.m1 * 100);
-    doc["m2"]             = (int)(db.m2 * 100);
-    doc["m3"]             = (int)(db.m3 * 100);
-    doc["m4"]             = (int)(db.m4 * 100);
-    doc["compassHeading"] = heading;
-    doc["navActive"]      = false;
-  }
 };

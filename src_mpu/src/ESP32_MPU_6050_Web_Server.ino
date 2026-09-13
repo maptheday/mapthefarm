@@ -1,11 +1,5 @@
 #include <Arduino.h>
-#include <Adafruit_MPU6050.h>
-#include <Adafruit_Sensor.h>
-#include <ArduinoJson.h>
-#include <MadgwickAHRS.h>
-#include <TinyGPSPlus.h>
 
-#include "hardware/EspBarometer.hpp"
 #include "state/FlightConfig.hpp"
 #include "models/FlightModel.hpp"
 #include "models/SensorTypes.hpp"
@@ -15,6 +9,10 @@
 #include "services/Log.hpp"
 #include "services/MotorController.hpp"
 #include "services/Motors.hpp"
+#include "services/Compass.hpp"       // magnetometer
+#include "services/Gps.hpp"           // GPS receiver
+#include "services/Imu.hpp"           // accel/gyro + attitude filter
+#include "services/Altimeter.hpp"     // barometer height-above-ground
 #include "phases/IFlightPhase.hpp"
 #include "phases/PhaseRegistry.hpp"
 #include "phases/PhaseMachine.hpp"   // transitionTo() + HIL gate
@@ -22,8 +20,8 @@
 #include "services/RcInput.hpp"      // CRSF radio + START/STOP handlers
 #include "services/SimAdapter.hpp"   // HIL serial protocol (sim only)
 
-// Pin/timing config lives in FlightConfig.hpp; sensors + motors live behind
-// their services (Compass, Gps parsing in the nav task for now, Motors).
+// Pin/timing config lives in FlightConfig.hpp; every sensor and actuator lives
+// behind its own service (Imu, Altimeter, Gps, Compass, Motors).
 
 // ==========================================
 // CRSF / ELRS RC INPUT
@@ -57,18 +55,18 @@
 // GPIO8 is unused on most ESP32-S3 DevKitC-1 boards but isn't a
 // hardware-enforced guarantee the way the others above are.
 // ==========================================
-// HARDWARE
+// SERVICE INSTANCES
+// ------------------------------------------
+// The one real object for each service. Every service header declares these
+// `extern` so any file can reach the same one; they are born here, once (this
+// .ino is the composition root).
 // ==========================================
-Adafruit_MPU6050 mpu;
-Madgwick         filter;
-EspBarometer     barometer;
-TinyGPSPlus      gps;
-
-// The service instances (declared extern in FlightRuntime.hpp so phases can
-// use them). Motors owns the 4 ESCs; Compass owns the magnetometer.
-Motors          motors;
-MotorController motorController;
-Compass         compass;
+Motors          motors;          // the 4 ESCs
+MotorController motorController;  // PID + motor mixing
+Compass         compass;         // magnetometer + calibration
+Gps             gps;             // GPS receiver
+Imu             imu;             // accel/gyro + attitude filter
+Altimeter       altimeter;       // barometer height-above-ground
 
 // ==========================================
 // The phase machine (transitionTo) + HIL gate live in phases/PhaseMachine.hpp.
@@ -77,18 +75,13 @@ Compass         compass;
 // SHARED STATE (repository)
 // ------------------------------------------
 // Per-phase state blocks, SharedState, and withMutex() live in PhaseState.hpp.
-// The single instances are DEFINED here (the .ino is the one place that owns
-// them); PhaseState.hpp / FlightRuntime.hpp declare them `extern` for phases.
+// The single instances are DEFINED here (the .ino owns them); PhaseState.hpp
+// declares `shared` + the mutex `extern` for the rest of the code.
 // ==========================================
 SemaphoreHandle_t sharedDataMutex;
 SemaphoreHandle_t serialMutex;
 
 volatile SharedState shared;
-float groundAltitudeFt = 0;
-
-// logLine() -> services/Log.hpp | GPS/nav math -> services/NavMath.hpp
-// motor output -> services/Motors.hpp | phase machine -> phases/PhaseMachine.hpp
-// core failsafes -> services/Failsafes.hpp
 
 // ==========================================
 // TASKS
@@ -114,16 +107,16 @@ void navigationTask(void* parameter) {
   shared.raw.gps.sats = simGpsFix ? 8 : 0;
     });
 #else
-    while (Serial2.available() > 0) gps.encode(Serial2.read());
-    if (gps.location.isValid() && gps.location.age() < 2000) {
-      RawGpsReading g;
-      g.lat      = gps.location.lat(); 
-      g.lon      = gps.location.lng();
-      g.fix      = true; 
-      g.sats     = gps.satellites.value(); 
-      g.speedMps = gps.speed.mps(); 
-      g.lastFixMs = millis();
-      withMutex([&]() { shared.raw.gps = g; });
+    RawGpsReading g;
+    if (gps.read(g)) {
+      withMutex([&]() {
+        shared.raw.gps.lat       = g.lat;
+        shared.raw.gps.lon       = g.lon;
+        shared.raw.gps.fix       = g.fix;
+        shared.raw.gps.sats      = g.sats;
+        shared.raw.gps.speedMps  = g.speedMps;
+        shared.raw.gps.lastFixMs = g.lastFixMs;
+      });
     } else {
       withMutex([&]() { shared.raw.gps.fix = false; });
     }
@@ -142,7 +135,6 @@ void navigationTask(void* parameter) {
 unsigned long lastGyroMicros = 0;
 void physicsTask(void* parameter) {
   lastGyroMicros = micros();
-  filter.begin(PHYSICS_LOOP_HZ);
   const TickType_t xFrequency = pdMS_TO_TICKS(PHYSICS_LOOP_MS);
   TickType_t lastWakeTime     = xTaskGetTickCount();
 
@@ -158,29 +150,18 @@ void physicsTask(void* parameter) {
     lastGyroMicros    = now;
 
 #ifndef WOKWI_SIM
-    sensors_event_t a;
-    sensors_event_t g;
-    sensors_event_t temp;
-    mpu.getEvent(&a, &g, &temp);
-
-    float gx = g.gyro.x * 57.2958f;
-    float gy = g.gyro.y * 57.2958f;
-    float gz = g.gyro.z * 57.2958f;
-
-    if (dt > 0 && dt < 1.0f) {
-      filter.updateIMU(gx, gy, gz, a.acceleration.x, a.acceleration.y, a.acceleration.z);
-    }
-
-    float baroAlt = ((float)barometer.readAltitudeMeters() * 3.28084f) - groundAltitudeFt;
+    RawImuReading r;
+    imu.read(r, dt);
+    float baroAlt = altimeter.readAltitudeFt();
 
     withMutex([&]() {
-      shared.raw.imu.gyroX      = filter.getRoll();
-      shared.raw.imu.gyroY      = filter.getPitch();
-      shared.raw.imu.gyroZ      = filter.getYaw();
-      shared.raw.imu.accX       = a.acceleration.x;
-      shared.raw.imu.accY       = a.acceleration.y;
-      shared.raw.imu.accZ       = a.acceleration.z;
-      shared.raw.imu.temp       = temp.temperature;
+      shared.raw.imu.gyroX      = r.gyroX;
+      shared.raw.imu.gyroY      = r.gyroY;
+      shared.raw.imu.gyroZ      = r.gyroZ;
+      shared.raw.imu.accX       = r.accX;
+      shared.raw.imu.accY       = r.accY;
+      shared.raw.imu.accZ       = r.accZ;
+      shared.raw.imu.temp       = r.temp;
       shared.raw.baroAltitudeFt = baroAlt;
     });
 #else
@@ -199,25 +180,8 @@ void physicsTask(void* parameter) {
   }
 }
 
-// ==========================================
-// INIT HELPERS
-// ==========================================
-void initMPU() {
-  logLine("[IMU] Initializing MPU6050...");
-  if (!mpu.begin()) {
-    logLine("[IMU] ERROR: MPU6050 not found.");
-    while (1) { delay(10); }
-  }
-  logLine("[IMU] MPU6050 ready.");
-}
-
-// Compass bring-up + calibration now live in the Compass service; live
-// calibration is the CalibratePhase (triggered on boot below if configured).
-
-void initGPS() {
-  Serial2.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
-}
-
+// Each sensor/actuator brings itself up via its own service's begin() (called
+// in setup below). No init helpers live here anymore.
 
 // ==========================================
 // SETUP
@@ -235,35 +199,17 @@ void setup() {
 #endif
 #ifndef WOKWI_SIM
   Wire.begin(16, 15);
-  initMPU();
+  imu.begin();
   compass.begin();
   logLine("[COMPASS] QMC5883L ready.");
-  initGPS();
+  gps.begin();
   motors.begin();
   logLine("[ESC] DShot600 channels initialized, all motors disarmed.");
-#endif
-#ifndef WOKWI_SIM
-  barometer.initialize();
-  
-  // Average 20 barometer readings over ~2 s so the sensor has time to settle
-  // and temperature effects are smoothed before we lock in the ground reference.
-  logLine("[BARO] Sampling ground altitude (20 readings)...");
-  {
-    const int   BARO_SAMPLES     = 20;
-    const int   BARO_INTERVAL_MS = 100;
-    float accum = 0.0f;
-    for (int i = 0; i < BARO_SAMPLES; i++) {
-      accum += (float)barometer.readAltitudeMeters() * 3.28084f;
-      delay(BARO_INTERVAL_MS);
-    }
-    groundAltitudeFt = accum / BARO_SAMPLES;
-  }
-  logLine(String("[BARO] Ground altitude locked: ") + String(groundAltitudeFt, 1) + " ft");
+  altimeter.begin();   // samples + locks in the ground-altitude reference
 #else
-  // In sim mode baroAltitudeFt is driven entirely by the HIL runner
-  // via ALT: serial commands. No real sensor to read, no ground reference needed.
-  groundAltitudeFt = 0.0f;
-  logLine("[BARO] Sim mode -- barometer driven by HIL runner (ALT: commands).");
+  // In sim there is no sensor hardware: the HIL runner injects heading, GPS,
+  // and altitude over serial (see SimAdapter). Nothing to bring up here.
+  logLine("[SENSORS] Sim mode -- sensors driven by the HIL runner.");
 #endif
 
   xTaskCreatePinnedToCore(navigationTask, "NavTask",    8192, NULL, 1, NULL, 0);

@@ -19,8 +19,8 @@
 //   "Does the phase need this to make its next decision?" -> Trip_
 //   "Am I aiming at this?"                                 -> Cruise_
 //   "Do I just want to see it?"                            -> Dashboard_
-// (Trip_ is a phase's private working memory. It can still publish a friendly
-//  derived view via writeTelemetry() -- e.g. currentWP -> navWaypoint.)
+// (Trip_ is a phase's private working memory. If you ever want to show some of
+//  it, copy a friendly derived view into Dashboard_ -- e.g. currentWP.)
 //
 // Keeping each phase's state separate is on purpose: a bug in MISSION can only
 // touch mission's block, so you can reason about one phase at a time.

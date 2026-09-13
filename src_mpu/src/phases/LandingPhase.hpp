@@ -79,23 +79,4 @@ public:
       shared.dashboard_landing.pitchCorrection = mix.pitchCorrection;
     });
   }
-
-  void writeTelemetry(JsonDocument& doc) override {
-    Cruise_Landing    c;
-    Dashboard_Landing db;
-    float heading;
-    withMutex([&]() {
-      c       = shared.cruise_landing;
-      db      = shared.dashboard_landing;
-      heading = shared.raw.compassHeadingDeg;
-    });
-
-    doc["targetFt"]       = c.targetAltFt;
-    doc["m1"]             = (int)(db.m1 * 100);
-    doc["m2"]             = (int)(db.m2 * 100);
-    doc["m3"]             = (int)(db.m3 * 100);
-    doc["m4"]             = (int)(db.m4 * 100);
-    doc["compassHeading"] = heading;
-    doc["navActive"]      = false;
-  }
 };
