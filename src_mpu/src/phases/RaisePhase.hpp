@@ -7,7 +7,11 @@
 
 #include "IFlightPhase.hpp"
 #include "../state/PhaseState.hpp"
-#include "FlightRuntime.hpp"
+#include "../state/FlightConfig.hpp"        // TAKEOFF_ALTITUDE_FT, RAISE_CLIMB_RATE_FPS
+#include "../services/Motors.hpp"           // motors
+#include "../services/MotorController.hpp"  // motorController
+#include "../services/Log.hpp"              // logLine
+#include "PhaseSwitch.hpp"                  // transitionTo
 
 class RaisePhase : public IFlightPhase {
 public:

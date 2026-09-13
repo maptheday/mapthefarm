@@ -14,13 +14,10 @@
 #include "../models/FlightModel.hpp"
 #include "NavMath.hpp"                 // gpsDistanceMeters
 #include "Log.hpp"                     // logLine
+#include "../phases/PhaseSwitch.hpp"   // transitionTo
 #ifdef WOKWI_SIM
 #include "../state/HilState.hpp"       // sim GPS
 #endif
-
-// Declared in FlightRuntime.hpp; the phase machine that satisfies it is
-// included by the .ino before this is used.
-void transitionTo(FlightPhase next, TransitionReason reason);
 
 inline void checkCoreFailsafes(unsigned long armedAtMs, double launchLat, double launchLon) {
   bool tripRTL = false;

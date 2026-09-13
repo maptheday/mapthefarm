@@ -16,7 +16,8 @@
 #include "../state/PhaseState.hpp"
 #include "IFlightPhase.hpp"
 #include "PhaseRegistry.hpp"
-#include "FlightRuntime.hpp"      // transitionTo() declaration, logLine, PANIC
+#include "PhaseSwitch.hpp"           // transitionTo() declaration (this file is its body)
+#include "../services/Log.hpp"       // logLine
 #include "../models/FlightModel.hpp"
 #ifdef WOKWI_SIM
 #include "../state/HilState.hpp"  // sim GPS + HIL gate state

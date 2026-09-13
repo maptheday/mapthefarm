@@ -10,7 +10,12 @@
 
 #include "IFlightPhase.hpp"
 #include "../state/PhaseState.hpp"
-#include "FlightRuntime.hpp"
+#include "../state/FlightConfig.hpp"        // RTL_ALTITUDE_FT, WAYPOINT_ACCEPT_RADIUS_M, MAX_FLIGHT_TIME_MS
+#include "../services/Motors.hpp"           // motors
+#include "../services/MotorController.hpp"  // motorController
+#include "../services/NavMath.hpp"          // gpsDistanceMeters, gpsBearing, bearingToNorthEast
+#include "../services/Log.hpp"              // logLine
+#include "PhaseSwitch.hpp"                  // transitionTo
 
 class RtlPhase : public IFlightPhase {
 public:

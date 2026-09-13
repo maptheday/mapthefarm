@@ -8,7 +8,13 @@
 
 #include "IFlightPhase.hpp"
 #include "../state/PhaseState.hpp"
-#include "FlightRuntime.hpp"
+#include "../state/FlightConfig.hpp"        // WAYPOINTS, WAYPOINT_*, MAX_FLIGHT_TIME_MS
+#include "../services/Motors.hpp"           // motors
+#include "../services/MotorController.hpp"  // motorController
+#include "../services/NavMath.hpp"          // gpsDistanceMeters, gpsBearing, getMissionWaypoint
+#include "../services/Failsafes.hpp"        // checkCoreFailsafes
+#include "../services/Log.hpp"              // logLine, PANIC
+#include "PhaseSwitch.hpp"                  // transitionTo
 
 class MissionPhase : public IFlightPhase {
 public:

@@ -68,3 +68,6 @@ private:
   PID navNorthPID;
   PID navEastPID;
 };
+
+// The one MotorController instance (defined in the .ino).
+extern MotorController motorController;

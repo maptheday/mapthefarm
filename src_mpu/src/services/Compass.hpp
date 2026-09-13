@@ -90,3 +90,6 @@ private:
   int16_t minY_ = 32767, maxY_ = -32768;
   int16_t minZ_ = 32767, maxZ_ = -32768;
 };
+
+// The one Compass instance (defined in the .ino).
+extern Compass compass;

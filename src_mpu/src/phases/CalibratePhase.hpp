@@ -11,7 +11,11 @@
 
 #include "IFlightPhase.hpp"
 #include "../state/PhaseState.hpp"
-#include "FlightRuntime.hpp"
+#include "../state/FlightConfig.hpp"        // COMPASS_CAL_DURATION_MS
+#include "../services/Compass.hpp"          // compass
+#include "../services/Motors.hpp"           // motors
+#include "../services/Log.hpp"              // logLine
+#include "PhaseSwitch.hpp"                  // transitionTo
 
 class CalibratePhase : public IFlightPhase {
 public:

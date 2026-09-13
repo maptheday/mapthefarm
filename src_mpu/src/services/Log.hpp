@@ -23,3 +23,6 @@ inline void logLine(const String& msg) {
     xSemaphoreGive(serialMutex);
   }
 }
+
+// Unrecoverable-bug halt: print once and freeze so a broken drone never flies.
+#define PANIC(msg) do { Serial.println(F("[PANIC] " msg " — halting")); while(1) { delay(10); } } while(0)

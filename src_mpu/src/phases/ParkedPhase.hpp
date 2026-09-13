@@ -7,7 +7,9 @@
 
 #include "IFlightPhase.hpp"
 #include "../state/PhaseState.hpp"
-#include "FlightRuntime.hpp"
+#include "../state/FlightConfig.hpp"        // MAX_FLIGHT_TIME_MS
+#include "../services/Motors.hpp"           // motors
+#include "../services/MotorController.hpp"  // motorController
 
 class ParkedPhase : public IFlightPhase {
 public:

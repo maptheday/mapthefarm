@@ -1,0 +1,68 @@
+Run log: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/hil_20260912_220129_5QDf2M.log
+== Selected HIL scenarios ==
+  edge_geofence_breach.py
+  edge_gps_permanent_loss.py
+  edge_max_flight_timeout.py
+  full_flight_test.py
+== Uploading WOKWI_SIM firmware to /dev/cu.usbmodem14201 ==
+Processing wokwi_sim (platform: espressif32; board: esp32-s3-devkitc-1-n16r8; framework: arduino)
+--------------------------------------------------------------------------------
+Verbose mode can be enabled via `-v, --verbose` option
+CONFIGURATION: https://docs.platformio.org/page/boards/espressif32/esp32-s3-devkitc-1-n16r8.html
+PLATFORM: Espressif 32 (7.0.1) > Espressif ESP32-S3-DevKitC-1-N16R8 (16 MB, 8 MB PSRAM)
+HARDWARE: ESP32S3 240MHz, 320KB RAM, 16MB Flash
+DEBUG: Current (esp-builtin) On-board (esp-builtin) External (cmsis-dap, esp-bridge, esp-prog, iot-bus-jtag, jlink, minimodule, olimex-arm-usb-ocd, olimex-arm-usb-ocd-h, olimex-arm-usb-tiny-h, olimex-jtag-tiny, tumpa)
+PACKAGES: 
+ - framework-arduinoespressif32 @ 3.20017.241212+sha.dcc1105b 
+ - tool-esptoolpy @ 2.41100.0 (4.11.0) 
+ - tool-mkfatfs @ 2.0.1 
+ - tool-mklittlefs @ 1.203.210628 (2.3) 
+ - tool-mkspiffs @ 2.230.0 (2.30) 
+ - tool-openocd-esp32 @ 2.1100.20220706 (11.0) 
+ - toolchain-riscv32-esp @ 8.4.0+2021r2-patch5 
+ - toolchain-xtensa-esp32s3 @ 8.4.0+2021r2-patch5
+Converting ESP32_MPU_6050_Web_Server.ino
+LDF: Library Dependency Finder -> https://bit.ly/configure-pio-ldf
+LDF Modes: Finder ~ chain, Compatibility ~ soft
+Found 45 compatible libraries
+Scanning dependencies...
+Dependency Graph
+|-- AsyncTCP @ 3.5.0
+|-- ESPAsyncWebServer @ 3.12.0
+|-- Adafruit MPU6050 @ 2.2.9
+|-- Adafruit Unified Sensor @ 1.1.15
+|-- ArduinoJson @ 7.4.3
+|-- Madgwick @ 1.2.0
+|-- Adafruit BME280 Library @ 2.3.0
+|-- TinyGPSPlus @ 1.1.0
+|-- QMC5883LCompass @ 1.2.3
+|-- Wire @ 2.0.0
+|-- Preferences @ 2.0.0
+Building in release mode
+Compiling .pio/build/wokwi_sim/src/ESP32_MPU_6050_Web_Server.ino.cpp.o
+Retrieving maximum program size .pio/build/wokwi_sim/firmware.elf
+Checking size .pio/build/wokwi_sim/firmware.elf
+Advanced Memory Usage is available via "PlatformIO Home > Project Inspect"
+RAM:   [=         ]   6.5% (used 21412 bytes from 327680 bytes)
+Flash: [=         ]   5.6% (used 367825 bytes from 6553600 bytes)
+Configuring upload protocol...
+AVAILABLE: cmsis-dap, esp-bridge, esp-builtin, esp-prog, espota, esptool, iot-bus-jtag, jlink, minimodule, olimex-arm-usb-ocd, olimex-arm-usb-ocd-h, olimex-arm-usb-tiny-h, olimex-jtag-tiny, tumpa
+CURRENT: upload_protocol = esptool
+Looking for upload port...
+Using manually specified: /dev/cu.usbmodem14201
+Uploading .pio/build/wokwi_sim/firmware.bin
+esptool.py v4.11.0
+Serial port /dev/cu.usbmodem14201
+
+A fatal error occurred: Could not open /dev/cu.usbmodem14201, the port is busy or doesn't exist.
+([Errno 2] could not open port /dev/cu.usbmodem14201: [Errno 2] No such file or directory: '/dev/cu.usbmodem14201')
+
+Hint: Check if the port is correct and ESP connected
+
+*** [upload] Error 2
+========================== [FAILED] Took 6.85 seconds ==========================
+
+Environment    Status    Duration
+-------------  --------  ------------
+wokwi_sim      FAILED    00:00:06.851
+==================== 1 failed, 0 succeeded in 00:00:06.851 ====================
