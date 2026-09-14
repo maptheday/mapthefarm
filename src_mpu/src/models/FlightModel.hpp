@@ -12,7 +12,8 @@ enum FlightPhase {
   PHASE_HOVER_SETTLE,
   PHASE_LANDING,
   PHASE_LANDED,
-  PHASE_CALIBRATE   // ground maintenance: sensor calibration (motors off)
+  PHASE_CALIBRATE,  // ground maintenance: sensor calibration (motors off)
+  PHASE_MANUAL      // pilot flies by RC sticks (sticks drive the Cruise setpoints)
   // NOTE: new phases go at the END -- the registry table in PhaseRegistry.hpp
   // is indexed by this enum's order.
 };
@@ -29,7 +30,9 @@ enum TransitionReason {
   REASON_HOVER_COMPLETE,
   REASON_TOUCHDOWN,
   REASON_EMERGENCY_STOP,
-  REASON_CALIBRATION_COMPLETE
+  REASON_CALIBRATION_COMPLETE,
+  REASON_MANUAL_ON,   // pilot took manual stick control
+  REASON_MANUAL_OFF   // pilot handed control back to auto-hover
 };
 
 inline const char* phaseName(FlightPhase phase) {
@@ -43,6 +46,7 @@ inline const char* phaseName(FlightPhase phase) {
     case PHASE_LANDING:      return "LANDING";
     case PHASE_LANDED:       return "LANDED";
     case PHASE_CALIBRATE:    return "CALIBRATE";
+    case PHASE_MANUAL:       return "MANUAL";
   }
   return "UNKNOWN";
 }
@@ -65,6 +69,8 @@ inline const char* reasonName(TransitionReason reason) {
     case REASON_TOUCHDOWN:        return "TOUCHDOWN";
     case REASON_EMERGENCY_STOP:   return "EMERGENCY_STOP";
     case REASON_CALIBRATION_COMPLETE: return "CALIBRATION_COMPLETE";
+    case REASON_MANUAL_ON:        return "MANUAL_ON";
+    case REASON_MANUAL_OFF:       return "MANUAL_OFF";
   }
   return "UNKNOWN";
 }

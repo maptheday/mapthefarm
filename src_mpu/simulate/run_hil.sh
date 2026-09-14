@@ -16,6 +16,7 @@ SCENARIOS=(
     # "edge_gps_permanent_loss.py"
     "edge_max_flight_timeout.py"
     "full_flight_test.py"
+    "manual_flight_test.py"
 )
 
 # Passing a scenario keeps the convenient single-scenario debugging mode:

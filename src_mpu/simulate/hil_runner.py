@@ -78,6 +78,8 @@ _PHASE_DESCRIPTIONS = {
     "HOVER_SETTLE": "hovering over the launch point before landing",
     "LANDING": "descending to land",
     "LANDED": "on the ground with motors disarmed",
+    "CALIBRATE": "calibrating sensors on the ground (motors off)",
+    "MANUAL": "flying under manual RC-stick control",
 }
 
 _RTL_DESCRIPTIONS = {
@@ -179,6 +181,11 @@ _STATUS_RE = _re.compile(
     r"rtl=(?P<rtl>[A-Z]+) gate=(?P<gate>[A-Z_]+) "
     r"reason=(?P<reason>[A-Z_]+) wp=(?P<wp>\d+)"
 )
+_MANUAL_RE = _re.compile(
+    r"\[MANUAL\] targetAlt=(?P<targetAlt>-?[\d.]+) "
+    r"targetRoll=(?P<targetRoll>-?[\d.]+) targetPitch=(?P<targetPitch>-?[\d.]+) "
+    r"yaw=(?P<yaw>-?[\d.]+) anchored=(?P<anchored>\d+) base=(?P<base>-?[\d.]+)"
+)
 
 def query_motor(timeout: float = 3.0):
     """Send MOTOR? and block for the matching [MOTOR] response line.
@@ -216,6 +223,47 @@ def wait_for_motor_base(minimum: float, timeout: float = 3.0):
         if sample is not None and sample["base"] >= minimum:
             return sample
     return None
+
+def query_manual(timeout: float = 3.0):
+    """Send MANUAL? and block for the matching [MANUAL] response line.
+
+    Returns a dict (targetAlt/targetRoll/targetPitch/yaw are floats,
+    anchored is an int 0/1) describing the pilot setpoints the sticks are
+    currently driving in MANUAL mode, plus whether position hold has an
+    anchor dropped. Used to assert stick response and position hold.
+    """
+    with log_condition:
+        next_line = len(log_lines)
+    send("MANUAL?")
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with log_condition:
+            while next_line == len(log_lines):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                log_condition.wait(timeout=remaining)
+            new_lines = log_lines[next_line:]
+            next_line = len(log_lines)
+        for line in new_lines:
+            m = _MANUAL_RE.search(line)
+            if m:
+                d = m.groupdict()
+                d["anchored"] = int(d["anchored"])
+                for k in ("targetAlt", "targetRoll", "targetPitch", "yaw", "base"):
+                    d[k] = float(d[k])
+                return d
+    return None
+
+def set_sticks(throttle: float = 0.5, roll: float = 0.0,
+               pitch: float = 0.0, yaw: float = 0.0):
+    """Fake the four RC sticks for MANUAL mode.
+
+    throttle is 0..1 (0.5 = centered = hold altitude); roll/pitch/yaw are
+    -1..1 (0 = centered). Sends one STICKS: line; the firmware latches it
+    just like a real CRSF frame would.
+    """
+    send(f"STICKS:{throttle:.3f},{roll:.3f},{pitch:.3f},{yaw:.3f}")
 
 def query_status(timeout: float = 1.0):
     """Return a status snapshot correlated to this request, without side effects."""
@@ -422,6 +470,8 @@ def main():
     mod.forbid_count_gt_1 = forbid_count_gt_1
     mod.query_motor       = query_motor
     mod.wait_for_motor_base = wait_for_motor_base
+    mod.query_manual      = query_manual
+    mod.set_sticks        = set_sticks
     mod.query_status      = query_status
     mod.wait_for_status   = wait_for_status
     mod.approve_gate      = approve_gate

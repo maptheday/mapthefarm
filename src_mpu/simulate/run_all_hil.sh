@@ -37,6 +37,7 @@ run_scenario "edge_gps_permanent_loss"
 run_scenario "edge_geofence_breach"
 run_scenario "edge_max_flight_timeout"
 run_scenario "full_flight_test"
+run_scenario "manual_flight_test"
 
 echo ""
 echo "================================"

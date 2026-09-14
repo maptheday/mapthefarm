@@ -52,7 +52,39 @@ inline void crsfHandleStart() {
   }
 }
 
+// MANUAL switch flipped ON: pilot takes the sticks. Allowed from the ground
+// (bench/hand testing) or from a stable auto-hover (take over mid-flight).
+inline void crsfHandleManualOn() {
+  FlightPhase phase;
+  withMutex([&]() { phase = shared.phase; });
+  if (phase == PHASE_PARKED || phase == PHASE_LANDED || phase == PHASE_HOLD) {
+    logLine("[CRSF] MANUAL switch -- pilot has the sticks.");
+    transitionTo(PHASE_MANUAL, REASON_MANUAL_ON);
+  } else {
+    logLine("[CRSF] MANUAL ignored (phase: " + String(phaseName(phase)) + ")");
+  }
+}
+
+// MANUAL switch flipped OFF: hand back to auto-hover (HOLD). STOP is still the
+// hard kill; this is the "let go of the sticks safely" path.
+inline void crsfHandleManualOff() {
+  FlightPhase phase;
+  withMutex([&]() { phase = shared.phase; });
+  if (phase == PHASE_MANUAL) {
+    logLine("[CRSF] MANUAL switch off -- handing back to auto-hover.");
+    transitionTo(PHASE_HOLD, REASON_MANUAL_OFF);
+  }
+}
+
 #ifndef WOKWI_SIM
+// Convert a raw CRSF channel (172..1811, mid 992) to a signed -1..1 deflection.
+inline float crsfNorm(uint16_t raw) {
+  float v = ((float)raw - CRSF_RAW_MID) / (float)(CRSF_RAW_MAX - CRSF_RAW_MID);
+  if (v >  1.0f) v =  1.0f;
+  if (v < -1.0f) v = -1.0f;
+  return v;
+}
+
 // --- Real radio only: parse CRSF frames off the wire ---
 // A CRSF frame every ~4 ms: [0]=sync 0xC8, [1]=payload len, [2]=type
 // (0x16 = RC channels packed), [3..]=16 channels packed as 11-bit values,
@@ -71,11 +103,12 @@ inline void crsfTask(void* parameter) {
   logLine("[CRSF] WARNING: CRSF_RX_PIN (GPIO" + String(CRSF_RX_PIN) + ") is a placeholder -- "
           "verify it doesn't collide with EspESC.hpp's pins before first flight.");
   Serial1.begin(CRSF_BAUD, SERIAL_8N1, CRSF_RX_PIN, -1 /* TX unused */);
-  logLine("[CRSF] Listening -- Ch5=START, Ch6=STOP");
+  logLine("[CRSF] Listening -- sticks + START/STOP/MANUAL switches");
 
   uint8_t buf[64];
-  int     bufLen        = 0;
-  bool    prevStartHigh = false; // for edge detection on START channel
+  int     bufLen         = 0;
+  bool    prevStartHigh  = false; // for edge detection on START channel
+  bool    prevManualHigh = false; // for edge detection on MANUAL channel
 
   for (;;) {
     while (Serial1.available()) {
@@ -101,8 +134,22 @@ inline void crsfTask(void* parameter) {
       if (buf[2] == 0x16 && frameLen == 26) {
         const uint8_t* payload = buf + 3; // payload starts at byte 3
 
-        uint16_t startVal = crsfChannel(payload, CRSF_START_CH);
-        uint16_t stopVal  = crsfChannel(payload, CRSF_STOP_CH);
+        uint16_t startVal  = crsfChannel(payload, CRSF_START_CH);
+        uint16_t stopVal   = crsfChannel(payload, CRSF_STOP_CH);
+        uint16_t manualVal = crsfChannel(payload, CRSF_MANUAL_CH);
+
+        // Latch the four sticks so the MANUAL phase can read them. throttle is
+        // published 0..1 (down..up); roll/pitch/yaw as -1..1 (centered = 0).
+        float roll     = crsfNorm(crsfChannel(payload, CRSF_ROLL_CH));
+        float pitch    = crsfNorm(crsfChannel(payload, CRSF_PITCH_CH));
+        float yaw      = crsfNorm(crsfChannel(payload, CRSF_YAW_CH));
+        float throttle = (crsfNorm(crsfChannel(payload, CRSF_THROTTLE_CH)) + 1.0f) * 0.5f;
+        withMutex([&]() {
+          shared.sticks.roll     = roll;
+          shared.sticks.pitch    = pitch;
+          shared.sticks.yaw      = yaw;
+          shared.sticks.throttle = throttle;
+        });
 
         // STOP: level-triggered, highest priority -- any low frame cuts motors.
         if (stopVal < CRSF_LOW_THRESHOLD) {
@@ -115,6 +162,13 @@ inline void crsfTask(void* parameter) {
           crsfHandleStart();
         }
         prevStartHigh = startHigh;
+
+        // MANUAL: edge-triggered both ways -- ON grabs the sticks, OFF hands
+        // back to auto-hover.
+        bool manualHigh = (manualVal > CRSF_HIGH_THRESHOLD);
+        if (manualHigh && !prevManualHigh)      crsfHandleManualOn();
+        else if (!manualHigh && prevManualHigh) crsfHandleManualOff();
+        prevManualHigh = manualHigh;
       }
 
       bufLen = 0; // done with this frame, reset for next

@@ -52,3 +52,25 @@ const float RAISE_CLIMB_RATE_FPS = 3.0f;
 #define CRSF_STOP_CH        5
 #define CRSF_HIGH_THRESHOLD 1700
 #define CRSF_LOW_THRESHOLD  1300
+
+// MANUAL mode: stick channels (0-based, standard AETR order) + the AUX switch
+// that flips into/out of pilot control. Raw CRSF values are 172..1811 (mid 992).
+#define CRSF_ROLL_CH        0
+#define CRSF_PITCH_CH       1
+#define CRSF_THROTTLE_CH    2
+#define CRSF_YAW_CH         3
+#define CRSF_MANUAL_CH      6   // 3-pos switch: HIGH = take manual control
+#define CRSF_RAW_MIN        172
+#define CRSF_RAW_MID        992
+#define CRSF_RAW_MAX        1811
+
+// How far the sticks push the setpoints at full deflection.
+const float MANUAL_MAX_LEAN_DEG   = 15.0f;  // full roll/pitch stick -> 15 deg lean
+const float MANUAL_CLIMB_RATE_FPS = 3.0f;   // full up/down throttle -> 3 ft/s climb/descend
+const float MANUAL_YAW_RATE_DPS   = 45.0f;  // full yaw stick -> 45 deg/s turn
+const float MANUAL_STICK_DEADBAND = 0.05f;  // ignore tiny stick noise near center
+
+// Position hold: when you center the roll/pitch sticks, actively brake and hold
+// the GPS spot instead of coasting. Needs a real GPS fix. Set to false for
+// bench/indoor testing -- then a centered stick just levels out (as before).
+const bool MANUAL_POSITION_HOLD = true;

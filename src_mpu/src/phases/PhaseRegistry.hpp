@@ -18,6 +18,7 @@
 #include "LandingPhase.hpp"
 #include "LandedPhase.hpp"
 #include "CalibratePhase.hpp"
+#include "ManualPhase.hpp"
 
 // One instance of each phase (they hold no state of their own -- all state
 // lives in the shared repository -- so a single shared instance is fine).
@@ -31,6 +32,7 @@ inline IFlightPhase* phaseFor(FlightPhase phase) {
   static LandingPhase     landing;
   static LandedPhase      landed;
   static CalibratePhase   calibrate;
+  static ManualPhase      manual;
 
   // Table order MUST match the FlightPhase enum order in FlightModel.hpp.
   static IFlightPhase* table[] = {
@@ -43,6 +45,7 @@ inline IFlightPhase* phaseFor(FlightPhase phase) {
     &landing,      // PHASE_LANDING
     &landed,       // PHASE_LANDED
     &calibrate,    // PHASE_CALIBRATE
+    &manual,       // PHASE_MANUAL
   };
   return table[phase];
 }

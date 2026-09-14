@@ -3,6 +3,21 @@
 // Plain data objects representing the latest sensor measurements. The
 // controller uses these types without knowing which sensor produced them.
 
+// Latest RC stick positions, normalized. throttle is 0..1 (0=stick down,
+// 0.5=centered, 1=up); roll/pitch/yaw are -1..1 (0=centered). Filled by the
+// RC input service on real hardware; used only by the MANUAL phase.
+struct RawSticks {
+  float throttle = 0.5f;  // centered = "hold altitude"
+  float roll     = 0.0f;
+  float pitch    = 0.0f;
+  float yaw      = 0.0f;
+
+  RawSticks& operator=(const volatile RawSticks& o) {
+    throttle = o.throttle; roll = o.roll; pitch = o.pitch; yaw = o.yaw;
+    return *this;
+  }
+};
+
 struct RawImuReading {
   float accX  = 0.0f;
   float accY  = 0.0f;

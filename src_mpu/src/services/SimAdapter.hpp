@@ -6,11 +6,13 @@
 // with tiny text commands; this file parses them and speaks the reply protocol:
 //   inputs:  HDG:/LAT:/LON:/FIX:/ALT:  inject fake sensor readings
 //            CRSFSTART:1 / CRSFSTOP:1   fake the pilot's radio switches
+//            CRSFMANUAL:1 / :0          fake the MANUAL switch on/off
+//            STICKS:th,ro,pi,ya         fake the four RC sticks (MANUAL mode)
 //            MISSION:                   shortcut to start a mission
 //            ALLOW:<PHASE>              approve a gated transition
 //            RESET:                     wipe state between scenarios
 //            PING:                      liveness check
-//   queries: STATUS? / MOTOR?          machine-readable state read-back
+//   queries: STATUS? / MOTOR? / MANUAL? machine-readable state read-back
 // Kept out of the real firmware path -- none of this compiles on hardware.
 // ============================================================================
 
@@ -74,6 +76,32 @@ inline void parseSimInput() {
       else if (buf.startsWith("CRSFSTOP:")) {
         if (buf.substring(9).toInt() == 1) crsfHandleStop();
       }
+      // MANUAL switch: :1 grabs the sticks, :0 hands back to auto-hover. Same
+      // handlers the real crsfTask calls on the switch edge.
+      else if (buf.startsWith("CRSFMANUAL:")) {
+        if (buf.substring(11).toInt() == 1) crsfHandleManualOn();
+        else                                crsfHandleManualOff();
+      }
+      // Fake the four RC sticks for MANUAL mode: "STICKS:throttle,roll,pitch,yaw"
+      // (throttle 0..1 with 0.5 centered; roll/pitch/yaw -1..1 centered at 0).
+      else if (buf.startsWith("STICKS:")) {
+        String p = buf.substring(7);
+        int c1 = p.indexOf(',');
+        int c2 = p.indexOf(',', c1 + 1);
+        int c3 = p.indexOf(',', c2 + 1);
+        if (c1 > 0 && c2 > c1 && c3 > c2) {
+          float th = p.substring(0, c1).toFloat();
+          float ro = p.substring(c1 + 1, c2).toFloat();
+          float pi = p.substring(c2 + 1, c3).toFloat();
+          float ya = p.substring(c3 + 1).toFloat();
+          withMutex([&]() {
+            shared.sticks.throttle = th;
+            shared.sticks.roll     = ro;
+            shared.sticks.pitch    = pi;
+            shared.sticks.yaw      = ya;
+          });
+        }
+      }
       // HIL runner ping -- confirms firmware is alive and setup() has completed.
       else if (buf.startsWith("PING:")) {
         logLine("[HIL] Ready.");
@@ -83,7 +111,7 @@ inline void parseSimInput() {
       }
       else if (buf.startsWith("ALLOW:")) {
         String allowed = buf.substring(6);
-        for (int i = PHASE_PARKED; i <= PHASE_LANDED; ++i) {
+        for (int i = PHASE_PARKED; i <= PHASE_MANUAL; ++i) {  // covers every FlightPhase
           FlightPhase phase = static_cast<FlightPhase>(i);
           if (allowed == phaseName(phase) && hilGatePending && hilGateNext == phase) {
             hilGateApproved = true;
@@ -100,6 +128,24 @@ inline void parseSimInput() {
         logLine("[MOTOR] base=" + String(m.baseThrottle, 2) +
                 " roll=" + String(m.rollCorrection, 3) +
                 " pitch=" + String(m.pitchCorrection, 3));
+      }
+      // MANUAL-mode read-back: the pilot setpoints the sticks are driving, plus
+      // whether position hold has dropped an anchor and the base throttle.
+      else if (buf.startsWith("MANUAL?")) {
+        Cruise_Manual    c;
+        Trip_Manual      t;
+        Dashboard_Manual d;
+        withMutex([&]() {
+          c = shared.cruise_manual;
+          t = shared.trip_manual;
+          d = shared.dashboard_manual;
+        });
+        logLine("[MANUAL] targetAlt=" + String(c.targetAltFt, 2) +
+                " targetRoll=" + String(c.targetRollDeg, 2) +
+                " targetPitch=" + String(c.targetPitchDeg, 2) +
+                " yaw=" + String(c.yawTargetHeading, 1) +
+                " anchored=" + String(t.anchored ? 1 : 0) +
+                " base=" + String(d.baseThrottle, 2));
       }
       // Machine-readable state read-back. Tests use this, not human log lines,
       // because a dropped CDC byte could make a real event look like a missing

@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drone Manual Cockpit</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #121821;
+    --panel2: #0e141c;
+    --edge: #223042;
+    --ink: #e6edf3;
+    --dim: #8aa0b4;
+    --accent: #35c1ff;
+    --good: #35e08a;
+    --warn: #ffb03a;
+    --bad: #ff5470;
+    --sky: #2b6cb0;
+    --ground: #6b4a2b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    padding: 16px; max-width: 1100px; margin: 0 auto;
+  }
+  h1 { font-size: 18px; margin: 0 0 2px; letter-spacing: .5px; }
+  .sub { color: var(--dim); font-size: 12px; margin-bottom: 14px; }
+  .bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+  button {
+    background: var(--panel); color: var(--ink); border: 1px solid var(--edge);
+    border-radius: 8px; padding: 8px 14px; font: inherit; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: default; }
+  button.stop { border-color: var(--bad); color: var(--bad); }
+  .pill { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--edge); font-size: 12px; }
+  .pill.on { color: var(--good); border-color: var(--good); }
+  .pill.off { color: var(--dim); }
+  .grid { display: grid; grid-template-columns: 260px 1fr 260px; gap: 14px; align-items: start; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--edge); border-radius: 12px; padding: 14px; }
+  .card h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); margin: 0 0 10px; }
+  .readout { display: flex; justify-content: space-between; padding: 3px 0; }
+  .readout b { color: var(--accent); font-weight: 600; }
+
+  /* Attitude indicator */
+  .adi-wrap { position: relative; width: 240px; height: 240px; margin: 0 auto; border-radius: 50%;
+    overflow: hidden; border: 3px solid var(--edge); background: #000; }
+  .adi-ball { position: absolute; left: -50%; top: -50%; width: 200%; height: 200%;
+    transform-origin: 50% 50%; }
+  .adi-horizon { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+  .adi-sky { position: absolute; left: 0; top: 0; width: 100%; height: 50%; background: linear-gradient(#3a86c9, var(--sky)); }
+  .adi-ground { position: absolute; left: 0; top: 50%; width: 100%; height: 50%; background: linear-gradient(var(--ground), #4a3620); }
+  .adi-line { position: absolute; left: 0; top: 50%; width: 100%; height: 2px; background: #fff; }
+  .adi-fixed { position: absolute; inset: 0; pointer-events: none; }
+  .adi-fixed::before { content: ""; position: absolute; left: 50%; top: 50%; width: 70px; height: 2px;
+    background: var(--warn); transform: translate(-50%, -50%); box-shadow: 0 0 0 1px #000; }
+  .adi-fixed::after { content: ""; position: absolute; left: 50%; top: 50%; width: 8px; height: 8px;
+    background: var(--warn); border-radius: 50%; transform: translate(-50%, -50%); }
+
+  /* Compass */
+  .compass { position: relative; width: 200px; height: 200px; margin: 0 auto; }
+  .compass svg { width: 100%; height: 100%; }
+  .compass .pointer { position: absolute; left: 50%; top: -2px; transform: translateX(-50%);
+    border-left: 8px solid transparent; border-right: 8px solid transparent; border-top: 12px solid var(--accent); }
+  .hdg-num { text-align: center; font-size: 22px; margin-top: 6px; color: var(--accent); }
+
+  /* Vertical bars */
+  .bars { display: flex; gap: 18px; justify-content: center; }
+  .vbar { text-align: center; }
+  .vbar .track { width: 34px; height: 160px; background: var(--panel2); border: 1px solid var(--edge);
+    border-radius: 8px; position: relative; overflow: hidden; }
+  .vbar .fill { position: absolute; left: 0; bottom: 0; width: 100%; background: var(--accent); transition: height .08s linear; }
+  .vbar .fill.thr { background: var(--good); }
+  .vbar .lbl { font-size: 11px; color: var(--dim); margin-top: 6px; }
+  .vbar .val { font-size: 13px; color: var(--ink); }
+
+  /* Stick pads */
+  .pads { display: flex; gap: 18px; justify-content: center; }
+  .pad { width: 120px; }
+  .pad .box { width: 120px; height: 120px; background: var(--panel2); border: 1px solid var(--edge);
+    border-radius: 10px; position: relative; }
+  .pad .cross-h, .pad .cross-v { position: absolute; background: var(--edge); }
+  .pad .cross-h { left: 6px; right: 6px; top: 50%; height: 1px; }
+  .pad .cross-v { top: 6px; bottom: 6px; left: 50%; width: 1px; }
+  .pad .dot { position: absolute; width: 16px; height: 16px; border-radius: 50%; background: var(--accent);
+    transform: translate(-50%, -50%); left: 50%; top: 50%; transition: left .06s, top .06s; box-shadow: 0 0 8px var(--accent); }
+  .pad .cap { text-align: center; font-size: 11px; color: var(--dim); margin-top: 6px; }
+  .pad .cap span { color: var(--ink); }
+
+  .keys { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 14px; font-size: 12px; color: var(--dim); }
+  .keys b { color: var(--ink); }
+  kbd { background: var(--panel2); border: 1px solid var(--edge); border-bottom-width: 2px; border-radius: 5px;
+    padding: 1px 6px; color: var(--ink); font-size: 11px; }
+
+  #log { background: #05080c; border: 1px solid var(--edge); border-radius: 8px; padding: 8px 10px;
+    height: 150px; overflow: auto; font-size: 11px; color: var(--dim); white-space: pre-wrap; margin-top: 14px; }
+  #log .tx { color: var(--accent); }
+  #log .rx { color: var(--good); }
+  #log .sys { color: var(--warn); }
+  .foot { color: var(--dim); font-size: 11px; margin-top: 10px; }
+  .warnbox { background: #2a1420; border: 1px solid var(--bad); color: #ffd6de; padding: 10px 12px;
+    border-radius: 8px; font-size: 12px; margin-bottom: 12px; display: none; }
+</style>
+</head>
+<body>
+  <h1>🚁 Drone Manual Cockpit</h1>
+  <div class="sub">Fly the <b>MANUAL</b> phase with your keyboard over USB serial, and watch the drone's commanded state live.</div>
+
+  <div class="warnbox" id="nowebserial">
+    This browser has no Web Serial API. Open this file in <b>Chrome</b> or <b>Edge</b> (desktop).
+    If it's blocked from <code>file://</code>, serve the folder: <code>python3 -m http.server</code> then open <code>http://localhost:8000/simulate/manual_ui.html</code>.
+  </div>
+
+  <div class="bar">
+    <button id="connect">Connect ESP</button>
+    <button id="takeSticks" disabled>Take the sticks (MANUAL)</button>
+    <button id="handBack" disabled>Hand back (HOLD)</button>
+    <button id="estop" class="stop" disabled>STOP</button>
+    <span class="pill off" id="phasePill">DISCONNECTED</span>
+    <span class="pill off" id="anchorPill">POS-HOLD —</span>
+  </div>
+
+  <div class="grid">
+    <!-- LEFT: instruments -->
+    <div class="card">
+      <h2>Attitude (roll / pitch target)</h2>
+      <div class="adi-wrap">
+        <div class="adi-ball" id="adiBall">
+          <div class="adi-horizon" id="adiHorizon">
+            <div class="adi-sky"></div>
+            <div class="adi-ground"></div>
+            <div class="adi-line"></div>
+          </div>
+        </div>
+        <div class="adi-fixed"></div>
+      </div>
+      <div style="margin-top:12px">
+        <div class="readout"><span>Roll target</span><b id="roRoll">0.0°</b></div>
+        <div class="readout"><span>Pitch target</span><b id="roPitch">0.0°</b></div>
+      </div>
+    </div>
+
+    <!-- CENTER: controls + pads -->
+    <div class="card">
+      <h2>Your stick inputs</h2>
+      <div class="pads">
+        <div class="pad">
+          <div class="box"><div class="cross-h"></div><div class="cross-v"></div><div class="dot" id="dotLeft"></div></div>
+          <div class="cap">Throttle / Yaw<br><span id="capThr">thr 0.50</span> · <span id="capYaw">yaw 0.0</span></div>
+        </div>
+        <div class="pad">
+          <div class="box"><div class="cross-h"></div><div class="cross-v"></div><div class="dot" id="dotRight"></div></div>
+          <div class="cap">Pitch / Roll<br><span id="capPitch">pitch 0.0</span> · <span id="capRoll">roll 0.0</span></div>
+        </div>
+      </div>
+      <h2 style="margin-top:18px">Keys</h2>
+      <div class="keys">
+        <div><kbd>↑</kbd><kbd>↓</kbd> <b>pitch</b> (fwd/back)</div>
+        <div><kbd>←</kbd><kbd>→</kbd> <b>roll</b> (left/right)</div>
+        <div><kbd>W</kbd><kbd>S</kbd> <b>throttle</b> (climb/descend)</div>
+        <div><kbd>A</kbd><kbd>D</kbd> <b>yaw</b> (turn)</div>
+        <div><kbd>Space</kbd> <b>center all</b> (level + hold)</div>
+        <div><kbd>X</kbd> <b>emergency stop</b></div>
+      </div>
+      <div class="foot" id="hint">Connect, then click <b>Take the sticks</b> and start flying. Center the sticks (release keys) to drop a GPS anchor and hold position.</div>
+    </div>
+
+    <!-- RIGHT: heading + altitude + throttle -->
+    <div class="card">
+      <h2>Heading (yaw target)</h2>
+      <div class="compass">
+        <div class="pointer"></div>
+        <svg viewBox="0 0 200 200"><g id="compassCard"></g></svg>
+      </div>
+      <div class="hdg-num" id="hdgNum">090°</div>
+
+      <h2 style="margin-top:18px">Altitude &amp; throttle</h2>
+      <div class="bars">
+        <div class="vbar">
+          <div class="track"><div class="fill" id="altFill" style="height:0%"></div></div>
+          <div class="lbl">TGT ALT</div><div class="val" id="altVal">0.0 ft</div>
+        </div>
+        <div class="vbar">
+          <div class="track"><div class="fill thr" id="thrFill" style="height:0%"></div></div>
+          <div class="lbl">MOTOR</div><div class="val" id="thrVal">0%</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h2>Top-down map — where the drone is (light physics sim)</h2>
+    <div style="display:flex; gap:18px; flex-wrap:wrap; align-items:center; justify-content:center">
+      <canvas id="map" width="300" height="300" style="background:#05080c;border:1px solid var(--edge);border-radius:12px"></canvas>
+      <div style="min-width:180px">
+        <div class="readout"><span>North</span><b id="roN">0.0 m</b></div>
+        <div class="readout"><span>East</span><b id="roE">0.0 m</b></div>
+        <div class="readout"><span>Ground speed</span><b id="roSpd">0.0 m/s</b></div>
+        <div class="readout"><span>Actual alt</span><b id="roAlt">0.0 ft</b></div>
+        <div class="readout"><span>Heading</span><b id="roHdg">090°</b></div>
+        <div style="margin-top:10px"><button id="recenter">Recenter to home</button></div>
+        <div class="foot" style="margin-top:8px">
+          <span style="color:var(--accent)">▲</span> drone &nbsp;
+          <span style="color:var(--good)">◎</span> anchor &nbsp;
+          <span style="color:var(--dim)">+</span> home.
+          Grid = 5 m. Pitch = N/S, roll = E/W (matches the flight controller's world-frame nav).
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="log"></div>
+  <div class="foot">Requires the <b>wokwi_sim</b> firmware flashed to the ESP. Close the Python HIL runner first — only one program can own the serial port. Altitude limit shown = 40 ft, lean scale = 15°.</div>
+
+<script>
+"use strict";
+// ---- config that mirrors the firmware ----
+const ALT_MAX_FT = 40;      // just for the bar scale
+const LEAN_MAX   = 15;      // MANUAL_MAX_LEAN_DEG, for the ADI/pad scale
+const HOME_LAT = 36.123456, HOME_LON = -80.123456;
+
+// ---- serial plumbing ----
+let port = null, reader = null, writer = null;
+let connected = false;
+let phase = "—";
+
+const $ = id => document.getElementById(id);
+if (!("serial" in navigator)) $("nowebserial").style.display = "block";
+
+function log(kind, text) {
+  const el = $("log");
+  const line = document.createElement("div");
+  line.className = kind;
+  line.textContent = (kind === "tx" ? "» " : kind === "rx" ? "« " : "· ") + text;
+  el.appendChild(line);
+  while (el.childNodes.length > 200) el.removeChild(el.firstChild);
+  el.scrollTop = el.scrollHeight;
+}
+
+async function send(line, quiet) {
+  if (!writer) return;
+  await writer.write(line + "\n");
+  if (!quiet) log("tx", line);
+}
+
+// Fire-and-forget for the high-rate physics injection (order is preserved by
+// the writer's queue; we just don't want to await each tiny line).
+function rawSend(line) { if (writer) writer.write(line + "\n").catch(() => {}); }
+
+async function connect() {
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+  } catch (e) { log("sys", "Connect cancelled: " + e.message); return; }
+
+  const dec = new TextDecoderStream();
+  port.readable.pipeTo(dec.writable).catch(() => {});
+  reader = dec.readable.getReader();
+  const enc = new TextEncoderStream();
+  enc.readable.pipeTo(port.writable).catch(() => {});
+  writer = enc.writable.getWriter();
+
+  connected = true;
+  $("connect").disabled = true;
+  $("takeSticks").disabled = false;
+  $("handBack").disabled = false;
+  $("estop").disabled = false;
+  setPhase("CONNECTING");
+  readLoop();
+  startup();
+}
+
+async function startup() {
+  // Give the freshly-opened port (which resets the ESP) a moment, then set up
+  // the simulated world so position hold has a GPS fix to hold to.
+  await new Promise(r => setTimeout(r, 400));
+  for (let i = 0; i < 20; i++) { await send("PING:", true); await new Promise(r => setTimeout(r, 100)); }
+  await send("RESET:");
+  await send("FIX:1");
+  await send("LAT:" + HOME_LAT.toFixed(6));
+  await send("LON:" + HOME_LON.toFixed(6));
+  await send("HDG:90");
+  await send("ALT:0");
+  log("sys", "World ready. Click 'Take the sticks' to enter MANUAL.");
+  startPolling();
+  startPhysics();
+}
+
+async function readLoop() {
+  let buf = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += value;
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i).replace(/\r$/, "");
+        buf = buf.slice(i + 1);
+        if (line) handleLine(line);
+      }
+    }
+  } catch (e) { log("sys", "Read stopped: " + e.message); }
+}
+
+function handleLine(line) {
+  // Auto-approve every HIL gate so transitions (MANUAL/HOLD/PARKED) go through.
+  const gate = line.match(/\[HIL_GATE\] request=([A-Z_]+)/);
+  if (gate) { send("ALLOW:" + gate[1], true); return; }
+
+  const man = line.match(/\[MANUAL\] targetAlt=(-?[\d.]+) targetRoll=(-?[\d.]+) targetPitch=(-?[\d.]+) yaw=(-?[\d.]+) anchored=(\d+) base=(-?[\d.]+)/);
+  if (man) { updateInstruments({
+    alt: +man[1], roll: +man[2], pitch: +man[3], yaw: +man[4], anchored: +man[5], base: +man[6]
+  }); return; }
+
+  const st = line.match(/\[STATUS\] id=\d+ phase=([A-Z_]+)/);
+  if (st) { setPhase(st[1]); return; }
+
+  // Skip echoing our own noisy poll acks; show everything else.
+  log("rx", line);
+}
+
+// ---- telemetry polling ----
+let pollTimer = null;
+function startPolling() {
+  if (pollTimer) return;
+  pollTimer = setInterval(() => {
+    send("MANUAL?", true);
+    send("STATUS?", true);
+  }, 120);
+}
+
+// ---- keyboard -> sticks ----
+const keys = new Set();
+const HELD = new Set(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","w","s","a","d"," "]);
+let lastSticks = "";
+
+function computeSticks() {
+  const throttle = keys.has("w") ? 1.0 : keys.has("s") ? 0.0 : 0.5;
+  const roll  = keys.has("ArrowRight") ? 1.0 : keys.has("ArrowLeft") ? -1.0 : 0.0;
+  const pitch = keys.has("ArrowUp")    ? 1.0 : keys.has("ArrowDown") ? -1.0 : 0.0;
+  const yaw   = keys.has("d") ? 1.0 : keys.has("a") ? -1.0 : 0.0;
+  return { throttle, roll, pitch, yaw };
+}
+
+function pushSticks() {
+  const s = computeSticks();
+  const msg = `STICKS:${s.throttle.toFixed(3)},${s.roll.toFixed(3)},${s.pitch.toFixed(3)},${s.yaw.toFixed(3)}`;
+  if (msg !== lastSticks) { lastSticks = msg; send(msg, true); }
+  updateInputPads(s);
+}
+
+window.addEventListener("keydown", e => {
+  if (e.key === "x" || e.key === "X") { estop(); return; }
+  if (!HELD.has(e.key)) return;
+  e.preventDefault();
+  if (e.key === " ") { keys.clear(); pushSticks(); return; }
+  if (!keys.has(e.key)) { keys.add(e.key); pushSticks(); }
+});
+window.addEventListener("keyup", e => {
+  if (!HELD.has(e.key)) return;
+  e.preventDefault();
+  if (keys.delete(e.key)) pushSticks();
+});
+
+// ---- buttons ----
+$("connect").onclick = connect;
+$("takeSticks").onclick = () => { send("CRSFMANUAL:1"); };
+$("handBack").onclick   = () => { keys.clear(); pushSticks(); send("CRSFMANUAL:0"); };
+$("estop").onclick = estop;
+function estop() { if (connected) { keys.clear(); pushSticks(); send("CRSFSTOP:1"); } }
+
+// ---- visualization ----
+function setPhase(p) {
+  phase = p;
+  const pill = $("phasePill");
+  pill.textContent = p;
+  pill.className = "pill " + (p === "MANUAL" ? "on" : "off");
+  $("hint").style.opacity = p === "MANUAL" ? .5 : 1;
+}
+
+function updateInstruments(d) {
+  tel = { alt: d.alt, roll: d.roll, pitch: d.pitch, yaw: d.yaw, anchored: d.anchored, base: d.base };
+  // Attitude: ground/sky ball rotates by roll, shifts by pitch.
+  const pxPerDeg = 4;
+  $("adiHorizon").style.transform = `translateY(${d.pitch * pxPerDeg}px)`;
+  $("adiBall").style.transform = `rotate(${-d.roll}deg)`;
+  $("roRoll").textContent = d.roll.toFixed(1) + "°";
+  $("roPitch").textContent = d.pitch.toFixed(1) + "°";
+
+  // Compass card rotates opposite to heading.
+  $("compassCard").setAttribute("transform", `rotate(${-d.yaw} 100 100)`);
+  $("hdgNum").textContent = String(Math.round((d.yaw % 360 + 360) % 360)).padStart(3, "0") + "°";
+
+  // Altitude + motor bars.
+  $("altFill").style.height = Math.max(0, Math.min(100, d.alt / ALT_MAX_FT * 100)) + "%";
+  $("altVal").textContent = d.alt.toFixed(1) + " ft";
+  $("thrFill").style.height = Math.max(0, Math.min(100, d.base * 100)) + "%";
+  $("thrVal").textContent = Math.round(d.base * 100) + "%";
+
+  // Position-hold badge.
+  const ap = $("anchorPill");
+  ap.textContent = d.anchored ? "POS-HOLD LOCKED" : "POS-HOLD drift";
+  ap.className = "pill " + (d.anchored ? "on" : "off");
+}
+
+function updateInputPads(s) {
+  // Left pad: x = yaw (-1..1), y = throttle (0..1 -> bottom..top).
+  const L = $("dotLeft");
+  L.style.left = (50 + s.yaw * 42) + "%";
+  L.style.top  = (100 - s.throttle * 88 - 6) + "%";
+  $("capThr").textContent = "thr " + s.throttle.toFixed(2);
+  $("capYaw").textContent = "yaw " + s.yaw.toFixed(1);
+  // Right pad: x = roll, y = pitch (up = forward = dot up).
+  const R = $("dotRight");
+  R.style.left = (50 + s.roll * 42) + "%";
+  R.style.top  = (50 - s.pitch * 42) + "%";
+  $("capPitch").textContent = "pitch " + s.pitch.toFixed(1);
+  $("capRoll").textContent  = "roll " + s.roll.toFixed(1);
+}
+
+// ---- light physics sim: the browser plays "the world" and feeds simulated
+// position/altitude/heading back to the firmware, so the firmware's real
+// controller flies against it and position hold visibly corrects drift. ----
+let tel = { alt: 0, roll: 0, pitch: 0, yaw: 90, anchored: 0, base: 0 };
+const phys = { N: 0, E: 0, alt: 0, hdg: 90, vN: 0, vE: 0,
+               anchorN: null, anchorE: null, prevAnchored: 0, trail: [] };
+let physTimer = null;
+
+function startPhysics() {
+  if (physTimer) return;
+  let last = performance.now();
+  physTimer = setInterval(() => {
+    const now = performance.now();
+    let dt = (now - last) / 1000; last = now;
+    if (dt > 0.2) dt = 0.2;
+    stepPhysics(dt);
+    injectWorld();
+    drawMap();
+  }, 50);   // 20 Hz
+}
+
+function stepPhysics(dt) {
+  const g = 9.81, drag = 0.7;
+  // Lean angle -> horizontal acceleration. The flight controller's nav is
+  // world-frame (pitch drives north, roll drives east), so we match that.
+  const aN = g * Math.tan(tel.pitch * Math.PI / 180);
+  const aE = g * Math.tan(tel.roll  * Math.PI / 180);
+  phys.vN += (aN - drag * phys.vN) * dt;
+  phys.vE += (aE - drag * phys.vE) * dt;
+  phys.N  += phys.vN * dt;
+  phys.E  += phys.vE * dt;
+  // Altitude chases the commanded target (fast first-order lag).
+  phys.alt += (tel.alt - phys.alt) * Math.min(1, dt / 0.6);
+  if (phys.alt < 0) phys.alt = 0;
+  // Heading chases the yaw target.
+  const dh = ((tel.yaw - phys.hdg + 540) % 360) - 180;
+  phys.hdg = (phys.hdg + dh * Math.min(1, dt / 0.4) + 360) % 360;
+  // Anchor: capture where we are the instant position hold engages (mirrors
+  // the firmware dropping its anchor when the sticks center).
+  if (tel.anchored && !phys.prevAnchored) { phys.anchorN = phys.N; phys.anchorE = phys.E; }
+  if (!tel.anchored) { phys.anchorN = null; phys.anchorE = null; }
+  phys.prevAnchored = tel.anchored;
+  phys.trail.push([phys.N, phys.E]);
+  if (phys.trail.length > 240) phys.trail.shift();
+}
+
+function injectWorld() {
+  const dLat = phys.N / 111111;
+  const dLon = phys.E / (111111 * Math.cos(HOME_LAT * Math.PI / 180));
+  rawSend("LAT:" + (HOME_LAT + dLat).toFixed(7));
+  rawSend("LON:" + (HOME_LON + dLon).toFixed(7));
+  rawSend("ALT:" + phys.alt.toFixed(2));
+  rawSend("HDG:" + phys.hdg.toFixed(1));
+}
+
+function drawMap() {
+  const cv = $("map"), ctx = cv.getContext("2d"), W = cv.width, H = cv.height;
+  const cx = W / 2, cy = H / 2, scale = W / 40;   // 40 m across (±20 m)
+  const sx = e => cx + e * scale, sy = n => cy - n * scale;  // north = up, east = right
+  ctx.clearRect(0, 0, W, H);
+  ctx.strokeStyle = "#182230"; ctx.lineWidth = 1;
+  for (let m = -20; m <= 20; m += 5) {
+    ctx.beginPath(); ctx.moveTo(sx(m), 0); ctx.lineTo(sx(m), H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, sy(m)); ctx.lineTo(W, sy(m)); ctx.stroke();
+  }
+  // home cross
+  ctx.strokeStyle = "#8aa0b4"; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(cx - 6, cy); ctx.lineTo(cx + 6, cy);
+  ctx.moveTo(cx, cy - 6); ctx.lineTo(cx, cy + 6); ctx.stroke();
+  // trail
+  ctx.strokeStyle = "rgba(53,193,255,.35)"; ctx.lineWidth = 2; ctx.beginPath();
+  phys.trail.forEach((p, i) => { const x = sx(p[1]), y = sy(p[0]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+  ctx.stroke();
+  // anchor
+  if (phys.anchorN !== null) {
+    ctx.strokeStyle = "#35e08a"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(sx(phys.anchorE), sy(phys.anchorN), 9, 0, Math.PI * 2); ctx.stroke();
+  }
+  // drone triangle, nose along heading
+  ctx.save(); ctx.translate(sx(phys.E), sy(phys.N)); ctx.rotate(phys.hdg * Math.PI / 180);
+  ctx.fillStyle = "#35c1ff"; ctx.beginPath();
+  ctx.moveTo(0, -9); ctx.lineTo(6, 7); ctx.lineTo(0, 3); ctx.lineTo(-6, 7); ctx.closePath(); ctx.fill();
+  ctx.restore();
+  // readouts
+  $("roN").textContent = phys.N.toFixed(1) + " m";
+  $("roE").textContent = phys.E.toFixed(1) + " m";
+  $("roSpd").textContent = Math.hypot(phys.vN, phys.vE).toFixed(1) + " m/s";
+  $("roAlt").textContent = phys.alt.toFixed(1) + " ft";
+  $("roHdg").textContent = String(Math.round(phys.hdg)).padStart(3, "0") + "°";
+}
+
+$("recenter").onclick = () => {
+  phys.N = phys.E = phys.vN = phys.vE = 0; phys.alt = 0;
+  phys.trail = []; phys.anchorN = phys.anchorE = null;
+};
+
+// Build the compass card (ticks + cardinal letters) once.
+(function buildCompass() {
+  const g = $("compassCard");
+  const NS = "http://www.w3.org/2000/svg";
+  const cx = 100, cy = 100, r = 92;
+  const ring = document.createElementNS(NS, "circle");
+  ring.setAttribute("cx", cx); ring.setAttribute("cy", cy); ring.setAttribute("r", r);
+  ring.setAttribute("fill", "#0e141c"); ring.setAttribute("stroke", "#223042"); ring.setAttribute("stroke-width", "2");
+  g.appendChild(ring);
+  for (let deg = 0; deg < 360; deg += 15) {
+    const a = (deg - 90) * Math.PI / 180;
+    const major = deg % 90 === 0;
+    const r1 = r - (major ? 14 : 8);
+    const t = document.createElementNS(NS, "line");
+    t.setAttribute("x1", cx + r * Math.cos(a)); t.setAttribute("y1", cy + r * Math.sin(a));
+    t.setAttribute("x2", cx + r1 * Math.cos(a)); t.setAttribute("y2", cy + r1 * Math.sin(a));
+    t.setAttribute("stroke", major ? "#35c1ff" : "#4a5c70"); t.setAttribute("stroke-width", major ? 2 : 1);
+    g.appendChild(t);
+  }
+  const cards = [["N", 0], ["E", 90], ["S", 180], ["W", 270]];
+  for (const [ch, deg] of cards) {
+    const a = (deg - 90) * Math.PI / 180;
+    const tr = r - 30;
+    const txt = document.createElementNS(NS, "text");
+    txt.setAttribute("x", cx + tr * Math.cos(a)); txt.setAttribute("y", cy + tr * Math.sin(a) + 5);
+    txt.setAttribute("fill", "#e6edf3"); txt.setAttribute("font-size", "16");
+    txt.setAttribute("text-anchor", "middle"); txt.setAttribute("font-family", "monospace");
+    txt.textContent = ch;
+    g.appendChild(txt);
+  }
+})();
+</script>
+</body>
+</html>

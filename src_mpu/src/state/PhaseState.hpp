@@ -331,6 +331,51 @@ struct Trip_Calibrate {
   unsigned long enteredAtMs = 0;
 };
 
+// --- MANUAL (RC sticks) ---
+struct Dashboard_Manual {
+  float altitudeFt      = 0.0f;
+  float roll            = 0.0f;
+  float pitch           = 0.0f;
+  float yaw             = 0.0f;
+  float compassHeading  = 0.0f;
+  float m1              = 0.0f;
+  float m2              = 0.0f;
+  float m3              = 0.0f;
+  float m4              = 0.0f;
+  float baseThrottle    = 0.0f;
+  float rollCorrection  = 0.0f;
+  float pitchCorrection = 0.0f;
+  Dashboard_Manual& operator=(const volatile Dashboard_Manual& o) {
+    altitudeFt=o.altitudeFt; roll=o.roll; pitch=o.pitch; yaw=o.yaw;
+    compassHeading=o.compassHeading;
+    m1=o.m1; m2=o.m2; m3=o.m3; m4=o.m4;
+    baseThrottle=o.baseThrottle; rollCorrection=o.rollCorrection;
+    pitchCorrection=o.pitchCorrection;
+    return *this;
+  }
+};
+struct Cruise_Manual {
+  float targetAltFt      = 0.0f;
+  float targetRollDeg    = 0.0f;
+  float targetPitchDeg   = 0.0f;
+  float yawTargetHeading = 0.0f;
+  Cruise_Manual& operator=(const volatile Cruise_Manual& o) {
+    targetAltFt=o.targetAltFt; targetRollDeg=o.targetRollDeg;
+    targetPitchDeg=o.targetPitchDeg; yawTargetHeading=o.yawTargetHeading;
+    return *this;
+  }
+};
+struct Trip_Manual {
+  // The GPS spot to hold when the sticks are centered ("dropped anchor").
+  double anchorLat = 0.0;
+  double anchorLon = 0.0;
+  bool   anchored  = false;  // is an anchor currently dropped?
+  Trip_Manual& operator=(const volatile Trip_Manual& o) {
+    anchorLat=o.anchorLat; anchorLon=o.anchorLon; anchored=o.anchored;
+    return *this;
+  }
+};
+
 // ============================================================================
 // SHARED STATE -- the whole notebook, one struct.
 // ============================================================================
@@ -374,6 +419,12 @@ struct SharedState {
   Dashboard_Calibrate   dashboard_calibrate;
   Cruise_Calibrate      cruise_calibrate;
   Trip_Calibrate        trip_calibrate;
+
+  Dashboard_Manual      dashboard_manual;
+  Cruise_Manual         cruise_manual;
+  Trip_Manual           trip_manual;
+
+  RawSticks             sticks;   // latest RC stick input (real hardware only)
 };
 
 // ----------------------------------------------------------------------------
