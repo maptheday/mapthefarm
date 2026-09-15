@@ -427,7 +427,7 @@ STATUS?17
 The firmware answers with a structured line like:
 
 ```text
-[STATUS] id=17 phase=RTL rtl=CLIMB gate=NONE reason=GEOFENCE wp=0
+[STATUS] id=17 phase=RTL_CLIMB gate=NONE reason=GEOFENCE wp=0
 ```
 
 The request ID matters because serial responses can arrive late. The runner
@@ -444,7 +444,7 @@ For example, imagine the runner asks for motor telemetry while the firmware is
 also reporting a flight-state change. The serial stream could arrive like this:
 
 ```text
-[STATUS] id=17 phase=RTL rtl=CLIMB gate=NONE reason=GEOFENCE wp=0
+[STATUS] id=17 phase=RTL_CLIMB gate=NONE reason=GEOFENCE wp=0
 [MOTOR] base=0.72 roll=0.03 pitch=-0.01
 ```
 
@@ -459,7 +459,7 @@ But serial timing can also produce this sequence:
 
 ```text
 [MOTOR] base=0.72 roll=0.03 pitch=-0.01
-[STATUS] id=17 phase=RTL rtl=CLIMB gate=NONE reason=GEOFENCE wp=0
+[STATUS] id=17 phase=RTL_CLIMB gate=NONE reason=GEOFENCE wp=0
 ```
 
 If `query_status()` is waiting first, it removes the motor line from the

@@ -20,7 +20,7 @@
 
 #ifdef WOKWI_SIM
 
-#include "../state/PhaseState.hpp"     // shared, withMutex, RTLState, Dashboard_RTL
+#include "../state/PhaseState.hpp"     // shared, withMutex, per-phase dashboards
 #include "../state/HilState.hpp"       // sim inputs + HIL gate state
 #include "../services/Log.hpp"         // logLine
 #include "../phases/PhaseSwitch.hpp"   // transitionTo
@@ -123,11 +123,37 @@ inline void parseSimInput() {
       // On-demand motor telemetry -- queried by the harness so it never
       // collides on the wire with async safety/phase log lines.
       else if (buf.startsWith("MOTOR?")) {
-        Dashboard_RTL m;
-        withMutex([&]() { m = shared.dashboard_rtl; });
-        logLine("[MOTOR] base=" + String(m.baseThrottle, 2) +
-                " roll=" + String(m.rollCorrection, 3) +
-                " pitch=" + String(m.pitchCorrection, 3));
+        // Report the motor mix of whichever phase is currently flying. Each
+        // phase writes its own dashboard, so pick the one matching shared.phase.
+        float base = 0.0f;
+        float roll = 0.0f;
+        float pitch = 0.0f;
+        withMutex([&]() {
+          switch (shared.phase) {
+            case PHASE_RAISE:
+              base=shared.dashboard_raise.baseThrottle; roll=shared.dashboard_raise.rollCorrection; pitch=shared.dashboard_raise.pitchCorrection; break;
+            case PHASE_HOLD:
+              base=shared.dashboard_hold.baseThrottle; roll=shared.dashboard_hold.rollCorrection; pitch=shared.dashboard_hold.pitchCorrection; break;
+            case PHASE_MISSION:
+              base=shared.dashboard_mission.baseThrottle; roll=shared.dashboard_mission.rollCorrection; pitch=shared.dashboard_mission.pitchCorrection; break;
+            case PHASE_RTL_CLIMB:
+              base=shared.dashboard_rtlClimb.baseThrottle; roll=shared.dashboard_rtlClimb.rollCorrection; pitch=shared.dashboard_rtlClimb.pitchCorrection; break;
+            case PHASE_RTL_RETURN:
+              base=shared.dashboard_rtlReturn.baseThrottle; roll=shared.dashboard_rtlReturn.rollCorrection; pitch=shared.dashboard_rtlReturn.pitchCorrection; break;
+            case PHASE_RTL_SETTLE:
+              base=shared.dashboard_rtlSettle.baseThrottle; roll=shared.dashboard_rtlSettle.rollCorrection; pitch=shared.dashboard_rtlSettle.pitchCorrection; break;
+            case PHASE_HOVER_SETTLE:
+              base=shared.dashboard_hoverSettle.baseThrottle; roll=shared.dashboard_hoverSettle.rollCorrection; pitch=shared.dashboard_hoverSettle.pitchCorrection; break;
+            case PHASE_LANDING:
+              base=shared.dashboard_landing.baseThrottle; roll=shared.dashboard_landing.rollCorrection; pitch=shared.dashboard_landing.pitchCorrection; break;
+            case PHASE_MANUAL:
+              base=shared.dashboard_manual.baseThrottle; roll=shared.dashboard_manual.rollCorrection; pitch=shared.dashboard_manual.pitchCorrection; break;
+            default: break;  // ground phases (PARKED / LANDED / CALIBRATE): motors off
+          }
+        });
+        logLine("[MOTOR] base=" + String(base, 2) +
+                " roll=" + String(roll, 3) +
+                " pitch=" + String(pitch, 3));
       }
       // MANUAL-mode read-back: the pilot setpoints the sticks are driving, plus
       // whether position hold has dropped an anchor and the base throttle.
@@ -154,24 +180,22 @@ inline void parseSimInput() {
         String requestId = buf.substring(7);
         if (requestId.length() == 0) requestId = "0";
         FlightPhase phase;
-        RTLState rtlState;
         bool gatePending;
         FlightPhase gateNext;
         TransitionReason transitionReason;
         int waypoint;
         withMutex([&]() {
           phase = shared.phase;
-          rtlState = shared.trip_rtl.state;
           gatePending = hilGatePending;
           gateNext = hilGateNext;
           transitionReason = shared.transitionReason;
           waypoint = shared.trip_mission.currentWP;
         });
         TransitionReason reason = gatePending ? hilGateReason : transitionReason;
+        // The RTL sub-state used to ride along as a separate rtl= field; it is
+        // now just the phase name (RTL_CLIMB / RTL_RETURN / RTL_SETTLE).
         logLine("[STATUS] id=" + requestId +
                 " phase=" + String(phaseName(phase)) +
-                " rtl=" + String(rtlState == RTL_CLIMB ? "CLIMB" :
-                                    rtlState == RTL_RETURN ? "RETURN" : "SETTLE") +
                 " gate=" + String(gatePending ? phaseName(gateNext) : "NONE") +
                 " reason=" + reasonName(reason) +
                 " wp=" + String(waypoint));

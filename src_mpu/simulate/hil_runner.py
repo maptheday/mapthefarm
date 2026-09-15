@@ -74,18 +74,15 @@ _PHASE_DESCRIPTIONS = {
     "RAISE": "climbing to takeoff altitude",
     "HOLD": "hovering in place",
     "MISSION": "following the mission route",
-    "RTL": "returning to the launch point",
+    # RTL is now three ordinary phases instead of one phase with sub-states.
+    "RTL_CLIMB": "returning to launch: climbing to RTL altitude",
+    "RTL_RETURN": "returning to launch: flying toward the launch point",
+    "RTL_SETTLE": "returning to launch: settling over the launch point",
     "HOVER_SETTLE": "hovering over the launch point before landing",
     "LANDING": "descending to land",
     "LANDED": "on the ground with motors disarmed",
     "CALIBRATE": "calibrating sensors on the ground (motors off)",
     "MANUAL": "flying under manual RC-stick control",
-}
-
-_RTL_DESCRIPTIONS = {
-    "CLIMB": "climbing to RTL altitude",
-    "RETURN": "flying toward the launch point",
-    "SETTLE": "settling over the launch point",
 }
 
 
@@ -97,11 +94,8 @@ def _friendly_status(line: str):
 
     status = match.groupdict()
     phase = status["phase"]
-    rtl = status["rtl"]
     gate = status["gate"]
     phase_description = _PHASE_DESCRIPTIONS.get(phase, "in an unknown phase")
-    if phase == "RTL":
-        phase_description += f"; RTL {_RTL_DESCRIPTIONS.get(rtl, 'has an unknown sub-state')}"
 
     if gate == "NONE":
         gate_description = "no approval pending"
@@ -178,7 +172,7 @@ _MOTOR_RE = _re.compile(
 )
 _STATUS_RE = _re.compile(
     r"\[STATUS\] id=(?P<id>\d+) phase=(?P<phase>[A-Z_]+) "
-    r"rtl=(?P<rtl>[A-Z]+) gate=(?P<gate>[A-Z_]+) "
+    r"gate=(?P<gate>[A-Z_]+) "
     r"reason=(?P<reason>[A-Z_]+) wp=(?P<wp>\d+)"
 )
 _MANUAL_RE = _re.compile(
@@ -299,14 +293,13 @@ def _matches(actual, expected):
         return actual == expected
     return actual in set(expected)
 
-def wait_for_status(phase=None, rtl=None, gate=None, reason=None, wp=None, timeout=10.0):
+def wait_for_status(phase=None, gate=None, reason=None, wp=None, timeout=10.0):
     """Poll a durable firmware snapshot without modifying firmware state."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         remaining = deadline - time.monotonic()
         status = query_status(timeout=min(1.0, remaining))
         if status and _matches(status["phase"], phase) and \
-                      _matches(status["rtl"], rtl) and \
                       _matches(status["gate"], gate) and \
                       _matches(status["reason"], reason) and \
                       _matches(status["wp"], wp):

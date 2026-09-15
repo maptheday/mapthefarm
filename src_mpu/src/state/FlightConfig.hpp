@@ -19,6 +19,7 @@ const unsigned long MAX_FLIGHT_TIME_MS = 5UL * 60UL * 1000UL;
 const float         GEOFENCE_RADIUS_M   = 150.0f;
 const unsigned long GPS_LOSS_ABORT_MS   = 3000;
 const float         RTL_ALTITUDE_FT     = 60.0f;
+const unsigned long RTL_SETTLE_MS       = 3000;   // hover this long over launch before landing
 const float         TAKEOFF_ALTITUDE_FT = 15.0f;
 
 // Mission configuration.

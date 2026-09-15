@@ -123,7 +123,7 @@ That is why the firmware still prints logs for people, but the test asks a separ
 
 ```text
 Python:  STATUS?
-ESP32:   [STATUS] phase=HOLD rtl=CLIMB
+ESP32:   [STATUS] phase=HOLD gate=NONE
 ```
 
 The log says, “Here is a sentence describing what happened.” The status response says, “Here is my state right now.” The second form is what the automated test needs.
@@ -230,18 +230,23 @@ The firmware now answers:
 
 ```text
 Python sends:  STATUS?
-Firmware sends: [STATUS] phase=RTL rtl=CLIMB
+Firmware sends: [STATUS] phase=RTL_CLIMB gate=NONE
 ```
 
 The Python helper uses this response:
 
 ```python
-wait_for_status(phase="RTL", rtl="CLIMB", timeout=5)
+wait_for_status(phase="RTL_CLIMB", timeout=5)
 ```
 
 This asks the firmware directly:
 
 > Are you currently in RTL climb?
+
+(RTL used to be one phase with a `rtl=CLIMB/RETURN/SETTLE` sub-state field.
+It is now three ordinary phases -- `RTL_CLIMB`, `RTL_RETURN`, `RTL_SETTLE` --
+so the phase name alone says which step you are on, and the old `rtl=` field
+is gone.)
 
 It no longer needs to infer that fact from a sentence such as:
 
@@ -262,15 +267,15 @@ the next flight phase:
 
 ```text
 Python: STATUS?
-ESP32:  [STATUS] phase=HOLD rtl=CLIMB gate=RTL
-Python: ALLOW:RTL
-ESP32:  moves to RTL
+ESP32:  [STATUS] phase=HOLD gate=RTL_CLIMB
+Python: ALLOW:RTL_CLIMB
+ESP32:  moves to RTL_CLIMB
 ```
 
 While waiting, both the navigation and physics loops pause their normal work.
 The main serial loop stays alive so it can receive the approval. This is why
 the firmware must not simply block inside `transitionTo()` while holding a
-mutex: the code that receives `ALLOW:RTL` would not get a chance to run.
+mutex: the code that receives `ALLOW:RTL_CLIMB` would not get a chance to run.
 
 The Python runner automatically sends the approval when `STATUS?` reports a
 pending gate. The separate `[HIL_GATE]` log is only a human-readable hint; it
@@ -286,7 +291,7 @@ phase transition.
 Here is the helper in plain English:
 
 ```python
-def wait_for_status(phase=None, rtl=None, timeout=10.0):
+def wait_for_status(phase=None, gate=None, reason=None, wp=None, timeout=10.0):
 ```
 
 It means:
@@ -397,11 +402,11 @@ That causes three problems.
 Suppose the firmware reports:
 
 ```text
-RTL / CLIMB
-RTL / RETURN
+RTL_CLIMB
+RTL_RETURN
 ```
 
-If the test only checks the last sample, it sees `RETURN` and concludes that it never saw `CLIMB`, even though `CLIMB` really happened.
+If the test only checks the last sample, it sees `RTL_RETURN` and concludes that it never saw `RTL_CLIMB`, even though `RTL_CLIMB` really happened.
 
 ### Problem B: It wastes the whole timeout
 
@@ -482,7 +487,7 @@ Later checks still verify the landing phase and final landed phase separately.
 The final successful run showed:
 
 ```text
-[STATUS] phase=LANDING rtl=SETTLE
+[STATUS] phase=LANDING gate=NONE
 RESULT: PASS
 ```
 
@@ -492,9 +497,9 @@ The test now checks the real state transitions rather than depending on every hu
 
 ```text
 HOLD
-RTL / CLIMB
-RTL / RETURN
-HOVER_SETTLE or later
+RTL_CLIMB
+RTL_RETURN
+RTL_SETTLE
 LANDING
 LANDED
 ```
@@ -541,7 +546,7 @@ Useful, but not ideal as the only machine-readable test signal.
 Sent by the firmware after an explicit request:
 
 ```text
-[STATUS] phase=RTL rtl=CLIMB
+[STATUS] phase=RTL_CLIMB gate=NONE
 [MOTOR] base=0.43 roll=0.000 pitch=-0.155
 ```
 

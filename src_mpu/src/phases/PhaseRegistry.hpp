@@ -13,7 +13,9 @@
 #include "RaisePhase.hpp"
 #include "HoldPhase.hpp"
 #include "MissionPhase.hpp"
-#include "RtlPhase.hpp"
+#include "RtlClimbPhase.hpp"
+#include "RtlReturnPhase.hpp"
+#include "RtlSettlePhase.hpp"
 #include "HoverSettlePhase.hpp"
 #include "LandingPhase.hpp"
 #include "LandedPhase.hpp"
@@ -27,7 +29,9 @@ inline IFlightPhase* phaseFor(FlightPhase phase) {
   static RaisePhase       raise;
   static HoldPhase        hold;
   static MissionPhase     mission;
-  static RtlPhase         rtl;
+  static RtlClimbPhase    rtlClimb;
+  static RtlReturnPhase   rtlReturn;
+  static RtlSettlePhase   rtlSettle;
   static HoverSettlePhase hoverSettle;
   static LandingPhase     landing;
   static LandedPhase      landed;
@@ -40,7 +44,9 @@ inline IFlightPhase* phaseFor(FlightPhase phase) {
     &raise,        // PHASE_RAISE
     &hold,         // PHASE_HOLD
     &mission,      // PHASE_MISSION
-    &rtl,          // PHASE_RTL
+    &rtlClimb,     // PHASE_RTL_CLIMB
+    &rtlReturn,    // PHASE_RTL_RETURN
+    &rtlSettle,    // PHASE_RTL_SETTLE
     &hoverSettle,  // PHASE_HOVER_SETTLE
     &landing,      // PHASE_LANDING
     &landed,       // PHASE_LANDED

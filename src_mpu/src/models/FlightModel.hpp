@@ -8,7 +8,12 @@ enum FlightPhase {
   PHASE_RAISE,
   PHASE_HOLD,
   PHASE_MISSION,
-  PHASE_RTL,
+  // RTL (return to launch) is three independent phases, entered in order by a
+  // failsafe. Each one is a normal, self-contained, individually-triggerable
+  // phase -- no "phase inside a phase".
+  PHASE_RTL_CLIMB,   // rise to a safe altitude
+  PHASE_RTL_RETURN,  // fly back over the launch point
+  PHASE_RTL_SETTLE,  // pause a few seconds, then land
   PHASE_HOVER_SETTLE,
   PHASE_LANDING,
   PHASE_LANDED,
@@ -26,7 +31,9 @@ enum TransitionReason {
   REASON_GEOFENCE,
   REASON_GPS_LOSS,
   REASON_MISSION_COMPLETE,
-  REASON_RTL_COMPLETE,
+  REASON_RTL_CLIMB_COMPLETE,  // RTL_CLIMB reached altitude -> RTL_RETURN
+  REASON_RTL_ARRIVED,         // RTL_RETURN reached launch -> RTL_SETTLE
+  REASON_RTL_COMPLETE,        // RTL_SETTLE done -> LANDING
   REASON_HOVER_COMPLETE,
   REASON_TOUCHDOWN,
   REASON_EMERGENCY_STOP,
@@ -41,7 +48,9 @@ inline const char* phaseName(FlightPhase phase) {
     case PHASE_RAISE:        return "RAISE";
     case PHASE_HOLD:         return "HOLD";
     case PHASE_MISSION:      return "MISSION";
-    case PHASE_RTL:          return "RTL";
+    case PHASE_RTL_CLIMB:    return "RTL_CLIMB";
+    case PHASE_RTL_RETURN:   return "RTL_RETURN";
+    case PHASE_RTL_SETTLE:   return "RTL_SETTLE";
     case PHASE_HOVER_SETTLE: return "HOVER_SETTLE";
     case PHASE_LANDING:      return "LANDING";
     case PHASE_LANDED:       return "LANDED";
@@ -64,6 +73,8 @@ inline const char* reasonName(TransitionReason reason) {
     case REASON_GEOFENCE:         return "GEOFENCE";
     case REASON_GPS_LOSS:         return "GPS_LOSS";
     case REASON_MISSION_COMPLETE: return "MISSION_COMPLETE";
+    case REASON_RTL_CLIMB_COMPLETE: return "RTL_CLIMB_COMPLETE";
+    case REASON_RTL_ARRIVED:      return "RTL_ARRIVED";
     case REASON_RTL_COMPLETE:     return "RTL_COMPLETE";
     case REASON_HOVER_COMPLETE:   return "HOVER_COMPLETE";
     case REASON_TOUCHDOWN:        return "TOUCHDOWN";

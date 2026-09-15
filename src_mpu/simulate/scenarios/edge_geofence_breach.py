@@ -22,15 +22,18 @@ assert approve_gate("HOLD", reason="TAKEOFF_COMPLETE", timeout=10), \
 
 # Teleport GPS ~400m north -- well outside geofence
 set_world(lat=36.127056, alt_ft=15.0)
-assert approve_gate("RTL", reason="GEOFENCE", timeout=5), \
-    "Geofence breach did not request RTL"
+# RTL is now three ordinary phases (RTL_CLIMB -> RTL_RETURN -> RTL_SETTLE), so
+# each step is its own gated transition we approve in turn -- no phase-inside-a-
+# phase sub-state to poll anymore.
+assert approve_gate("RTL_CLIMB", reason="GEOFENCE", timeout=5), \
+    "Geofence breach did not request RTL_CLIMB"
 
 # RTL_CLIMB: confirm the firmware is actually commanding more thrust to
 # climb, not just watching an injected barometer value cross a threshold.
 # Query right after the breach (large alt error -> should demand real climb
 # thrust) and compare against the hover baseline queried once cruise is
 # reached -- comparing against a pre-breach HOLD-phase sample doesn't work
-# because dashboard_rtl is only live once physicsTick_RTL is actually running.
+# because the RTL_CLIMB dashboard is only live once its physicsTick runs.
 climb_sample = wait_for_motor_base(0.05, timeout=3)
 assert climb_sample is not None, "No [MOTOR] response during RTL_CLIMB"
 
@@ -38,7 +41,7 @@ for alt in [20, 30, 40, 50, 61]:
     set_world(alt_ft=float(alt))
     time.sleep(0.5)
 
-assert wait_for_status(phase="RTL", rtl=("RETURN", "SETTLE"), timeout=10), \
+assert approve_gate("RTL_RETURN", reason="RTL_CLIMB_COMPLETE", timeout=10), \
     "RTL climb never completed"
 
 hover_sample = query_motor()
@@ -48,10 +51,11 @@ assert climb_sample["base"] > hover_sample["base"] + 0.05, \
      f"above cruise hover throttle ({hover_sample['base']}) -- firmware "
      "may not be commanding real climb thrust")
 
-# RTL_RETURN: walk GPS back to launch and confirm the firmware is issuing a
-# steering correction (non-zero roll/pitch mix) toward the launch heading,
-# not just polling GPS until it happens to match the launch coordinates.
-for lat in [36.125000, 36.123500, 36.123456]:
+# RTL_RETURN: walk GPS back toward launch (staying > WAYPOINT_ACCEPT_RADIUS_M
+# away) and confirm the firmware is issuing a steering correction (non-zero
+# roll/pitch mix) toward the launch heading, not just polling GPS until it
+# happens to match the launch coordinates.
+for lat in [36.125000, 36.124000]:
     set_world(lat=lat, alt_ft=61.0)
     assert wait_for_gps_publish(), \
         "GPS loop never published the updated position"
@@ -59,6 +63,12 @@ for lat in [36.125000, 36.123500, 36.123456]:
     assert sample is not None, "No [MOTOR] response while returning to launch"
     assert abs(sample["roll"]) > 0.01 or abs(sample["pitch"]) > 0.01, \
         "No steering correction commanded while returning to launch"
+
+# Arrive over launch -> RTL_SETTLE.
+set_world(lat=36.123456, alt_ft=61.0)
+assert wait_for_gps_publish(), "GPS loop never published the launch position"
+assert approve_gate("RTL_SETTLE", reason="RTL_ARRIVED", timeout=8), \
+    "RTL_RETURN never arrived over launch"
 
 # RTL_SETTLE: 3s hover. Keep barometer at 61 ft so transitionTo(PHASE_LANDING)
 # snapshots the real cruise altitude, not zero.

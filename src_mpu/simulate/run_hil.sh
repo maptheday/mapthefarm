@@ -12,8 +12,8 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PORT="${ESP_PORT:-}"
 # Comment out scenarios you do not want to run.
 SCENARIOS=(
-    # "edge_geofence_breach.py"
-    # "edge_gps_permanent_loss.py"
+    "edge_geofence_breach.py"
+    "edge_gps_permanent_loss.py"
     "edge_max_flight_timeout.py"
     "full_flight_test.py"
     "manual_flight_test.py"

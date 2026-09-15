@@ -24,23 +24,32 @@ assert approve_gate("HOLD", reason="TAKEOFF_COMPLETE", timeout=10), \
     "Never reached takeoff altitude"
 
 # Sit in HOLD. armedAtMs was set at RAISE entry (~5s ago), so we need
-# ~55s more for MAX_FLIGHT_TIME_MS (60s total) to fire.
+# ~55s more for MAX_FLIGHT_TIME_MS (60s total) to fire. RTL is now three
+# ordinary phases (RTL_CLIMB -> RTL_RETURN -> RTL_SETTLE), each a gated
+# transition we approve in turn.
 set_world(alt_ft=15.0)
-assert approve_gate("RTL", reason="MAX_FLIGHT_TIME", timeout=60), \
-    "Max flight time safety did not request RTL"
+assert approve_gate("RTL_CLIMB", reason="MAX_FLIGHT_TIME", timeout=60), \
+    "Max flight time safety did not request RTL_CLIMB"
+
+# Nudge GPS ~60m north (well inside the 150m geofence) so RTL_RETURN has real
+# distance to fly back -- otherwise it would arrive on its first nav tick.
+set_world(lat=36.124000, alt_ft=15.0)
 
 # RTL_CLIMB: ramp barometer to RTL_ALTITUDE_FT (60 ft)
 for alt in [20, 30, 40, 50, 61]:
     set_world(alt_ft=float(alt))
     time.sleep(0.5)
 
-# The RTL sub-state can move from RETURN to SETTLE between status polls when
-# the drone is already over the launch coordinates. Accept either durable
-# state instead of relying on a one-time human log line.
-assert wait_for_status(phase="RTL", rtl=("RETURN", "SETTLE"), timeout=10), \
-    "RTL did not complete its climb/return transition"
+assert approve_gate("RTL_RETURN", reason="RTL_CLIMB_COMPLETE", timeout=10), \
+    "RTL did not complete its climb transition"
 
-# Already at launch coords -- RTL_RETURN resolves on the next nav tick.
+# Walk GPS back to launch -> RTL_RETURN arrives -> RTL_SETTLE.
+set_world(lat=36.123456, alt_ft=61.0)
+assert wait_for_gps_publish(), "GPS loop never published the launch position"
+assert approve_gate("RTL_SETTLE", reason="RTL_ARRIVED", timeout=10), \
+    "RTL_RETURN never arrived over launch"
+
+# RTL_SETTLE: 3s hover -> LANDING.
 set_world(alt_ft=61.0)
 assert approve_gate("LANDING", reason="RTL_COMPLETE", timeout=8), \
     "RTL settle did not enter landing"

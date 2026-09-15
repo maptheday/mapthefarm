@@ -70,7 +70,10 @@ inline void checkCoreFailsafes(unsigned long armedAtMs, double launchLat, double
   FlightPhase phase;
   withMutex([&]() { phase = shared.phase; });
 
-  if (tripRTL && phase != PHASE_RTL && phase != PHASE_LANDING && phase != PHASE_LANDED) {
-    transitionTo(PHASE_RTL, rtlReason);
+  bool alreadyComingHome = phase == PHASE_RTL_CLIMB || phase == PHASE_RTL_RETURN ||
+                           phase == PHASE_RTL_SETTLE || phase == PHASE_LANDING ||
+                           phase == PHASE_LANDED;
+  if (tripRTL && !alreadyComingHome) {
+    transitionTo(PHASE_RTL_CLIMB, rtlReason);  // RTL starts at the climb step
   }
 }

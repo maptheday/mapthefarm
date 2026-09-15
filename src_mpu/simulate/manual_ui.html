@@ -426,7 +426,7 @@ function updateInputPads(s) {
 // position/altitude/heading back to the firmware, so the firmware's real
 // controller flies against it and position hold visibly corrects drift. ----
 let tel = { alt: 0, roll: 0, pitch: 0, yaw: 90, anchored: 0, base: 0 };
-const phys = { N: 0, E: 0, alt: 0, hdg: 90, vN: 0, vE: 0,
+const phys = { N: 0, E: 0, alt: 0, vAlt: 0, hdg: 90, vN: 0, vE: 0,
                anchorN: null, anchorE: null, prevAnchored: 0, trail: [] };
 let physTimer = null;
 
@@ -453,9 +453,17 @@ function stepPhysics(dt) {
   phys.vE += (aE - drag * phys.vE) * dt;
   phys.N  += phys.vN * dt;
   phys.E  += phys.vE * dt;
-  // Altitude chases the commanded target (fast first-order lag).
-  phys.alt += (tel.alt - phys.alt) * Math.min(1, dt / 0.6);
-  if (phys.alt < 0) phys.alt = 0;
+  // Altitude from thrust vs gravity: the motor % the firmware commands
+  // (tel.base) must beat the hover throttle to climb, or the drone sinks. This
+  // makes the MOTOR reading honest -- it settles near HOVER to hold height, and
+  // you can watch the firmware's PID integral term wind up to find that point.
+  const HOVER = 0.5;      // throttle that exactly cancels gravity
+  const K_THRUST = 64.4;  // ft/s^2 swing: base 0 -> -1g (fall), base 1 -> +1g (climb)
+  const vDrag = 0.3;      // vertical air resistance -> terminal speed + damping
+  const accelAlt = K_THRUST * (tel.base - HOVER);
+  phys.vAlt += (accelAlt - vDrag * phys.vAlt) * dt;
+  phys.alt  += phys.vAlt * dt;
+  if (phys.alt <= 0) { phys.alt = 0; if (phys.vAlt < 0) phys.vAlt = 0; }  // rests on the ground
   // Heading chases the yaw target.
   const dh = ((tel.yaw - phys.hdg + 540) % 360) - 180;
   phys.hdg = (phys.hdg + dh * Math.min(1, dt / 0.4) + 360) % 360;
@@ -514,7 +522,7 @@ function drawMap() {
 }
 
 $("recenter").onclick = () => {
-  phys.N = phys.E = phys.vN = phys.vE = 0; phys.alt = 0;
+  phys.N = phys.E = phys.vN = phys.vE = 0; phys.alt = phys.vAlt = 0;
   phys.trail = []; phys.anchorN = phys.anchorE = null;
 };
 

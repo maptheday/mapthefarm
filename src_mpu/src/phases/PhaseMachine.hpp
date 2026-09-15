@@ -75,10 +75,15 @@ inline void transitionTo(FlightPhase next, TransitionReason reason) {
         ctx.carriedLaunchLat = shared.trip_mission.launchLat;
         ctx.carriedLaunchLon = shared.trip_mission.launchLon;
         break;
-      case PHASE_RTL:
-        ctx.carriedArmedAtMs = shared.trip_rtl.armedAtMs;
-        ctx.carriedLaunchLat = shared.trip_rtl.launchLat;
-        ctx.carriedLaunchLon = shared.trip_rtl.launchLon;
+      case PHASE_RTL_CLIMB:
+        ctx.carriedArmedAtMs = shared.trip_rtlClimb.armedAtMs;
+        ctx.carriedLaunchLat = shared.trip_rtlClimb.launchLat;
+        ctx.carriedLaunchLon = shared.trip_rtlClimb.launchLon;
+        break;
+      case PHASE_RTL_RETURN:
+        ctx.carriedArmedAtMs = shared.trip_rtlReturn.armedAtMs;
+        ctx.carriedLaunchLat = shared.trip_rtlReturn.launchLat;
+        ctx.carriedLaunchLon = shared.trip_rtlReturn.launchLon;
         break;
       default: break;
     }

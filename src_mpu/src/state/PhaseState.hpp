@@ -187,14 +187,8 @@ struct Trip_Mission {
   }
 };
 
-// --- RTL ---
-enum RTLState {
-  RTL_CLIMB,
-  RTL_RETURN,
-  RTL_SETTLE
-};
-
-struct Dashboard_RTL {
+// --- RTL_CLIMB (rise to a safe altitude, then RTL_RETURN) ---
+struct Dashboard_RtlClimb {
   float altitudeFt      = 0.0f;
   float roll            = 0.0f;
   float pitch           = 0.0f;
@@ -207,7 +201,7 @@ struct Dashboard_RTL {
   float baseThrottle    = 0.0f;
   float rollCorrection  = 0.0f;
   float pitchCorrection = 0.0f;
-  Dashboard_RTL& operator=(const volatile Dashboard_RTL& o) {
+  Dashboard_RtlClimb& operator=(const volatile Dashboard_RtlClimb& o) {
     altitudeFt=o.altitudeFt; roll=o.roll; pitch=o.pitch; yaw=o.yaw;
     compassHeading=o.compassHeading;
     m1=o.m1; m2=o.m2; m3=o.m3; m4=o.m4;
@@ -216,29 +210,107 @@ struct Dashboard_RTL {
     return *this;
   }
 };
-struct Cruise_RTL {
+struct Cruise_RtlClimb {
   float targetAltFt      = 10.0f;
   float targetRollDeg    = 0.0f;
   float targetPitchDeg   = 0.0f;
   float yawTargetHeading = 0.0f;
-  Cruise_RTL& operator=(const volatile Cruise_RTL& o) {
+  Cruise_RtlClimb& operator=(const volatile Cruise_RtlClimb& o) {
     targetAltFt=o.targetAltFt; targetRollDeg=o.targetRollDeg;
     targetPitchDeg=o.targetPitchDeg; yawTargetHeading=o.yawTargetHeading;
     return *this;
   }
 };
-struct Trip_RTL {
-  unsigned long armedAtMs     = 0;
-  RTLState      state         = RTL_CLIMB;
-  double        launchLat     = 0.0;
-  double        launchLon     = 0.0;
-  unsigned long settleStartMs = 0;
-  Trip_RTL& operator=(const volatile Trip_RTL& o) {
-    armedAtMs=o.armedAtMs; state=o.state;
-    launchLat=o.launchLat; launchLon=o.launchLon;
-    settleStartMs=o.settleStartMs;
+struct Trip_RtlClimb {
+  unsigned long armedAtMs = 0;
+  double        launchLat = 0.0;  // carried forward so RTL_RETURN can fly home
+  double        launchLon = 0.0;
+  Trip_RtlClimb& operator=(const volatile Trip_RtlClimb& o) {
+    armedAtMs=o.armedAtMs; launchLat=o.launchLat; launchLon=o.launchLon;
     return *this;
   }
+};
+
+// --- RTL_RETURN (fly back over the launch point, then RTL_SETTLE) ---
+struct Dashboard_RtlReturn {
+  float altitudeFt      = 0.0f;
+  float roll            = 0.0f;
+  float pitch           = 0.0f;
+  float yaw             = 0.0f;
+  float compassHeading  = 0.0f;
+  float m1              = 0.0f;
+  float m2              = 0.0f;
+  float m3              = 0.0f;
+  float m4              = 0.0f;
+  float baseThrottle    = 0.0f;
+  float rollCorrection  = 0.0f;
+  float pitchCorrection = 0.0f;
+  Dashboard_RtlReturn& operator=(const volatile Dashboard_RtlReturn& o) {
+    altitudeFt=o.altitudeFt; roll=o.roll; pitch=o.pitch; yaw=o.yaw;
+    compassHeading=o.compassHeading;
+    m1=o.m1; m2=o.m2; m3=o.m3; m4=o.m4;
+    baseThrottle=o.baseThrottle; rollCorrection=o.rollCorrection;
+    pitchCorrection=o.pitchCorrection;
+    return *this;
+  }
+};
+struct Cruise_RtlReturn {
+  float targetAltFt      = 10.0f;
+  float targetRollDeg    = 0.0f;
+  float targetPitchDeg   = 0.0f;
+  float yawTargetHeading = 0.0f;
+  Cruise_RtlReturn& operator=(const volatile Cruise_RtlReturn& o) {
+    targetAltFt=o.targetAltFt; targetRollDeg=o.targetRollDeg;
+    targetPitchDeg=o.targetPitchDeg; yawTargetHeading=o.yawTargetHeading;
+    return *this;
+  }
+};
+struct Trip_RtlReturn {
+  unsigned long armedAtMs = 0;
+  double        launchLat = 0.0;  // where "home" is
+  double        launchLon = 0.0;
+  Trip_RtlReturn& operator=(const volatile Trip_RtlReturn& o) {
+    armedAtMs=o.armedAtMs; launchLat=o.launchLat; launchLon=o.launchLon;
+    return *this;
+  }
+};
+
+// --- RTL_SETTLE (hover over launch for RTL_SETTLE_MS, then LANDING) ---
+struct Dashboard_RtlSettle {
+  float altitudeFt      = 0.0f;
+  float roll            = 0.0f;
+  float pitch           = 0.0f;
+  float yaw             = 0.0f;
+  float compassHeading  = 0.0f;
+  float m1              = 0.0f;
+  float m2              = 0.0f;
+  float m3              = 0.0f;
+  float m4              = 0.0f;
+  float baseThrottle    = 0.0f;
+  float rollCorrection  = 0.0f;
+  float pitchCorrection = 0.0f;
+  Dashboard_RtlSettle& operator=(const volatile Dashboard_RtlSettle& o) {
+    altitudeFt=o.altitudeFt; roll=o.roll; pitch=o.pitch; yaw=o.yaw;
+    compassHeading=o.compassHeading;
+    m1=o.m1; m2=o.m2; m3=o.m3; m4=o.m4;
+    baseThrottle=o.baseThrottle; rollCorrection=o.rollCorrection;
+    pitchCorrection=o.pitchCorrection;
+    return *this;
+  }
+};
+struct Cruise_RtlSettle {
+  float targetAltFt      = 10.0f;
+  float targetRollDeg    = 0.0f;
+  float targetPitchDeg   = 0.0f;
+  float yawTargetHeading = 0.0f;
+  Cruise_RtlSettle& operator=(const volatile Cruise_RtlSettle& o) {
+    targetAltFt=o.targetAltFt; targetRollDeg=o.targetRollDeg;
+    targetPitchDeg=o.targetPitchDeg; yawTargetHeading=o.yawTargetHeading;
+    return *this;
+  }
+};
+struct Trip_RtlSettle {
+  unsigned long settleStartMs = 0;  // when the hover began
 };
 
 // --- HOVER SETTLE ---
@@ -400,9 +472,17 @@ struct SharedState {
   Cruise_Mission        cruise_mission;
   Trip_Mission          trip_mission;
 
-  Dashboard_RTL         dashboard_rtl;
-  Cruise_RTL            cruise_rtl;
-  Trip_RTL              trip_rtl;
+  Dashboard_RtlClimb    dashboard_rtlClimb;
+  Cruise_RtlClimb       cruise_rtlClimb;
+  Trip_RtlClimb         trip_rtlClimb;
+
+  Dashboard_RtlReturn   dashboard_rtlReturn;
+  Cruise_RtlReturn      cruise_rtlReturn;
+  Trip_RtlReturn        trip_rtlReturn;
+
+  Dashboard_RtlSettle   dashboard_rtlSettle;
+  Cruise_RtlSettle      cruise_rtlSettle;
+  Trip_RtlSettle        trip_rtlSettle;
 
   Dashboard_HoverSettle dashboard_hoverSettle;
   Cruise_HoverSettle    cruise_hoverSettle;
