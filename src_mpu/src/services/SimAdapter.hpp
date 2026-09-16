@@ -5,6 +5,7 @@
 // The Python test runner drives the drone entirely over the USB serial line
 // with tiny text commands; this file parses them and speaks the reply protocol:
 //   inputs:  HDG:/LAT:/LON:/FIX:/ALT:  inject fake sensor readings
+//            IMU:roll,pitch,yawRate     inject fake attitude (stabilization test)
 //            CRSFSTART:1 / CRSFSTOP:1   fake the pilot's radio switches
 //            CRSFMANUAL:1 / :0          fake the MANUAL switch on/off
 //            STICKS:th,ro,pi,ya         fake the four RC sticks (MANUAL mode)
@@ -61,6 +62,27 @@ inline void parseSimInput() {
       }
       else if (buf.startsWith("ALT:")) {
         withMutex([&]() { shared.raw.baroAltitudeFt = buf.substring(4).toFloat(); });
+      }
+      // Inject a fake ATTITUDE (tilt) so the stabilization loop can be tested:
+      // "IMU:roll,pitch,yawRate" in degrees (roll/pitch) and deg/s (yawRate).
+      // These land in the same fields the real Madgwick filter fills (gyroX =
+      // roll, gyroY = pitch, gyroZ = yaw rate), which physicsTick reads. This is
+      // an OPEN-LOOP injection: the tilt does NOT change in response to the
+      // motors, so it tests correction DIRECTION/mixing, not stability/tuning.
+      else if (buf.startsWith("IMU:")) {
+        String p = buf.substring(4);
+        int c1 = p.indexOf(',');
+        int c2 = p.indexOf(',', c1 + 1);
+        if (c1 > 0 && c2 > c1) {
+          float ro = p.substring(0, c1).toFloat();
+          float pi = p.substring(c1 + 1, c2).toFloat();
+          float yr = p.substring(c2 + 1).toFloat();
+          withMutex([&]() {
+            shared.raw.imu.gyroX = ro;  // fused roll  (see Imu.hpp naming quirk)
+            shared.raw.imu.gyroY = pi;  // fused pitch
+            shared.raw.imu.gyroZ = yr;  // yaw rate
+          });
+        }
       }
       else if (buf.startsWith("MISSION:")) {
         bool fixNow;
@@ -125,35 +147,35 @@ inline void parseSimInput() {
       else if (buf.startsWith("MOTOR?")) {
         // Report the motor mix of whichever phase is currently flying. Each
         // phase writes its own dashboard, so pick the one matching shared.phase.
+        // Includes the four per-motor outputs (m1..m4) so a stabilization test
+        // can check the mixing, not just the base/roll/pitch summary.
         float base = 0.0f;
         float roll = 0.0f;
         float pitch = 0.0f;
+        float m1 = 0.0f, m2 = 0.0f, m3 = 0.0f, m4 = 0.0f;
         withMutex([&]() {
+          #define MOTOR_FROM(dash) \
+            base=dash.baseThrottle; roll=dash.rollCorrection; pitch=dash.pitchCorrection; \
+            m1=dash.m1; m2=dash.m2; m3=dash.m3; m4=dash.m4;
           switch (shared.phase) {
-            case PHASE_RAISE:
-              base=shared.dashboard_raise.baseThrottle; roll=shared.dashboard_raise.rollCorrection; pitch=shared.dashboard_raise.pitchCorrection; break;
-            case PHASE_HOLD:
-              base=shared.dashboard_hold.baseThrottle; roll=shared.dashboard_hold.rollCorrection; pitch=shared.dashboard_hold.pitchCorrection; break;
-            case PHASE_MISSION:
-              base=shared.dashboard_mission.baseThrottle; roll=shared.dashboard_mission.rollCorrection; pitch=shared.dashboard_mission.pitchCorrection; break;
-            case PHASE_RTL_CLIMB:
-              base=shared.dashboard_rtlClimb.baseThrottle; roll=shared.dashboard_rtlClimb.rollCorrection; pitch=shared.dashboard_rtlClimb.pitchCorrection; break;
-            case PHASE_RTL_RETURN:
-              base=shared.dashboard_rtlReturn.baseThrottle; roll=shared.dashboard_rtlReturn.rollCorrection; pitch=shared.dashboard_rtlReturn.pitchCorrection; break;
-            case PHASE_RTL_SETTLE:
-              base=shared.dashboard_rtlSettle.baseThrottle; roll=shared.dashboard_rtlSettle.rollCorrection; pitch=shared.dashboard_rtlSettle.pitchCorrection; break;
-            case PHASE_HOVER_SETTLE:
-              base=shared.dashboard_hoverSettle.baseThrottle; roll=shared.dashboard_hoverSettle.rollCorrection; pitch=shared.dashboard_hoverSettle.pitchCorrection; break;
-            case PHASE_LANDING:
-              base=shared.dashboard_landing.baseThrottle; roll=shared.dashboard_landing.rollCorrection; pitch=shared.dashboard_landing.pitchCorrection; break;
-            case PHASE_MANUAL:
-              base=shared.dashboard_manual.baseThrottle; roll=shared.dashboard_manual.rollCorrection; pitch=shared.dashboard_manual.pitchCorrection; break;
+            case PHASE_RAISE:        { MOTOR_FROM(shared.dashboard_raise);       break; }
+            case PHASE_HOLD:         { MOTOR_FROM(shared.dashboard_hold);        break; }
+            case PHASE_MISSION:      { MOTOR_FROM(shared.dashboard_mission);     break; }
+            case PHASE_RTL_CLIMB:    { MOTOR_FROM(shared.dashboard_rtlClimb);    break; }
+            case PHASE_RTL_RETURN:   { MOTOR_FROM(shared.dashboard_rtlReturn);   break; }
+            case PHASE_RTL_SETTLE:   { MOTOR_FROM(shared.dashboard_rtlSettle);   break; }
+            case PHASE_HOVER_SETTLE: { MOTOR_FROM(shared.dashboard_hoverSettle); break; }
+            case PHASE_LANDING:      { MOTOR_FROM(shared.dashboard_landing);     break; }
+            case PHASE_MANUAL:       { MOTOR_FROM(shared.dashboard_manual);      break; }
             default: break;  // ground phases (PARKED / LANDED / CALIBRATE): motors off
           }
+          #undef MOTOR_FROM
         });
         logLine("[MOTOR] base=" + String(base, 2) +
                 " roll=" + String(roll, 3) +
-                " pitch=" + String(pitch, 3));
+                " pitch=" + String(pitch, 3) +
+                " m1=" + String(m1, 3) + " m2=" + String(m2, 3) +
+                " m3=" + String(m3, 3) + " m4=" + String(m4, 3));
       }
       // MANUAL-mode read-back: the pilot setpoints the sticks are driving, plus
       // whether position hold has dropped an anchor and the base throttle.

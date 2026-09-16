@@ -17,6 +17,7 @@ SCENARIOS=(
     "edge_max_flight_timeout.py"
     "full_flight_test.py"
     "manual_flight_test.py"
+    "stabilization_reaction_test.py"
 )
 
 # Passing a scenario keeps the convenient single-scenario debugging mode:

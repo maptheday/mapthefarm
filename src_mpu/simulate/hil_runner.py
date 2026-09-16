@@ -168,7 +168,9 @@ import re as _re
 
 _MOTOR_RE = _re.compile(
     r"\[MOTOR\] base=(?P<base>-?[\d.]+) roll=(?P<roll>-?[\d.]+) "
-    r"pitch=(?P<pitch>-?[\d.]+)"
+    r"pitch=(?P<pitch>-?[\d.]+) "
+    r"m1=(?P<m1>-?[\d.]+) m2=(?P<m2>-?[\d.]+) "
+    r"m3=(?P<m3>-?[\d.]+) m4=(?P<m4>-?[\d.]+)"
 )
 _STATUS_RE = _re.compile(
     r"\[STATUS\] id=(?P<id>\d+) phase=(?P<phase>[A-Z_]+) "
@@ -382,6 +384,15 @@ def set_world(**kwargs):
     with world_lock:
         world.update(kwargs)
 
+def set_attitude(roll_deg: float = 0.0, pitch_deg: float = 0.0, yaw_rate_dps: float = 0.0):
+    """Inject a fake tilt so the stabilization loop can be tested.
+
+    OPEN-LOOP: the injected tilt does NOT change in response to the motors, so
+    this tests the direction/magnitude of the correction and the motor mixing,
+    NOT closed-loop stability or PID tuning (that needs a real tethered flight).
+    """
+    send(f"IMU:{roll_deg:.3f},{pitch_deg:.3f},{yaw_rate_dps:.3f}")
+
 def arm_and_takeoff(takeoff_timeout: float = 15.0) -> bool:
     send("CRSFSTART:1")
     return approve_gate("RAISE", timeout=takeoff_timeout) is not None
@@ -457,6 +468,7 @@ def main():
     mod.log_lines         = log_lines
     mod.log_lock          = log_condition
     mod.set_world         = set_world
+    mod.set_attitude      = set_attitude
     mod.wait_for          = wait_for
     mod.wait_for_gps_publish = wait_for_gps_publish
     mod.forbid            = forbid

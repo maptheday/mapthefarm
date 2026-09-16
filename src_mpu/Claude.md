@@ -469,6 +469,8 @@ The bridge both of them speak to is [`SimAdapter.hpp`](#simadapterhpp) on the fi
 
 > **Key insight:** the difference between the automated tests and the cockpit is only *where the fake GPS numbers come from* — a script types them in one case, a physics model generates them in the other. The firmware, the sensors-are-fake trick, and the phase logic are identical.
 
+**What HIL does *not* cover (important):** most scenarios leave the IMU at zero, so the drone always "believes" it is level. That means the **navigation/phase brain** (which waypoint, when to come home, when to land) is tested thoroughly, but the **stabilization brain** (the roll/pitch/yaw PIDs + motor mixing that keep it upright) is not exercised by them. To partly close that gap, [`scenarios/stabilization_reaction_test.py`](simulate/scenarios/stabilization_reaction_test.py) injects a *fake tilt* (the `IMU:roll,pitch,yawRate` command) and asserts the firmware pushes the correct motors the correct way. This is **open-loop**: the injected tilt does not change in response to the motors, so it catches **sign / axis / mixing / clamp** bugs (the kind that flip a drone instantly) but **cannot** validate PID tuning or whether the corrections actually settle the drone. That — and confirming a positive tilt *number* really means the drone is physically leaning that way (IMU mounting + the Madgwick filter, which only run on hardware) — still requires a real, tethered bench test.
+
 ---
 
 ## 9. Common tasks

@@ -1,0 +1,411 @@
+Run log: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/hil_20260915_000740_t1aZZw.log
+== Selected HIL scenarios ==
+  edge_geofence_breach.py
+  edge_gps_permanent_loss.py
+  edge_max_flight_timeout.py
+  full_flight_test.py
+  manual_flight_test.py
+  stabilization_reaction_test.py
+== Uploading WOKWI_SIM firmware to /dev/cu.usbmodem14201 ==
+Processing wokwi_sim (platform: espressif32; board: esp32-s3-devkitc-1-n16r8; framework: arduino)
+--------------------------------------------------------------------------------
+Verbose mode can be enabled via `-v, --verbose` option
+CONFIGURATION: https://docs.platformio.org/page/boards/espressif32/esp32-s3-devkitc-1-n16r8.html
+PLATFORM: Espressif 32 (7.0.1) > Espressif ESP32-S3-DevKitC-1-N16R8 (16 MB, 8 MB PSRAM)
+HARDWARE: ESP32S3 240MHz, 320KB RAM, 16MB Flash
+DEBUG: Current (esp-builtin) On-board (esp-builtin) External (cmsis-dap, esp-bridge, esp-prog, iot-bus-jtag, jlink, minimodule, olimex-arm-usb-ocd, olimex-arm-usb-ocd-h, olimex-arm-usb-tiny-h, olimex-jtag-tiny, tumpa)
+PACKAGES: 
+ - framework-arduinoespressif32 @ 3.20017.241212+sha.dcc1105b 
+ - tool-esptoolpy @ 2.41100.0 (4.11.0) 
+ - tool-mkfatfs @ 2.0.1 
+ - tool-mklittlefs @ 1.203.210628 (2.3) 
+ - tool-mkspiffs @ 2.230.0 (2.30) 
+ - tool-openocd-esp32 @ 2.1100.20220706 (11.0) 
+ - toolchain-riscv32-esp @ 8.4.0+2021r2-patch5 
+ - toolchain-xtensa-esp32s3 @ 8.4.0+2021r2-patch5
+Converting ESP32_MPU_6050_Web_Server.ino
+LDF: Library Dependency Finder -> https://bit.ly/configure-pio-ldf
+LDF Modes: Finder ~ chain, Compatibility ~ soft
+Found 45 compatible libraries
+Scanning dependencies...
+Dependency Graph
+|-- AsyncTCP @ 3.5.0
+|-- ESPAsyncWebServer @ 3.12.0
+|-- Adafruit MPU6050 @ 2.2.9
+|-- Adafruit Unified Sensor @ 1.1.15
+|-- ArduinoJson @ 7.4.3
+|-- Madgwick @ 1.2.0
+|-- Adafruit BME280 Library @ 2.3.0
+|-- TinyGPSPlus @ 1.1.0
+|-- QMC5883LCompass @ 1.2.3
+|-- Preferences @ 2.0.0
+|-- Wire @ 2.0.0
+Building in release mode
+Compiling .pio/build/wokwi_sim/src/ESP32_MPU_6050_Web_Server.ino.cpp.o
+Retrieving maximum program size .pio/build/wokwi_sim/firmware.elf
+Checking size .pio/build/wokwi_sim/firmware.elf
+Advanced Memory Usage is available via "PlatformIO Home > Project Inspect"
+RAM:   [=         ]   6.5% (used 21380 bytes from 327680 bytes)
+Flash: [=         ]   5.5% (used 359041 bytes from 6553600 bytes)
+Configuring upload protocol...
+AVAILABLE: cmsis-dap, esp-bridge, esp-builtin, esp-prog, espota, esptool, iot-bus-jtag, jlink, minimodule, olimex-arm-usb-ocd, olimex-arm-usb-ocd-h, olimex-arm-usb-tiny-h, olimex-jtag-tiny, tumpa
+CURRENT: upload_protocol = esptool
+Looking for upload port...
+Using manually specified: /dev/cu.usbmodem14201
+Uploading .pio/build/wokwi_sim/firmware.bin
+esptool.py v4.11.0
+Serial port /dev/cu.usbmodem14201
+Connecting...
+Chip is ESP32-S3 (QFN56) (revision v0.2)
+Features: WiFi, BLE, Embedded PSRAM 8MB (AP_3v3)
+Crystal is 40MHz
+USB mode: USB-Serial/JTAG
+MAC: e0:72:a1:db:c6:20
+Uploading stub...
+Running stub...
+Stub running...
+Changing baud rate to 460800
+Changed.
+Configuring flash size...
+Flash will be erased from 0x00000000 to 0x00003fff...
+Flash will be erased from 0x00008000 to 0x00008fff...
+Flash will be erased from 0x0000e000 to 0x0000ffff...
+Flash will be erased from 0x00010000 to 0x00067fff...
+SHA digest in image updated
+Compressed 15104 bytes to 10429...
+Writing at 0x00000000... (100 %)
+Wrote 15104 bytes (10429 compressed) at 0x00000000 in 0.2 seconds (effective 700.9 kbit/s)...
+Hash of data verified.
+Compressed 3072 bytes to 146...
+Writing at 0x00008000... (100 %)
+Wrote 3072 bytes (146 compressed) at 0x00008000 in 0.0 seconds (effective 677.4 kbit/s)...
+Hash of data verified.
+Compressed 8192 bytes to 47...
+Writing at 0x0000e000... (100 %)
+Wrote 8192 bytes (47 compressed) at 0x0000e000 in 0.1 seconds (effective 980.3 kbit/s)...
+Hash of data verified.
+Compressed 359408 bytes to 206378...
+Writing at 0x00010000... (7 %)
+Writing at 0x0001b5d8... (15 %)
+Writing at 0x00026ea4... (23 %)
+Writing at 0x0002c3fe... (30 %)
+Writing at 0x00031e7f... (38 %)
+Writing at 0x000386eb... (46 %)
+Writing at 0x0003e174... (53 %)
+Writing at 0x000435e4... (61 %)
+Writing at 0x00048bee... (69 %)
+Writing at 0x0004e1f2... (76 %)
+Writing at 0x00053a9c... (84 %)
+Writing at 0x0005bfab... (92 %)
+Writing at 0x00064365... (100 %)
+Wrote 359408 bytes (206378 compressed) at 0x00010000 in 2.2 seconds (effective 1279.6 kbit/s)...
+Hash of data verified.
+
+Leaving...
+Hard resetting via RTS pin...
+========================= [SUCCESS] Took 9.50 seconds =========================
+
+Environment    Status    Duration
+-------------  --------  ------------
+wokwi_sim      SUCCESS   00:00:09.502
+========================= 1 succeeded in 00:00:09.502 =========================
+== Running HIL scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/edge_geofence_breach.py ==
+[HIL] Opening /dev/cu.usbmodem14201...
+[HIL] Waiting for firmware (PING handshake)...
+[FW] '[SENSORS] Sim mode -- sensors driven by the HIL runner.'
+[FW] '[HIL] Ready.'
+[FW] '[HIL] Ready.'
+[FW] '[HIL] Ready.'
+[FW] '[HIL] State reset.'
+[HIL] Firmware ready. Loading scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/edge_geofence_breach.py
+[FW] '[CRSF] START switch -- arming and taking off.'
+[FW] '[HIL_GATE] request=RAISE reason=OPERATOR_START'
+[STATE] Drone is on the ground and ready. Gate: waiting for approval to enter RAISE.
+[HIL] Approved phase transition to RAISE
+[FW] '[HIL_GATE] approved=RAISE'
+[STATE] Drone is on the ground and ready. Gate: waiting for approval to enter RAISE.
+[STATE] Drone is climbing to takeoff altitude. Gate: no approval pending.
+[FW] '[NAV] Takeoff altitude reached, transitioning to HOLD.'
+[FW] '[HIL_GATE] request=HOLD reason=TAKEOFF_COMPLETE'
+[STATE] Drone is climbing to takeoff altitude. Gate: waiting for approval to enter HOLD.
+[HIL] Approved phase transition to HOLD
+[FW] '[HIL_GATE] approved=HOLD'
+[STATE] Drone is climbing to takeoff altitude. Gate: waiting for approval to enter HOLD.
+[STATE] Drone is hovering in place. Gate: no approval pending.
+[FW] '[SAFETY] Geofence exceeded — forcing RTL.'
+[FW] '[HIL_GATE] request=RTL_CLIMB reason=GEOFENCE'
+[STATE] Drone is hovering in place. Gate: waiting for approval to enter RTL_CLIMB.
+[HIL] Approved phase transition to RTL_CLIMB
+[FW] '[HIL_GATE] approved=RTL_CLIMB'
+[STATE] Drone is hovering in place. Gate: waiting for approval to enter RTL_CLIMB.
+[STATE] Drone is returning to launch: climbing to RTL altitude. Gate: no approval pending.
+[FW] '[MOTOR] base=1.00 roll=0.000 pitch=0.000 m1=1.000 m2=1.000 m3=1.000 m4=1.000'
+[FW] '[HIL_GATE] request=RTL_RETURN reason=RTL_CLIMB_COMPLETE'
+[STATE] Drone is returning to launch: climbing to RTL altitude. Gate: waiting for approval to enter RTL_RETURN.
+[HIL] Approved phase transition to RTL_RETURN
+[FW] '[HIL_GATE] approved=RTL_RETURN'
+[STATE] Drone is returning to launch: climbing to RTL altitude. Gate: waiting for approval to enter RTL_RETURN.
+[STATE] Drone is returning to launch: flying toward the launch point. Gate: no approval pending.
+[FW] '[MOTOR] base=0.49 roll=0.000 pitch=0.000 m1=0.486 m2=0.486 m3=0.486 m4=0.486'
+[FW] '[MOTOR] base=0.47 roll=-0.000 pitch=-0.166 m1=0.107 m2=0.507 m3=0.840 m4=0.440'
+[FW] '[MOTOR] base=0.45 roll=-0.000 pitch=-0.193 m1=0.060 m2=0.460 m3=0.847 m4=0.447'
+[FW] '[RTL] Arrived over launch pad. Settling.'
+[FW] '[HIL_GATE] request=RTL_SETTLE reason=RTL_ARRIVED'
+[STATE] Drone is returning to launch: flying toward the launch point. Gate: waiting for approval to enter RTL_SETTLE.
+[HIL] Approved phase transition to RTL_SETTLE
+[FW] '[HIL_GATE] approved=RTL_SETTLE'
+[STATE] Drone is returning to launch: flying toward the launch point. Gate: waiting for approval to enter RTL_SETTLE.
+[STATE] Drone is returning to launch: settling over the launch point. Gate: no approval pending.
+[FW] '[RTL] Settle complete. Beginning landing.'
+[FW] '[HIL_GATE] request=LANDING reason=RTL_COMPLETE'
+[STATE] Drone is returning to launch: settling over the launch point. Gate: waiting for approval to enter LANDING.
+[HIL] Approved phase transition to LANDING
+[FW] '[HIL_GATE] approved=LANDING'
+[STATE] Drone is descending to land. Gate: no approval pending.
+[FW] '[HIL_GATE] request=LANDED reason=TOUCHDOWN'
+[FW] '[NAV] Landed — motors disarmed.'
+[STATE] Drone is descending to land. Gate: waiting for approval to enter LANDED.
+[HIL] Approved phase transition to LANDED
+[FW] '[HIL_GATE] approved=LANDED'
+[STATE] Drone is descending to land. Gate: waiting for approval to enter LANDED.
+[STATE] Drone is on the ground with motors disarmed. Gate: no approval pending.
+
+RESULT: PASS
+== Passed HIL scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/edge_geofence_breach.py ==
+== Running HIL scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/edge_gps_permanent_loss.py ==
+[HIL] Opening /dev/cu.usbmodem14201...
+[HIL] Waiting for firmware (PING handshake)...
+[FW] '[HIL] Ready.'
+[FW] '[HIL] State reset.'
+[HIL] Firmware ready. Loading scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/edge_gps_permanent_loss.py
+[FW] '[CRSF] START switch -- arming and taking off.'
+[FW] '[HIL_GATE] request=RAISE reason=OPERATOR_START'
+[STATE] Drone is on the ground and ready. Gate: waiting for approval to enter RAISE.
+[HIL] Approved phase transition to RAISE
+[FW] '[HIL_GATE] approved=RAISE'
+[STATE] Drone is on the ground and ready. Gate: waiting for approval to enter RAISE.
+[STATE] Drone is climbing to takeoff altitude. Gate: no approval pending.
+[FW] 'OLD.'
+[FW] '[HIL_GATE] request=HOLD reason=TAKEOFF_COMPLETE'
+[STATE] Drone is climbing to takeoff altitude. Gate: waiting for approval to enter HOLD.
+[HIL] Approved phase transition to HOLD
+[FW] '[HIL_GATE] approved=HOLD'
+[STATE] Drone is climbing to takeoff altitude. Gate: waiting for approval to enter HOLD.
+[STATE] Drone is hovering in place. Gate: no approval pending.
+[FW] 'directly to LANDING.'
+[FW] '[HIL_GATE] request=LANDING reason=GPS_LOSS'
+[STATE] Drone is hovering in place. Gate: waiting for approval to enter LANDING.
+[HIL] Approved phase transition to LANDING
+[FW] '[HIL_GATE] approved=LANDING'
+[STATE] Drone is hovering in place. Gate: waiting for approval to enter LANDING.
+[STATE] Drone is descending to land. Gate: no approval pending.
+[FW] '[HIL_GATE] request=LANDED reason=TOUCHDOWN'
+[FW] '[NAV] Landed — motors disarmed.'
+[STATE] Drone is descending to land. Gate: waiting for approval to enter LANDED.
+[HIL] Approved phase transition to LANDED
+[FW] '[HIL_GATE] approved=LANDED'
+[STATE] Drone is on the ground with motors disarmed. Gate: no approval pending.
+
+RESULT: PASS
+== Passed HIL scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/edge_gps_permanent_loss.py ==
+== Running HIL scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/edge_max_flight_timeout.py ==
+[HIL] Opening /dev/cu.usbmodem14201...
+[HIL] Waiting for firmware (PING handshake)...
+[FW] '[HIL] Ready.'
+[FW] '[HIL] State reset.'
+[HIL] Firmware ready. Loading scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/edge_max_flight_timeout.py
+[FW] '[CRSF] START switch -- arming and taking off.'
+[FW] '[HIL_GATE] request=RAISE reason=OPERATOR_START'
+[STATE] Drone is on the ground and ready. Gate: waiting for approval to enter RAISE.
+[HIL] Approved phase transition to RAISE
+[FW] '[HIL_GATE] approved=RAISE'
+[STATE] Drone is on the ground and ready. Gate: waiting for approval to enter RAISE.
+[STATE] Drone is climbing to takeoff altitude. Gate: no approval pending.
+[FW] '[NA[HIL_GATE] request=HOLD reason=TAKEOFF_COMPLETE'
+[STATE] Drone is climbing to takeoff altitude. Gate: waiting for approval to enter HOLD.
+[HIL] Approved phase transition to HOLD
+[FW] '[HIL_GATE] approved=HOLD'
+[STATE] Drone is climbing to takeoff altitude. Gate: waiting for approval to enter HOLD.
+[STATE] Drone is hovering in place. Gate: no approval pending.
+[FW] '[SAFETY] M[HIL_GATE] request=RTL_CLIMB reason=MAX_FLIGHT_TIME'
+[STATE] Drone is hovering in place. Gate: waiting for approval to enter RTL_CLIMB.
+[HIL] Approved phase transition to RTL_CLIMB
+[FW] '[HIL_GATE] approved=RTL_CLIMB'
+[STATE] Drone is hovering in place. Gate: waiting for approval to enter RTL_CLIMB.
+[STATE] Drone is returning to launch: climbing to RTL altitude. Gate: no approval pending.
+[FW] '[RTL] Climb complete. Returning to launch.'
+[FW] '[HIL_GATE] request=RTL_RETURN reason=RTL_CLIMB_COMPLETE'
+[STATE] Drone is returning to launch: climbing to RTL altitude. Gate: waiting for approval to enter RTL_RETURN.
+[HIL] Approved phase transition to RTL_RETURN
+[FW] '[HIL_GATE] approved=RTL_RETURN'
+[STATE] Drone is returning to launch: flying toward the launch point. Gate: no approval pending.
+[FW] '[RTL] Arrived over launch pad. Settling.'
+[STATE] Drone is returning to launch: flying toward the launch point. Gate: waiting for approval to enter RTL_SETTLE.
+[HIL] Approved phase transition to RTL_SETTLE
+[FW] '[HIL_GATE] approved=RTL_SETTLE'
+[STATE] Drone is returning to launch: flying toward the launch point. Gate: waiting for approval to enter RTL_SETTLE.
+[STATE] Drone is returning to launch: settling over the launch point. Gate: no approval pending.
+[FW] 'Settle complete. Beginning landing.'
+[FW] '[HIL_GATE] request=LANDING reason=RTL_COMPLETE'
+[STATE] Drone is returning to launch: settling over the launch point. Gate: waiting for approval to enter LANDING.
+[HIL] Approved phase transition to LANDING
+[FW] '[HIL_GATE] approved=LANDING'
+[STATE] Drone is returning to launch: settling over the launch point. Gate: waiting for approval to enter LANDING.
+[STATE] Drone is descending to land. Gate: no approval pending.
+[FW] '[HIL_GATE] request=LANDED reason=TOUCHDOWN'
+[FW] '[NAV] Landed — motors disarmed.'
+[STATE] Drone is descending to land. Gate: waiting for approval to enter LANDED.
+[HIL] Approved phase transition to LANDED
+[FW] '[HIL_GATE] approved=LANDED'
+[STATE] Drone is descending to land. Gate: waiting for approval to enter LANDED.
+[STATE] Drone is on the ground with motors disarmed. Gate: no approval pending.
+
+RESULT: PASS
+== Passed HIL scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/edge_max_flight_timeout.py ==
+== Running HIL scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/full_flight_test.py ==
+[HIL] Opening /dev/cu.usbmodem14201...
+[HIL] Waiting for firmware (PING handshake)...
+[FW] '[HIL] Ready.'
+[FW] '[HIL] State reset.'
+[HIL] Firmware ready. Loading scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/full_flight_test.py
+[FW] '[CRSF] START ignored -- no GPS fix.'
+[STATE] Drone is on the ground and ready. Gate: no approval pending.
+[FW] '[CRSF] START switch -- arming and taking off.'
+[FW] '[HIL_GATE] request=RAISE reason=OPERATOR_START'
+[STATE] Drone is on the ground and ready. Gate: waiting for approval to enter RAISE.
+[HIL] Approved phase transition to RAISE
+[FW] '[HIL_GATE] approved=RAISE'
+[STATE] Drone is on the ground and ready. Gate: waiting for approval to enter RAISE.
+[STATE] Drone is climbing to takeoff altitude. Gate: no approval pending.
+[FW] '[CRSF] START ignored -- already flying/busy (phase: RAISE)'
+[STATE] Drone is climbing to takeoff altitude. Gate: no approval pending.
+[FW] '[NAV] Takeoff altitude reached, transitioning to HOLD.'
+[FW] '[HIL_GATE] request=HOLD reason=TAKEOFF_COMPLETE'
+[STATE] Drone is climbing to takeoff altitude. Gate: waiting for approval to enter HOLD.
+[HIL] Approved phase transition to HOLD
+[FW] '[HIL_GATE] approved=HOLD'
+[STATE] Drone is climbing to takeoff altitude. Gate: waiting for approval to enter HOLD.
+[STATE] Drone is hovering in place. Gate: no approval pending.
+[FW] '[CRSF] START switch -- starting waypoint mission.'
+[FW] '[HIL_GATE] request=MISSION reason=OPERATOR_START'
+[STATE] Drone is hovering in place. Gate: waiting for approval to enter MISSION.
+[HIL] Approved phase transition to MISSION
+[FW] '[HIL_GATE] approved=MISSION'
+[STATE] Drone is hovering in place. Gate: waiting for approval to enter MISSION.
+[FW] '[NAV] Reached waypoint 0 — advancing.'
+[STATE] Drone is following the mission route. Gate: no approval pending.
+[FW] '[CRSF] STOP switch -- emergency stop.'
+[FW] '[HIL_GATE] request=PARKED reason=EMERGENCY_STOP'
+[STATE] Drone is following the mission route. Gate: waiting for approval to enter PARKED.
+[HIL] Approved phase transition to PARKED
+[FW] '[HIL_GATE] approved=PARKED'
+[STATE] Drone is following the mission route. Gate: waiting for approval to enter PARKED.
+[STATE] Drone is on the ground and ready. Gate: no approval pending.
+[FW] '[CRSF] START switch -- arming and taking off.'
+[FW] '[HIL_GATE] request=RAISE reason=OPERATOR_START'
+[STATE] Drone is on the ground and ready. Gate: waiting for approval to enter RAISE.
+[HIL] Approved phase transition to RAISE
+[FW] '[HIL_GATE] approved=RAISE'
+[STATE] Drone is on the ground and ready. Gate: waiting for approval to enter RAISE.
+[STATE] Drone is climbing to takeoff altitude. Gate: no approval pending.
+[FW] '[NAV] Takeoff altitude reached, transitioning to HOLD.'
+[STATE] Drone is climbing to takeoff altitude. Gate: waiting for approval to enter HOLD.
+[HIL] Approved phase transition to HOLD
+[FW] '[HIL_GATE] approved=HOLD'
+[STATE] Drone is climbing to takeoff altitude. Gate: waiting for approval to enter HOLD.
+[STATE] Drone is hovering in place. Gate: no approval pending.
+[FW] '[CRSF] START switch -- starting waypoint mission.'
+[FW] '[HIL_GATE] request=MISSION reason=OPERATOR_START'
+[STATE] Drone is hovering in place. Gate: waiting for approval to enter MISSION.
+[HIL] Approved phase transition to MISSION
+[FW] '[HIL_GATE] approved=MISSION'
+[STATE] Drone is hovering in place. Gate: waiting for approval to enter MISSION.
+[STATE] Drone is following the mission route. Gate: no approval pending.
+[FW] '[NAV] Reached waypoint 1 — advancing.'
+[STATE] Drone is following the mission route. Gate: no approval pending.
+[FW] '[NAV] Reached waypoint 2 — advancing.'
+[STATE] Drone is following the mission route. Gate: no approval pending.
+[FW] '[HIL_GATE] request=HOVER_SETTLE reason=MISSION_COMPLETE'
+[FW] '[NAV] Mission complete — hovering before landing.'
+[STATE] Drone is following the mission route. Gate: waiting for approval to enter HOVER_SETTLE.
+[HIL] Approved phase transition to HOVER_SETTLE
+[FW] '[HIL_GATE] approved=HOVER_SETTLE'
+[STATE] Drone is following the mission route. Gate: waiting for approval to enter HOVER_SETTLE.
+[STATE] Drone is hovering over the launch point before landing. Gate: no approval pending.
+[FW] '[HIL_GATE][NAV] Hover complete — beginning automatic landing.'
+[STATE] Drone is hovering over the launch point before landing. Gate: waiting for approval to enter LANDING.
+[HIL] Approved phase transition to LANDING
+[FW] '[HIL_GATE] approved=LANDING'
+[STATE] Drone is hovering over the launch point before landing. Gate: waiting for approval to enter LANDING.
+[STATE] Drone is descending to land. Gate: no approval pending.
+[FW] '[HIL_GATE] request=LANDED reason=TOUCHDOWN'
+[FW] '[NAV] Landed — motors disarmed.'
+[STATE] Drone is descending to land. Gate: waiting for approval to enter LANDED.
+[HIL] Approved phase transition to LANDED
+[FW] '[HIL_GATE] approved=LANDED'
+[STATE] Drone is descending to land. Gate: waiting for approval to enter LANDED.
+[STATE] Drone is on the ground with motors disarmed. Gate: no approval pending.
+
+RESULT: PASS
+== Passed HIL scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/full_flight_test.py ==
+== Running HIL scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/manual_flight_test.py ==
+[HIL] Opening /dev/cu.usbmodem14201...
+[HIL] Waiting for firmware (PING handshake)...
+[FW] '[HIL] Ready.'
+[FW] '[HIL] State reset.'
+[HIL] Firmware ready. Loading scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/manual_flight_test.py
+[FW] '[CRSF] MANUAL switch -- pilot has the sticks.'
+[FW] '[HIL_GATE] request=MANUAL reason=MANUAL_ON'
+[STATE] Drone is on the ground and ready. Gate: waiting for approval to enter MANUAL.
+[HIL] Approved phase transition to MANUAL
+[FW] '[HIL_GATE] approved=MANUAL'
+[STATE] Drone is on the ground and ready. Gate: waiting for approval to enter MANUAL.
+[STATE] Drone is flying under manual RC-stick control. Gate: no approval pending.
+[FW] '[MANUAL] targetAlt=0.00 targetRoll=0.00 targetPitch=0.00 yaw=90.0 anchored=0 base=0.00'
+[FW] '[MANUAL] targetAlt=4.80 targetRoll=0.00 targetPitch=0.00 yaw=90.0 anchored=1 base=0.42'
+[FW] '[MANUAL] targetAlt=4.80 targetRoll=0.00 targetPitch=0.00 yaw=90.0 anchored=1 base=0.42'
+[FW] '[MANUAL] targetAlt=4.80 targetRoll=0.00 targetPitch=0.00 yaw=90.0 anchored=1 base=0.46'
+[FW] '[MANUAL] targetAlt=4.80 targetRoll=0.00 targetPitch=0.00 yaw=90.0 anchored=1 base=0.49'
+[FW] '[MANUAL] targetAlt=4.80 targetRoll=-0.00 targetPitch=-8.01 yaw=90.0 anchored=1 base=0.55'
+[FW] '[MANUAL] targetAlt=4.80 targetRoll=15.00 targetPitch=0.00 yaw=90.0 anchored=0 base=0.57'
+[FW] '[MANUAL] targetAlt=4.80 targetRoll=0.00 targetPitch=0.00 yaw=90.0 anchored=1 base=0.60'
+[FW] '[CRSF] MANUAL switch off -- handing back to auto-hover.'
+[FW] '[HIL_GATE] request=HOLD reason=MANUAL_OFF'
+[STATE] Drone is flying under manual RC-stick control. Gate: waiting for approval to enter HOLD.
+[HIL] Approved phase transition to HOLD
+[FW] '[HIL_GATE] approved=HOLD'
+[STATE] Drone is flying under manual RC-stick control. Gate: waiting for approval to enter HOLD.
+[STATE] Drone is hovering in place. Gate: no approval pending.
+[FW] '[CRSF] STOP switch -- emergency stop.'
+[FW] '[HIL_GATE] request=PARKED reason=EMERGENCY_STOP'
+[STATE] Drone is hovering in place. Gate: waiting for approval to enter PARKED.
+[HIL] Approved phase transition to PARKED
+[FW] '[HIL_GATE] approved=PARKED'
+[STATE] Drone is hovering in place. Gate: waiting for approval to enter PARKED.
+[STATE] Drone is on the ground and ready. Gate: no approval pending.
+
+RESULT: PASS
+== Passed HIL scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/manual_flight_test.py ==
+== Running HIL scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/stabilization_reaction_test.py ==
+[HIL] Opening /dev/cu.usbmodem14201...
+[HIL] Waiting for firmware (PING handshake)...
+[FW] '[HIL] Ready.'
+[FW] '[HIL] State reset.'
+[HIL] Firmware ready. Loading scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/stabilization_reaction_test.py
+[FW] '[CRSF] MANUAL switch -- pilot has the sticks.'
+[FW] '[HIL_GATE] request=MANUAL reason=MANUAL_ON'
+[STATE] Drone is on the ground and ready. Gate: waiting for approval to enter MANUAL.
+[HIL] Approved phase transition to MANUAL
+[FW] '[HIL_GATE] approved=MANUAL'
+[STATE] Drone is on the ground and ready. Gate: waiting for approval to enter MANUAL.
+[STATE] Drone is flying under manual RC-stick control. Gate: no approval pending.
+[FW] '[MOTOR] base=0.17 roll=0.000 pitch=0.000 m1=0.175 m2=0.175 m3=0.175 m4=0.175'
+[FW] '[MOTOR] base=0.18 roll=-0.103 pitch=0.000 m1=0.078 m2=0.284 m3=0.078 m4=0.284'
+[FW] '[MOTOR] base=0.19 roll=0.100 pitch=0.000 m1=0.287 m2=0.087 m3=0.287 m4=0.087'
+[FW] '[MOTOR] base=0.19 roll=-0.000 pitch=-0.103 m1=0.090 m2=0.090 m3=0.296 m4=0.296'
+[FW] '[MOTOR] base=0.20 roll=-0.000 pitch=0.100 m1=0.299 m2=0.299 m3=0.099 m4=0.099'
+[FW] '[MOTOR] base=0.21 roll=-0.300 pitch=-0.000 m1=0.000 m2=0.505 m3=0.000 m4=0.505'
+
+RESULT: PASS
+== Passed HIL scenario: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/scenarios/stabilization_reaction_test.py ==
+== All selected HIL scenarios passed ==
