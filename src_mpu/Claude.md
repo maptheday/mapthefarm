@@ -471,6 +471,62 @@ The bridge both of them speak to is [`SimAdapter.hpp`](#simadapterhpp) on the fi
 
 **What HIL does *not* cover (important):** most scenarios leave the IMU at zero, so the drone always "believes" it is level. That means the **navigation/phase brain** (which waypoint, when to come home, when to land) is tested thoroughly, but the **stabilization brain** (the roll/pitch/yaw PIDs + motor mixing that keep it upright) is not exercised by them. To partly close that gap, [`scenarios/stabilization_reaction_test.py`](simulate/scenarios/stabilization_reaction_test.py) injects a *fake tilt* (the `IMU:roll,pitch,yawRate` command) and asserts the firmware pushes the correct motors the correct way. This is **open-loop**: the injected tilt does not change in response to the motors, so it catches **sign / axis / mixing / clamp** bugs (the kind that flip a drone instantly) but **cannot** validate PID tuning or whether the corrections actually settle the drone. That — and confirming a positive tilt *number* really means the drone is physically leaning that way (IMU mounting + the Madgwick filter, which only run on hardware) — still requires a real, tethered bench test.
 
+### 8.1 Closed-loop physics with RotorPy (the bridge)
+
+The scenarios above are **open-loop**: a script types in fake sensor numbers on a timeline, and they don't react to what the motors do. To get a **closed loop** — where the world actually responds to the motors — there's [`simulate/scenarios_rotor_py/rotorpy_bridge.py`](simulate/scenarios_rotor_py/rotorpy_bridge.py), which connects the firmware to **[RotorPy](https://github.com/spencerfolk/rotorpy)**, an open-source drone physics simulator (installed in the gitignored `simulate/.venv-rotorpy` venv).
+
+**What RotorPy is, in one line:** a *physics calculator*. You tell it "the drone is here, and the motors are pushing this hard" and it answers "here's where it'll be a tiny moment later." It knows how a real drone moves — motors → tilt → sideways push → speed → distance (minus air drag) — which is exactly the math you'd otherwise have to derive and code yourself.
+
+There are only ever **two voices** in the loop:
+- 🧠 **The brain** (your firmware on the ESP) — decides how hard to spin the motors. It can only see through its **sensors**.
+- ⚙️ **The physics** (RotorPy) — decides what actually happens. It never makes a flight decision.
+
+The **bridge** sits between them, passing notes ~200×/second and translating: it turns the firmware's motor throttles into physics inputs, and turns RotorPy's answer back into the *fake sensor readings* the firmware reads (`ALT:` / `IMU:` / `HDG:`). The firmware never knows RotorPy exists — it just thinks its sensors work.
+
+#### A worked example: 3 loops
+
+RotorPy is handed, and returns, a little snapshot called **"where I am"** — just four plain numbers:
+- **up** — height in ft
+- **east** — how far east it's travelled, in ft
+- **tilt** — degrees it's leaning, and which way
+- **speed** — how fast it's sliding, ft/s
+
+Watch how **each loop's answer becomes the next loop's starting point** — that's the state being held and fed back. (Each loop below is a ~0.25s snapshot so the numbers move visibly; in reality it's ~50 tiny 5ms steps.) Scene: hovering at 10 ft over an apple tree 🍎, brain decides to fly east toward a peach tree 🍑 5 ft away.
+
+**🔁 Loop 1 — start the lean**
+- **① ESP → Bridge** `[MOTOR] m1=0.70 m2=0.73 m3=0.70 m4=0.73` → *"right-side motors harder, so I tip east."*
+- **② Bridge → RotorPy** `speeds=1750,1825,1750,1825` · where I am = `{ up:10.0, east:0.0, tilt:0°, speed:0 }` → *"motors this fast, I'm at 10 ft over the apple tree, flat, not moving — what next?"*
+- **③ RotorPy → Bridge** where I am = `{ up:10.0, east:0.05, tilt:4°, speed:0.4 }` → *"you tipped to 4° and just started creeping east."*
+- **④ Bridge → ESP** `ALT:10.0  IMU:4,0,0  GPS:~0 ft east` → *"sensors: 10 ft up, tilted 4°, still over the apple tree."*
+- 🔬 **RotorPy's benefit:** turned "right motors 3% harder" into "tilts 4°" — computing the twisting force and rotation speed from how the drone's weight is spread out.
+
+**🔁 Loop 2 — the lean becomes movement** *(starting point = Loop 1's answer)*
+- **① ESP → Bridge** `[MOTOR] m1=0.70 m2=0.73 m3=0.70 m4=0.73` → *"hold the lean."*
+- **② Bridge → RotorPy** `speeds=1750,1825,1750,1825` · where I am = `{ up:10.0, east:0.05, tilt:4°, speed:0.4 }` → *"same motors; now at 4°, creeping east at 0.4 ft/s — what next?"*
+- **③ RotorPy → Bridge** where I am = `{ up:10.0, east:0.35, tilt:5°, speed:1.6 }` → *"leaning tips thrust sideways, so you sped up to 1.6 ft/s and moved to 0.35 ft east."*
+- **④ Bridge → ESP** `ALT:10.0  IMU:5,0,0  GPS:0.35 ft east` → *"sensors: 10 ft, tilted 5°, now noticeably east."*
+- 🔬 **RotorPy's benefit:** turned tilt into sideways travel — split out how much thrust points sideways, turned it into speed, added it up into distance (Newton's laws over time).
+
+**🔁 Loop 3 — momentum builds** *(starting point = Loop 2's answer)*
+- **① ESP → Bridge** `[MOTOR] m1=0.71 m2=0.72 m3=0.71 m4=0.72` → *"ease the lean — I'm already moving."*
+- **② Bridge → RotorPy** `speeds=1775,1800,1775,1800` · where I am = `{ up:10.0, east:0.35, tilt:5°, speed:1.6 }` → *"slightly less lean; at 0.35 ft east doing 1.6 ft/s — what next?"*
+- **③ RotorPy → Bridge** where I am = `{ up:10.0, east:0.9, tilt:4°, speed:2.5 }` → *"kept accelerating to 2.5 ft/s, reached 0.9 ft east — and I trimmed a bit for air drag."*
+- **④ Bridge → ESP** `ALT:10.0  IMU:4,0,0  GPS:0.9 ft east` → *"sensors: 10 ft, tilted 4°, 0.9 ft east and picking up speed."*
+- 🔬 **RotorPy's benefit:** carried the **momentum** (keeps speeding up and covering ground) and subtracted for **air drag** now that it's faster.
+
+**Two takeaways:**
+1. **"Where I am" carries through.** Loop 1's answer `{east 0.05, tilt 4°, speed 0.4}` is Loop 2's starting point, and Loop 2's answer starts Loop 3. That handoff *is* the state you hold onto and feed back.
+2. **RotorPy's value = it knows how a drone moves.** Motors → tilt → sideways push → speed → distance → minus drag. You feed it "motors + where I am"; it hands back "here's where you really end up." The firmware makes every *decision*; RotorPy only ever answers "what happens next?"
+
+**Run it:**
+```
+simulate/.venv-rotorpy/bin/python simulate/scenarios_rotor_py/rotorpy_bridge.py \
+  --port /dev/cu.usbmodem14101 --vehicle hummingbird --plot out.png
+```
+It hovers, applies a one-time attitude "kick" (like a gust), and checks whether the firmware recovers. On the `hummingbird` model it settles cleanly; on the tiny `crazyflie` it stays bounded but oscillates — **same firmware, different vehicle model**, which is the honest lesson: a sim can only judge tuning as well as its vehicle numbers match your real airframe.
+
+**Honest limits (don't over-trust it):** it's still a *model* (not your airframe), it runs at serial speed (not 200 Hz), and it doesn't simulate the vibration that shakes a real IMU. It's great for catching wrong-sign / gross-instability problems and roughing in gains — but it does **not** replace a tethered bench test.
+
 ---
 
 ## 9. Common tasks

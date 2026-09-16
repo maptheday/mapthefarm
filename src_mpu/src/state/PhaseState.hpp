@@ -225,8 +225,11 @@ struct Trip_RtlClimb {
   unsigned long armedAtMs = 0;
   double        launchLat = 0.0;  // carried forward so RTL_RETURN can fly home
   double        launchLon = 0.0;
+  double        anchorLat = 0.0;  // where RTL triggered -- hold here while climbing
+  double        anchorLon = 0.0;
   Trip_RtlClimb& operator=(const volatile Trip_RtlClimb& o) {
     armedAtMs=o.armedAtMs; launchLat=o.launchLat; launchLon=o.launchLon;
+    anchorLat=o.anchorLat; anchorLon=o.anchorLon;
     return *this;
   }
 };
@@ -311,6 +314,12 @@ struct Cruise_RtlSettle {
 };
 struct Trip_RtlSettle {
   unsigned long settleStartMs = 0;  // when the hover began
+  double        launchLat     = 0.0;  // hold over this point (don't coast off it)
+  double        launchLon     = 0.0;
+  Trip_RtlSettle& operator=(const volatile Trip_RtlSettle& o) {
+    settleStartMs=o.settleStartMs; launchLat=o.launchLat; launchLon=o.launchLon;
+    return *this;
+  }
 };
 
 // --- HOVER SETTLE ---
@@ -385,7 +394,14 @@ struct Cruise_Landing {
     return *this;
   }
 };
-struct Trip_Landing {};
+struct Trip_Landing {
+  double anchorLat = 0.0;  // hold over this point while descending (if GPS is available)
+  double anchorLon = 0.0;
+  Trip_Landing& operator=(const volatile Trip_Landing& o) {
+    anchorLat=o.anchorLat; anchorLon=o.anchorLon;
+    return *this;
+  }
+};
 
 // --- LANDED ---
 struct Dashboard_Landed {

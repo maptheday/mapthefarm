@@ -111,4 +111,22 @@ for scenario_path in "${SCENARIO_PATHS[@]}"; do
     echo "== Passed HIL scenario: $scenario_path =="
 done
 
+# --- RotorPy closed-loop demos (optional) ------------------------------------
+# These are NOT scripted hil_runner scenarios -- each is a standalone program
+# that flies the firmware against the RotorPy physics model. They run with the
+# RotorPy venv's python, after the normal scenarios. Skipped if the venv is
+# missing so a plain HIL run still works.
+ROTORPY_PY="$SCRIPT_DIR/.venv-rotorpy/bin/python"
+ROTORPY_DIR="$SCRIPT_DIR/scenarios_rotor_py"
+if [[ -x "$ROTORPY_PY" && -d "$ROTORPY_DIR" ]]; then
+    for demo in "$ROTORPY_DIR"/*.py; do
+        [[ -e "$demo" ]] || continue
+        echo "== Running RotorPy closed-loop demo: $(basename "$demo") =="
+        "$ROTORPY_PY" "$demo" --port "$PORT"
+        echo "== Finished RotorPy demo: $(basename "$demo") =="
+    done
+else
+    echo "== Skipping RotorPy demos (no .venv-rotorpy venv found) =="
+fi
+
 echo "== All selected HIL scenarios passed =="

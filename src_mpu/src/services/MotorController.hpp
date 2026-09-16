@@ -39,6 +39,17 @@ public:
                            float compassHeading, float gyroZ, float dt) {
     MotorMix out;
     out.baseThrottle = altitudePID.compute(targetAltFt, altFt, dt);
+
+    // Throttle tilt compensation: when the drone banks, only cos(tilt) of its
+    // thrust points up, so it sinks unless we push harder. Scale base throttle by
+    // 1/(cos roll * cos pitch) to hold altitude while maneuvering. Capped so an
+    // extreme tilt (or a bad reading) can't command runaway thrust.
+    float rollRad  = roll  * 0.0174532925f;
+    float pitchRad = pitch * 0.0174532925f;
+    float tiltFactor = 1.0f / (cosf(rollRad) * cosf(pitchRad));
+    tiltFactor = constrain(tiltFactor, 1.0f, 2.0f);   // 2.0 ~= 60 deg of tilt
+    out.baseThrottle = constrain(out.baseThrottle * tiltFactor, 0.0f, 1.0f);
+
     out.rollCorrection = rollPID.compute(targetRollDeg, roll, dt);
     out.pitchCorrection = pitchPID.compute(targetPitchDeg, pitch, dt);
 
