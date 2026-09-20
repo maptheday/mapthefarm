@@ -90,9 +90,24 @@ public:
       return;
     }
 
+    // Line-following: steer toward a carrot that rides ALONG the leg from the
+    // previous waypoint to this one, instead of aiming straight at the waypoint
+    // (which lets the drone bow to the inside of the turn). The previous point is
+    // the launch pad for the first leg, otherwise the prior waypoint.
+    double prevLat, prevLon;
+    if (trip.currentWP == 0) {
+      prevLat = trip.launchLat;
+      prevLon = trip.launchLon;
+    } else {
+      Waypoint prevWp = getMissionWaypoint(trip.currentWP - 1, trip.launchLat, trip.launchLon);
+      prevLat = prevWp.lat;
+      prevLon = prevWp.lon;
+    }
+
     float northM;
     float eastM;
-    bearingToNorthEast(distM, bearing, northM, eastM);
+    lineFollowNorthEast(gps.lat, gps.lon, prevLat, prevLon, wp.lat, wp.lon,
+                        WAYPOINT_LOOKAHEAD_M, northM, eastM);
 
     withMutex([&]() {
       shared.cruise_mission.targetRollDeg  = motorController.eastNavigationCorrection(eastM, navDt);

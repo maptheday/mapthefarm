@@ -10,6 +10,8 @@
             "includePath": [
                 "/Users/joblaundry/JobLaundry/drone/testrun/src_mpu/include",
                 "/Users/joblaundry/JobLaundry/drone/testrun/src_mpu/src",
+                "/Users/joblaundry/JobLaundry/drone/testrun/src_mpu/lib/QuadSim/src",
+                "/Users/joblaundry/.platformio/packages/framework-arduinoespressif32/libraries/LittleFS/src",
                 "/Users/joblaundry/.platformio/packages/framework-arduinoespressif32/libraries/Preferences/src",
                 "/Users/joblaundry/JobLaundry/drone/testrun/src_mpu/.pio/libdeps/esp32dev/QMC5883LCompass/src",
                 "/Users/joblaundry/JobLaundry/drone/testrun/src_mpu/.pio/libdeps/esp32dev/TinyGPSPlus/src",
@@ -241,7 +243,6 @@
                 "/Users/joblaundry/.platformio/packages/framework-arduinoespressif32/libraries/HTTPUpdateServer/src",
                 "/Users/joblaundry/.platformio/packages/framework-arduinoespressif32/libraries/I2S/src",
                 "/Users/joblaundry/.platformio/packages/framework-arduinoespressif32/libraries/Insights/src",
-                "/Users/joblaundry/.platformio/packages/framework-arduinoespressif32/libraries/LittleFS/src",
                 "/Users/joblaundry/.platformio/packages/framework-arduinoespressif32/libraries/NetBIOS/src",
                 "/Users/joblaundry/.platformio/packages/framework-arduinoespressif32/libraries/RainMaker/src",
                 "/Users/joblaundry/.platformio/packages/framework-arduinoespressif32/libraries/SD/src",
@@ -261,6 +262,8 @@
                 "path": [
                     "/Users/joblaundry/JobLaundry/drone/testrun/src_mpu/include",
                     "/Users/joblaundry/JobLaundry/drone/testrun/src_mpu/src",
+                    "/Users/joblaundry/JobLaundry/drone/testrun/src_mpu/lib/QuadSim/src",
+                    "/Users/joblaundry/.platformio/packages/framework-arduinoespressif32/libraries/LittleFS/src",
                     "/Users/joblaundry/.platformio/packages/framework-arduinoespressif32/libraries/Preferences/src",
                     "/Users/joblaundry/JobLaundry/drone/testrun/src_mpu/.pio/libdeps/esp32dev/QMC5883LCompass/src",
                     "/Users/joblaundry/JobLaundry/drone/testrun/src_mpu/.pio/libdeps/esp32dev/TinyGPSPlus/src",
@@ -492,7 +495,6 @@
                     "/Users/joblaundry/.platformio/packages/framework-arduinoespressif32/libraries/HTTPUpdateServer/src",
                     "/Users/joblaundry/.platformio/packages/framework-arduinoespressif32/libraries/I2S/src",
                     "/Users/joblaundry/.platformio/packages/framework-arduinoespressif32/libraries/Insights/src",
-                    "/Users/joblaundry/.platformio/packages/framework-arduinoespressif32/libraries/LittleFS/src",
                     "/Users/joblaundry/.platformio/packages/framework-arduinoespressif32/libraries/NetBIOS/src",
                     "/Users/joblaundry/.platformio/packages/framework-arduinoespressif32/libraries/RainMaker/src",
                     "/Users/joblaundry/.platformio/packages/framework-arduinoespressif32/libraries/SD/src",

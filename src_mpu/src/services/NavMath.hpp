@@ -33,6 +33,45 @@ inline void bearingToNorthEast(float distM, float bearingDeg, float& northM, flo
   eastM  = distM * sin(rad);
 }
 
+// Line-following "carrot" target (L1-style). Instead of flying straight at the
+// next waypoint -- which lets the drone cut to the INSIDE of each turn and bow
+// off the straight leg -- steer toward a point that rides ALONG the segment from
+// the previous waypoint to the current one, a fixed lookahead ahead of where the
+// drone currently projects onto that segment. The drone then converges onto the
+// line and hugs it corner-to-corner.
+//
+// Returns the north/east vector (metres) FROM the current position TO the carrot,
+// in the same world N/E convention as bearingToNorthEast, so it drops straight
+// into the nav PIDs. Falls back to aiming at the waypoint if the segment is tiny.
+inline void lineFollowNorthEast(double curLat, double curLon,      // where we are
+                                double prevLat, double prevLon,     // segment start
+                                double wpLat, double wpLon,         // segment end (waypoint)
+                                float lookaheadM,
+                                float& northM, float& eastM) {
+  // Local equirectangular metres, origin at the segment start.
+  float mPerLat = 111320.0f;
+  float mPerLon = 111320.0f * cos(radians(prevLat));
+  float segE = (wpLon  - prevLon) * mPerLon;   // segment end
+  float segN = (wpLat  - prevLat) * mPerLat;
+  float posE = (curLon - prevLon) * mPerLon;   // current position
+  float posN = (curLat - prevLat) * mPerLat;
+
+  float segLen = sqrt(segE * segE + segN * segN);
+  if (segLen < 1.0f) {                          // degenerate segment: aim at the wp
+    northM = segN - posN;
+    eastM  = segE - posE;
+    return;
+  }
+  float uE = segE / segLen, uN = segN / segLen;         // unit vector along the leg
+  float proj = posE * uE + posN * uN;                    // how far along the leg we are
+  if (proj < 0.0f) proj = 0.0f;
+  float carrot = proj + lookaheadM;                      // ride the line, lookahead ahead
+  if (carrot > segLen) carrot = segLen;                  // never past the waypoint
+  float carrotE = uE * carrot, carrotN = uN * carrot;    // carrot point on the line
+  eastM  = carrotE - posE;                               // vector from us to the carrot
+  northM = carrotN - posN;
+}
+
 // The waypoint to fly to. Past the last waypoint, hover over the launch point
 // at the final leg's altitude.
 inline Waypoint getMissionWaypoint(int index, double launchLat, double launchLon) {

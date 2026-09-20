@@ -126,19 +126,21 @@ The key design choice (this comes from the project's own rule): **phases share n
 
 A **service** wraps one messy real-world thing behind a clean method. The phases never talk to a GPS chip's raw bytes; they just read `shared.raw.gps.lat`, which the [`Gps`](#gpshpp) service filled in. Motors are the same: a phase computes a `MotorMix` and hands it to [`Motors`](#motorshpp) — nothing else in the codebase touches motor pins. This is why you can swap real hardware for a simulator without the flight logic noticing.
 
-### Idea 5 — One codebase, two worlds (`WOKWI_SIM`)
+### Idea 5 — One codebase, two builds (`SIM`)
 
-The same code runs on a **real drone** and in a **desk simulator**. A compile-time switch, `WOKWI_SIM`, decides which. You'll see this pattern everywhere:
+The same code runs on a **real drone** and in an **on-chip simulator**. A single compile-time switch, `SIM`, is the only difference. You'll see this pattern everywhere:
 
 ```cpp
-#ifdef WOKWI_SIM
-   // pretend: numbers are injected over USB by a test harness
+#ifdef SIM
+   // sim: sensor values come from the on-chip QuadSim physics
 #else
    // real: read the actual sensor chip
 #endif
 ```
 
-In sim mode there are no chips, so a Python test harness (or our keyboard UI) feeds fake sensor readings over the USB cable, and the motor outputs go nowhere. The *flight logic in between is identical*. This is what makes the drone testable. See [section 8](#8-simulation--testing).
+In a `SIM` build there are no sensor chips; instead the whole physics simulation runs **on the ESP itself** (the QuadSim library, inside the flight loop). It feeds the firmware fake sensor readings, and the motor outputs drive the simulated drone instead of real ESCs. The *flight logic in between is identical* — the real controller flies against real physics at the real rate. This is what makes the drone testable with no laptop in the loop. See [section 8](#8-simulation--testing).
+
+> **History:** there used to be a second sim path — a laptop "HIL" harness that injected sensors over USB and gated every phase change for a Python test script (flags `WOKWI_SIM` / `ONBOARD_SIM` / `FIELD_DEMO`, plus a RotorPy bridge). It worked but fought serial latency and jitter. It's been fully replaced by the on-chip sim; there is now just one flag, `SIM`.
 
 ---
 
@@ -178,8 +180,7 @@ src/
 │
 ├── state/          the drone's memory & configuration
 │   ├── FlightConfig.hpp            all the tunable numbers & pins (compile-time)
-│   ├── PhaseState.hpp              the shared "notebook" + the mutex "pen"
-│   └── HilState.hpp                sim-only fake-sensor globals
+│   └── PhaseState.hpp              the shared "notebook" + the mutex "pen"
 │
 ├── models/         plain data shapes (no logic)
 │   ├── FlightModel.hpp             the list of phases & transition reasons (+ their names)
@@ -211,7 +212,8 @@ src/
 │   ├── NavMath.hpp                 GPS geometry (distance, bearing, N/E split)
 │   ├── Failsafes.hpp               the safety net (timeout / geofence / GPS loss)
 │   ├── RcInput.hpp                 the radio (CRSF/ELRS): sticks + switches
-│   ├── SimAdapter.hpp              sim-only: the USB test protocol
+│   ├── OnboardSim.hpp              sim-only: on-chip physics (QuadSim) + flight logging
+│   ├── SimAdapter.hpp              sim-only: the DUMPLOG serial command
 │   ├── Log.hpp                     thread-safe serial printing + PANIC()
 │   ├── Imu.hpp                     accel/gyro → attitude (MPU6050 + Madgwick)
 │   ├── Gps.hpp                     GPS receiver (BN-880 via TinyGPSPlus)
@@ -246,7 +248,7 @@ Key parts:
 - `physicsTask()` — the 200 Hz loop: refresh IMU/barometer into `shared`, then call the current phase's `physicsTick()`.
 - `loop()` — on real hardware, does nothing (all work is in tasks); in sim, it runs `parseSimInput()` to receive fake sensor data over USB.
 
-The two tasks are pinned to different cores (`xTaskCreatePinnedToCore`). Notice the `#ifdef WOKWI_SIM` blocks: in sim, GPS/IMU/baro come from injected values instead of chips.
+The two tasks are pinned to different cores (`xTaskCreatePinnedToCore`). Notice the `#ifdef SIM` blocks: in a sim build, GPS/IMU/baro come from the on-chip QuadSim physics ([`OnboardSim.hpp`](#onboardsimhpp)) instead of real chips.
 
 > **Historical note:** the filename says "Web_Server" but there's no web server in this code anymore. It's a leftover name. (The project owner prefers a lightweight local UI instead — see [`simulate/manual_ui.html`](#8-simulation--testing).)
 
@@ -268,11 +270,6 @@ The single most important state file. It defines:
 - `withMutex(fn)` — "grab the pen, run your code, put the pen back." **Always** used when touching `shared`.
 
 The many `operator=(const volatile ...&)` bits are a C++ detail: `shared` is marked `volatile` (it changes across cores), and these let you copy a block out of it cleanly.
-
-#### [`HilState.hpp`](src/state/HilState.hpp)
-**ELI5:** the sim's fake sensors and the "may I change phase?" gate — only exists in sim builds.
-
-Sim-only global variables: the injected GPS (`simGpsLat/Lon/Fix`), compass heading, and the **HIL gate** flags. The gate is a clever test feature: in sim, phase changes don't happen instantly — they *pause and wait for the test harness to approve them* (`ALLOW:`), so a test can observe and control every transition. On real hardware there's no gate; transitions are immediate.
 
 ---
 
@@ -314,7 +311,7 @@ The only forward-declaration in the project. It exists to break a chicken-and-eg
 #### [`PhaseMachine.hpp`](src/phases/PhaseMachine.hpp)
 **ELI5:** the gearbox — the single place where the drone shifts from one mode to another.
 
-Contains the real `transitionTo(next, reason)`. It builds the `EnterContext`, carries forward "trip" info like arm-time and launch point, calls the new phase's `onEnter()`, and records the new phase. In sim, it also runs the **HIL gate** (pause-and-wait-for-approval). If you ever wonder "how does the drone actually change modes?" — it's here, and *only* here.
+Contains the real `transitionTo(next, reason)`. It builds the `EnterContext`, carries forward "trip" info like arm-time and launch point, calls the new phase's `onEnter()`, and records the new phase. Transitions are immediate — the same on a real drone and in the sim. If you ever wonder "how does the drone actually change modes?" — it's here, and *only* here.
 
 #### [`PhaseRegistry.hpp`](src/phases/PhaseRegistry.hpp)
 **ELI5:** the phone book — given a phase name, hand back the object that runs it.
@@ -361,7 +358,7 @@ Motors stay off. Collects compass min/max while you rotate the drone through all
 
 #### [`ManualPhase.hpp`](src/phases/ManualPhase.hpp)
 **ELI5:** you fly it with the sticks — same machine, but the sticks set the targets.
-Instead of GPS math setting the targets, the RC sticks do: throttle → climb/descend, roll/pitch → lean, yaw → turn. It reuses the exact same PID + motor mix as every other flying phase. It also has **GPS position hold**: when you center the sticks it drops an "anchor" and leans back toward it to cancel drift (reusing the nav PIDs), controllable via `MANUAL_POSITION_HOLD`. Entered/left with the radio's MANUAL switch; STOP always wins. (This is the phase the keyboard cockpit UI drives.)
+Instead of GPS math setting the targets, the RC sticks do: throttle → climb/descend, roll/pitch → lean, yaw → turn. It reuses the exact same PID + motor mix as every other flying phase. It also has **GPS position hold**: when you center the sticks it drops an "anchor" and leans back toward it to cancel drift (reusing the nav PIDs), controllable via `MANUAL_POSITION_HOLD`. Entered/left with the radio's MANUAL switch; STOP always wins.
 
 ---
 
@@ -402,10 +399,15 @@ Pure geometry, no state: `gpsDistanceMeters` (haversine distance), `gpsBearing` 
 
 Two layers: the **intent handlers** (`crsfHandleStart`, `crsfHandleStop`, `crsfHandleManualOn/Off`) that decide what a switch flip *means* given the current phase; and (real hardware only) `crsfTask`, which parses the raw CRSF protocol frames off the wire, latches the four sticks into `shared.sticks`, and edge-detects the switches. The handlers are shared between real radio and the simulator, so the sim tests the exact same intent logic. Also has `crsfNorm` to turn raw radio numbers into clean −1…1 values.
 
-#### [`SimAdapter.hpp`](src/services/SimAdapter.hpp)
-**ELI5:** the simulator's translator — turns little USB text commands into fake sensor data and actions. Sim builds only.
+#### [`OnboardSim.hpp`](src/services/OnboardSim.hpp)
+**ELI5:** the flight simulator that runs *on the drone's own chip*. Sim builds only.
 
-`parseSimInput()` reads text lines over USB and acts on them: `HDG:/LAT:/LON:/FIX:/ALT:` inject fake sensor readings; `CRSFSTART/STOP/MANUAL` and `STICKS:` fake the radio; `ALLOW:` approves a gated phase change; `STATUS?/MOTOR?/MANUAL?` report machine-readable state back. This is the bridge the Python test harness *and* the keyboard cockpit UI speak to. (We recently added the MANUAL/STICKS commands and the `MANUAL?` query here.)
+This is what makes a `SIM` build fly. Each physics tick it takes the last motor command, advances the **QuadSim** physics library (a tiny standalone quad simulator in `lib/QuadSim/`), and writes the resulting attitude/altitude/GPS back into `shared.raw` as fake sensor readings — so the real controller flies against real physics at the real 200 Hz, all on the ESP. It also drives the mission autonomously (fakes the START switch), keeps the heading pointed at the current target so the yaw loop stays quiet, and logs the whole flight to LittleFS. The sign/frame mapping is documented at the top of the file (validated on the laptop first — see [section 8](#8-simulation--testing)).
+
+#### [`SimAdapter.hpp`](src/services/SimAdapter.hpp)
+**ELI5:** a tiny USB command listener for the sim. Sim builds only.
+
+`parseSimInput()` reads text lines over USB and acts on just two: `DUMPLOG` streams the recorded flight log back (so the laptop can pull it and build the map replay), and `PING:` is a liveness check. (The old HIL protocol — sensor injection, the phase-change gate, stick faking — is gone; the flight is fully autonomous now.)
 
 #### [`Log.hpp`](src/services/Log.hpp)
 **ELI5:** safe printing (so two cores don't scramble each other's messages) + a "halt on fatal bug" macro.
@@ -415,7 +417,7 @@ Two layers: the **intent handlers** (`crsfHandleStart`, `crsfHandleStop`, `crsfH
 #### [`Imu.hpp`](src/services/Imu.hpp)
 **ELI5:** the inner-ear — turns raw accel/gyro into "how am I tilted?"
 
-Owns the MPU6050 chip and a **Madgwick filter** that fuses accelerometer + gyroscope into stable roll/pitch/yaw angles. Read every physics tick on real hardware. In sim it's left at zero (attitude control isn't exercised in the HIL tests). *Quirk:* the fused angles are stored in fields named `gyroX/Y/Z` — they're actually roll/pitch/yaw, not raw gyro.
+Owns the MPU6050 chip and a **Madgwick filter** that fuses accelerometer + gyroscope into stable roll/pitch/yaw angles. Read every physics tick on real hardware. In a sim build the on-chip physics supplies the attitude instead. *Quirk:* the fused angles are stored in fields named `gyroX/Y/Z` — they're actually roll/pitch/yaw, not raw gyro.
 
 #### [`Gps.hpp`](src/services/Gps.hpp)
 **ELI5:** the "where am I on Earth" receiver.
@@ -455,77 +457,44 @@ Implements `IBarometer`. On init it finds the chip on I2C and averages 20 readin
 
 ## 8. Simulation & testing
 
-You do **not** need a real drone to run and test this. Everything lives in the [`simulate/`](simulate/) folder.
+You do **not** need a real drone to run and test this. The whole simulation runs **on the ESP itself**.
 
-**How it works.** You flash the special `wokwi_sim` build to an ESP32 (or run it under the Wokwi emulator). In that build, the real sensor code is compiled out and replaced by injected values over USB. A driver on your computer feeds fake sensor readings in and reads state back, exercising the *real flight logic* on the *real chip* — this is called **HIL (Hardware-In-the-Loop)** testing.
+**How it works.** You flash the `sim` build (`-DSIM`) to the ESP. In that build the real sensor code is compiled out; instead, [`OnboardSim.hpp`](#onboardsimhpp) runs the **QuadSim** physics library ([`lib/QuadSim/`](lib/QuadSim/)) right inside the flight loop. Every physics tick it feeds the last motor command into QuadSim and writes the resulting attitude/altitude/GPS back into `shared.raw` as fake sensor readings. So the **real controller flies against real physics, at the real 200 Hz, with one clock and no laptop in the loop.** It flies the field autonomously (fakes the START switch), and logs the whole flight to LittleFS.
 
-Two drivers can play that role:
+There are only ever **two voices**, both on the chip:
+- 🧠 **The brain** (the flight controller) — decides how hard to spin the motors. It can only see through its **sensors**.
+- ⚙️ **The physics** (QuadSim) — decides what actually happens to the drone. It never makes a flight decision.
 
-1. **The Python harness** — [`simulate/hil_runner.py`](simulate/hil_runner.py) runs scripted **scenarios** from [`simulate/scenarios/`](simulate/scenarios/) (e.g. `full_flight_test.py`, `manual_flight_test.py`). Each scenario sends commands like `set_world(lat=...)` and asserts the drone reacts correctly. Run them with [`simulate/run_all_hil.sh`](simulate/run_all_hil.sh). This is your automated regression test suite.
-
-2. **The keyboard cockpit** — [`simulate/manual_ui.html`](simulate/manual_ui.html), a single local web page you open in Chrome. It talks to the ESP over USB (Web Serial API), lets you **fly MANUAL mode with the arrow keys**, and visualizes the drone live (attitude, compass, altitude, motor %, and a top-down map). It runs a **light physics model** in the browser and feeds the simulated position/altitude back to the firmware — so the firmware's *real* controller flies against it. It's the same HIL idea as the Python runner, but interactive.
-
-The bridge both of them speak to is [`SimAdapter.hpp`](#simadapterhpp) on the firmware side. The command/response protocol is documented at the top of that file.
-
-> **Key insight:** the difference between the automated tests and the cockpit is only *where the fake GPS numbers come from* — a script types them in one case, a physics model generates them in the other. The firmware, the sensors-are-fake trick, and the phase logic are identical.
-
-**What HIL does *not* cover (important):** most scenarios leave the IMU at zero, so the drone always "believes" it is level. That means the **navigation/phase brain** (which waypoint, when to come home, when to land) is tested thoroughly, but the **stabilization brain** (the roll/pitch/yaw PIDs + motor mixing that keep it upright) is not exercised by them. To partly close that gap, [`scenarios/stabilization_reaction_test.py`](simulate/scenarios/stabilization_reaction_test.py) injects a *fake tilt* (the `IMU:roll,pitch,yawRate` command) and asserts the firmware pushes the correct motors the correct way. This is **open-loop**: the injected tilt does not change in response to the motors, so it catches **sign / axis / mixing / clamp** bugs (the kind that flip a drone instantly) but **cannot** validate PID tuning or whether the corrections actually settle the drone. That — and confirming a positive tilt *number* really means the drone is physically leaning that way (IMU mounting + the Madgwick filter, which only run on hardware) — still requires a real, tethered bench test.
-
-### 8.1 Closed-loop physics with RotorPy (the bridge)
-
-The scenarios above are **open-loop**: a script types in fake sensor numbers on a timeline, and they don't react to what the motors do. To get a **closed loop** — where the world actually responds to the motors — there's [`simulate/scenarios_rotor_py/rotorpy_bridge.py`](simulate/scenarios_rotor_py/rotorpy_bridge.py), which connects the firmware to **[RotorPy](https://github.com/spencerfolk/rotorpy)**, an open-source drone physics simulator (installed in the gitignored `simulate/.venv-rotorpy` venv).
-
-**What RotorPy is, in one line:** a *physics calculator*. You tell it "the drone is here, and the motors are pushing this hard" and it answers "here's where it'll be a tiny moment later." It knows how a real drone moves — motors → tilt → sideways push → speed → distance (minus air drag) — which is exactly the math you'd otherwise have to derive and code yourself.
-
-There are only ever **two voices** in the loop:
-- 🧠 **The brain** (your firmware on the ESP) — decides how hard to spin the motors. It can only see through its **sensors**.
-- ⚙️ **The physics** (RotorPy) — decides what actually happens. It never makes a flight decision.
-
-The **bridge** sits between them, passing notes ~200×/second and translating: it turns the firmware's motor throttles into physics inputs, and turns RotorPy's answer back into the *fake sensor readings* the firmware reads (`ALT:` / `IMU:` / `HDG:`). The firmware never knows RotorPy exists — it just thinks its sensors work.
-
-#### A worked example: 3 loops
-
-RotorPy is handed, and returns, a little snapshot called **"where I am"** — just four plain numbers:
-- **up** — height in ft
-- **east** — how far east it's travelled, in ft
-- **tilt** — degrees it's leaning, and which way
-- **speed** — how fast it's sliding, ft/s
-
-Watch how **each loop's answer becomes the next loop's starting point** — that's the state being held and fed back. (Each loop below is a ~0.25s snapshot so the numbers move visibly; in reality it's ~50 tiny 5ms steps.) Scene: hovering at 10 ft over an apple tree 🍎, brain decides to fly east toward a peach tree 🍑 5 ft away.
-
-**🔁 Loop 1 — start the lean**
-- **① ESP → Bridge** `[MOTOR] m1=0.70 m2=0.73 m3=0.70 m4=0.73` → *"right-side motors harder, so I tip east."*
-- **② Bridge → RotorPy** `speeds=1750,1825,1750,1825` · where I am = `{ up:10.0, east:0.0, tilt:0°, speed:0 }` → *"motors this fast, I'm at 10 ft over the apple tree, flat, not moving — what next?"*
-- **③ RotorPy → Bridge** where I am = `{ up:10.0, east:0.05, tilt:4°, speed:0.4 }` → *"you tipped to 4° and just started creeping east."*
-- **④ Bridge → ESP** `ALT:10.0  IMU:4,0,0  GPS:~0 ft east` → *"sensors: 10 ft up, tilted 4°, still over the apple tree."*
-- 🔬 **RotorPy's benefit:** turned "right motors 3% harder" into "tilts 4°" — computing the twisting force and rotation speed from how the drone's weight is spread out.
-
-**🔁 Loop 2 — the lean becomes movement** *(starting point = Loop 1's answer)*
-- **① ESP → Bridge** `[MOTOR] m1=0.70 m2=0.73 m3=0.70 m4=0.73` → *"hold the lean."*
-- **② Bridge → RotorPy** `speeds=1750,1825,1750,1825` · where I am = `{ up:10.0, east:0.05, tilt:4°, speed:0.4 }` → *"same motors; now at 4°, creeping east at 0.4 ft/s — what next?"*
-- **③ RotorPy → Bridge** where I am = `{ up:10.0, east:0.35, tilt:5°, speed:1.6 }` → *"leaning tips thrust sideways, so you sped up to 1.6 ft/s and moved to 0.35 ft east."*
-- **④ Bridge → ESP** `ALT:10.0  IMU:5,0,0  GPS:0.35 ft east` → *"sensors: 10 ft, tilted 5°, now noticeably east."*
-- 🔬 **RotorPy's benefit:** turned tilt into sideways travel — split out how much thrust points sideways, turned it into speed, added it up into distance (Newton's laws over time).
-
-**🔁 Loop 3 — momentum builds** *(starting point = Loop 2's answer)*
-- **① ESP → Bridge** `[MOTOR] m1=0.71 m2=0.72 m3=0.71 m4=0.72` → *"ease the lean — I'm already moving."*
-- **② Bridge → RotorPy** `speeds=1775,1800,1775,1800` · where I am = `{ up:10.0, east:0.35, tilt:5°, speed:1.6 }` → *"slightly less lean; at 0.35 ft east doing 1.6 ft/s — what next?"*
-- **③ RotorPy → Bridge** where I am = `{ up:10.0, east:0.9, tilt:4°, speed:2.5 }` → *"kept accelerating to 2.5 ft/s, reached 0.9 ft east — and I trimmed a bit for air drag."*
-- **④ Bridge → ESP** `ALT:10.0  IMU:4,0,0  GPS:0.9 ft east` → *"sensors: 10 ft, tilted 4°, 0.9 ft east and picking up speed."*
-- 🔬 **RotorPy's benefit:** carried the **momentum** (keeps speeding up and covering ground) and subtracted for **air drag** now that it's faster.
-
-**Two takeaways:**
-1. **"Where I am" carries through.** Loop 1's answer `{east 0.05, tilt 4°, speed 0.4}` is Loop 2's starting point, and Loop 2's answer starts Loop 3. That handoff *is* the state you hold onto and feed back.
-2. **RotorPy's value = it knows how a drone moves.** Motors → tilt → sideways push → speed → distance → minus drag. You feed it "motors + where I am"; it hands back "here's where you really end up." The firmware makes every *decision*; RotorPy only ever answers "what happens next?"
-
-**Run it:**
 ```
-simulate/.venv-rotorpy/bin/python simulate/scenarios_rotor_py/rotorpy_bridge.py \
-  --port /dev/cu.usbmodem14101 --vehicle hummingbird --plot out.png
+   phase logic  ──►  MotorMix  ──►  QuadSim.step()  ──►  new attitude/pos  ──►  shared.raw (fake sensors)
+   "fly to the waypoint"          "given those motors,        "the sensors now
+                                   here's the new state"        read like this"   ──► back to the brain
 ```
-It hovers, applies a one-time attitude "kick" (like a gust), and checks whether the firmware recovers. On the `hummingbird` model it settles cleanly; on the tiny `crazyflie` it stays bounded but oscillates — **same firmware, different vehicle model**, which is the honest lesson: a sim can only judge tuning as well as its vehicle numbers match your real airframe.
 
-**Honest limits (don't over-trust it):** it's still a *model* (not your airframe), it runs at serial speed (not 200 Hz), and it doesn't simulate the vibration that shakes a real IMU. It's great for catching wrong-sign / gross-instability problems and roughing in gains — but it does **not** replace a tethered bench test.
+**Running it.** [`simulate/run_hil.sh`](simulate/run_hil.sh) flashes the `sim` build and runs the on-ESP scenarios in [`simulate/scenarios_esp/`](simulate/scenarios_esp/) — each flies a mission autonomously on the chip, pulls the flight log back over USB (the `DUMPLOG` command), checks it, and saves a JSON the map replay reads:
+
+```
+ESP_PORT=/dev/cu.usbmodem14101 ./simulate/run_hil.sh
+```
+
+The scenario list is a simple array at the top of that script. Each one picks its behaviour at boot with a single `SCENARIO:` command (no extra builds), and the shared fly-and-pull helper [`simulate/scenarios_esp/esp_sim.py`](simulate/scenarios_esp/esp_sim.py) resets the ESP, selects the scenario, waits for it to finish, and pulls the log. The suite (the on-chip replacements for the old HIL scenarios):
+
+| Scenario | What it exercises |
+|---|---|
+| `field_patrol.py` | full flight: takeoff → whole fence line → land (also drives the Clover map) |
+| `geofence_breach.py` | fly past a shrunk fence → geofence failsafe forces RTL |
+| `gps_loss.py` | GPS fix drops → abort straight to LANDING (can't RTL blind) |
+| `max_timeout.py` | flight-time limit hit → RTL |
+| `manual_flight.py` | MANUAL mode flies the drone on the sticks against the physics |
+| `stabilization.py` | a gust rolls it ~22° → the controller recovers to level |
+
+Each injects its fault by nudging the on-chip state (dropping the GPS fix, shrinking the geofence, holding a tilt, etc.) — the physics still runs entirely on the ESP.
+
+**The frame mapping (why it flies straight).** The sign conventions between QuadSim's world and the firmware's were **locked on the laptop first**, in [`lib/QuadSim/examples/nav_check.cpp`](lib/QuadSim/examples/nav_check.cpp), which runs the firmware's exact nav+mix math against QuadSim and sweeps the signs until it converges on a waypoint. The result (roll `+`, pitch `−`, north `−x`, east `−y`) went into `OnboardSim.hpp` and flew correctly on the first hardware run. If you ever change the mixing or QuadSim's frames, re-run `nav_check` before flashing.
+
+**What this covers — and doesn't.** Because the physics reacts to the motors (a true **closed loop**), this exercises the **whole** system: the navigation/phase brain *and* the stabilization brain (roll/pitch/yaw PIDs + motor mixing), including altitude hold, position hold, cornering and landing. It catches wrong-sign/instability bugs and lets you tune gains against realistic dynamics. **Honest limits:** QuadSim is still a *model*, not your exact airframe (its mass/inertia/thrust are generic), and it doesn't simulate the vibration that shakes a real IMU or GPS noise. It does **not** replace a real, tethered bench test — but it's a far truer test than the old open-loop harness, and it runs at the real rate on the real chip.
+
+> **The keyboard cockpit** ([`simulate/manual_ui.html`](simulate/manual_ui.html)) was built for the *old* laptop-HIL protocol (browser physics + serial sensor injection), which has been removed. The file is kept, but flying it against the on-chip physics would need a small rework (send stick inputs, read state back, instead of running its own physics).
 
 ---
 
@@ -543,7 +512,7 @@ It hovers, applies a one-time attitude "kick" (like a gust), and checks whether 
 ([`ManualPhase`](src/phases/ManualPhase.hpp) is a recent, complete example of exactly these steps.)
 
 **I want to tune the flight feel (wobbly, sluggish, drifty).**
-→ The PID gains in the [`MotorController`](src/services/MotorController.hpp) constructor. Raise a P gain for a snappier response, add D to reduce overshoot. Test the change in the cockpit UI before flying.
+→ The PID gains in the [`MotorController`](src/services/MotorController.hpp) constructor. Raise a P gain for a snappier response, add D to reduce overshoot. Test the change in the on-chip sim (`run_hil.sh`) before flying.
 
 **I want to change what a radio switch does.**
 → [`RcInput.hpp`](src/services/RcInput.hpp) (the `crsfHandle...` functions) and the channel map in [`FlightConfig.hpp`](src/state/FlightConfig.hpp).
@@ -567,9 +536,10 @@ It hovers, applies a one-time attitude "kick" (like a gust), and checks whether 
 - **RTL** — Return To Launch. The come-home autopilot.
 - **CRSF / ELRS** — the radio protocol / radio system your transmitter uses.
 - **Geofence** — an invisible max-distance circle around the launch point.
-- **HIL** — Hardware-In-the-Loop: testing real firmware on the real chip with faked sensors.
+- **SITL** — Software-In-The-Loop: the physics simulation runs on the same chip as the firmware (here, QuadSim inside the flight loop). See [`OnboardSim.hpp`](#onboardsimhpp).
+- **QuadSim** — the standalone C++ quad-physics library in [`lib/QuadSim/`](lib/QuadSim/) that powers the on-chip sim.
 - **Waypoint** — a GPS point (lat/lon/altitude) the mission flies to.
-- **`WOKWI_SIM`** — the compile-time flag that switches between real hardware and simulator builds.
+- **`SIM`** — the single compile-time flag that switches between a real-hardware build and the on-chip simulator build.
 
 ---
 
@@ -580,8 +550,8 @@ Because this code was largely AI-written, here are a few things a newcomer shoul
 - **The filename is misleading.** [`ESP32_MPU_6050_Web_Server.ino`](src/ESP32_MPU_6050_Web_Server.ino) has no web server. It's a stale name from an earlier version.
 - **`IESC.hpp` is not actually used as an interface.** [`EspESC`](src/hardware/EspESC.hpp) does *not* inherit from [`IESC`](src/hardware/IESC.hpp), and [`Motors`](src/services/Motors.hpp) uses `EspESC` directly. The interface documents intent (and the useful motor-layout diagram) but isn't wired in polymorphically. [`IBarometer`](src/hardware/IBarometer.hpp) *is* implemented by [`EspBarometer`](src/hardware/EspBarometer.hpp), but it too is used concretely, not through the interface.
 - **IMU field names are a little wrong.** In [`Imu.hpp`](src/services/Imu.hpp), the fused roll/pitch/yaw angles are stored in fields named `gyroX/gyroY/gyroZ`. They're angles, not raw gyro rates. This naming flows through the whole codebase.
-- **The altitude controller has no explicit hover feedforward.** Steady hover throttle comes from the PID's integral term winding up, which is slightly slow. (We noticed this while building the cockpit sim; it's a candidate for tuning, not a bug.)
+- **The altitude controller uses a hover feed-forward.** A baseline throttle (`HOVER_THROTTLE_FF` in [`FlightConfig.hpp`](src/state/FlightConfig.hpp)) holds the drone up and the altitude PID only trims around it — this replaced the old integral-windup-from-zero approach that made the height hunt up and down. Tune `HOVER_THROTTLE_FF` per airframe.
 - **Phases intentionally duplicate code.** The near-identical `physicsTick()` in each phase is a deliberate choice (full isolation, so one phase can't break another), not an oversight. Resist the urge to "DRY" them into a base class unless you really mean to change that design decision.
-- **The `#ifdef WOKWI_SIM` blocks matter.** When reading a file, notice which branch is the "real" one and which is the "sim" one; behavior genuinely differs (especially sensor input and the phase-change gate).
+- **The `#ifdef SIM` blocks matter.** When reading a file, notice which branch is the "real" one and which is the "sim" one; behavior genuinely differs (especially sensor input: real chips vs. the on-chip QuadSim physics).
 
 Welcome aboard — start with the [`.ino`](src/ESP32_MPU_6050_Web_Server.ino) and follow the [guided tour](#5-a-guided-tour-one-whole-flight). 🚁

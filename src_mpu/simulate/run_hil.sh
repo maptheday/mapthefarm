@@ -1,58 +1,55 @@
 #!/usr/bin/env bash
-# Build, upload, and run one HIL scenario against a connected ESP32.
+# Build + flash the on-ESP `sim` firmware, then run the on-ESP sim scenarios.
+#
+# The WHOLE simulation runs on the ESP now (QuadSim physics inside the real
+# 200 Hz flight loop -- no laptop in the loop, no serial jitter). Each scenario
+# in scenarios_esp/ flies a mission autonomously on the chip, pulls the flight
+# log back over USB (DUMPLOG), checks it, and saves the map-replay JSON.
 #
 # Usage:
-#   ESP_PORT=/dev/tty.usbmodem14101 ./simulate/run_hil.sh
-#   ESP_PORT=/dev/tty.usbmodem14101 ./simulate/run_hil.sh edge_gps_permanent_loss.py
+#   ESP_PORT=/dev/cu.usbmodem14101 ./simulate/run_hil.sh
+#   ESP_PORT=/dev/cu.usbmodem14101 ./simulate/run_hil.sh field_patrol.py   # one scenario
+#   NO_UPLOAD=1 ESP_PORT=... ./simulate/run_hil.sh                          # skip the flash
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PORT="${ESP_PORT:-}"
-# Comment out scenarios you do not want to run.
+
+# The on-ESP sim scenarios to run. Comment out any you don't want. Each flashes
+# nothing extra -- they all share the one `sim` build and pick their behaviour at
+# boot via the SCENARIO: command. (These replace the old laptop HIL scenarios.)
 SCENARIOS=(
-    "edge_geofence_breach.py"
-    "edge_gps_permanent_loss.py"
-    "edge_max_flight_timeout.py"
-    "full_flight_test.py"
-    "manual_flight_test.py"
-    "stabilization_reaction_test.py"
+    "field_patrol.py"      # full flight: takeoff -> whole fence line -> land (drives the Clover map)
+    "geofence_breach.py"   # fly past the fence -> RTL
+    "gps_loss.py"          # GPS drops -> abort straight to LANDING
+    "max_timeout.py"       # flight-time limit hit -> RTL
+    "manual_flight.py"     # MANUAL mode flies the drone on the sticks
+    "stabilization.py"     # a gust rolls it ~22 deg -> recovers to level
 )
 
-# Passing a scenario keeps the convenient single-scenario debugging mode:
-#   ./simulate/run_hil.sh edge_gps_permanent_loss.py
+# Passing one scenario name runs just that one:
+#   ./simulate/run_hil.sh field_patrol.py
 if [[ $# -gt 0 ]]; then
     SCENARIOS=("$1")
 fi
+
 LOG_DIR="$SCRIPT_DIR/logs"
 mkdir -p "$LOG_DIR"
-LOG_FILE_BASE="$(mktemp "$LOG_DIR/hil_$(date +%Y%m%d_%H%M%S)_XXXXXX")"
-LOG_FILE="${LOG_FILE_BASE}.log"
-mv "$LOG_FILE_BASE" "$LOG_FILE"
-
-# Show output live and preserve the complete upload/test run on disk.
+LOG_FILE="$LOG_DIR/sim_$(date +%Y%m%d_%H%M%S).log"
 exec > >(tee "$LOG_FILE") 2>&1
 echo "Run log: $LOG_FILE"
 
+# --- find the ESP serial port ------------------------------------------------
 if [[ -z "$PORT" ]]; then
     shopt -s nullglob
-    candidates=()
-    for device_pattern in \
-        /dev/cu.usbmodem* \
-        /dev/cu.usbserial* \
-        /dev/cu.SLAB_USBtoUART* \
-        /dev/cu.wchusbserial*; do
-        candidates+=("$device_pattern")
-    done
-
+    candidates=(/dev/cu.usbmodem* /dev/cu.usbserial* /dev/cu.SLAB_USBtoUART* /dev/cu.wchusbserial*)
     if [[ ${#candidates[@]} -eq 1 ]]; then
         PORT="${candidates[0]}"
         echo "Auto-discovered ESP32 port: $PORT"
     elif [[ ${#candidates[@]} -eq 0 ]]; then
-        echo "ERROR: no USB serial port found." >&2
-        echo "Connect the ESP32 or set ESP_PORT explicitly:" >&2
-        echo "  ESP_PORT=/dev/cu.usbmodem14201 $0 [scenario.py]" >&2
+        echo "ERROR: no USB serial port found. Set ESP_PORT explicitly." >&2
         exit 2
     else
         echo "ERROR: multiple USB serial ports found:" >&2
@@ -62,71 +59,58 @@ if [[ -z "$PORT" ]]; then
     fi
 fi
 
-SCENARIO_PATHS=()
-for scenario in "${SCENARIOS[@]}"; do
-    if [[ "$scenario" == */* ]]; then
-        scenario_path="$scenario"
-    else
-        scenario_path="$SCRIPT_DIR/scenarios/$scenario"
-    fi
-
-    if [[ ! -f "$scenario_path" ]]; then
-        echo "ERROR: scenario not found: $scenario_path" >&2
-        exit 2
-    fi
-    SCENARIO_PATHS+=("$scenario_path")
-done
-
+# --- locate PlatformIO + the venv python -------------------------------------
 if [[ -n "${PIO_BIN:-}" ]]; then
     PIO="$PIO_BIN"
 elif command -v pio >/dev/null 2>&1; then
     PIO="$(command -v pio)"
 elif [[ -x "$HOME/.platformio/penv/bin/pio" ]]; then
-    # PlatformIO's usual macOS installation location.
     PIO="$HOME/.platformio/penv/bin/pio"
 else
-    echo "ERROR: PlatformIO CLI not found." >&2
-    echo "Open a terminal where 'pio' works, or set PIO_BIN to its full path." >&2
+    echo "ERROR: PlatformIO CLI not found (set PIO_BIN)." >&2
     exit 2
 fi
 
-if ! command -v python3 >/dev/null 2>&1; then
-    echo "ERROR: python3 not found on PATH." >&2
-    exit 2
-fi
+PY="$SCRIPT_DIR/.venv-rotorpy/bin/python"
+[[ -x "$PY" ]] || PY="python3"
+
+# --- resolve scenario paths --------------------------------------------------
+SCENARIO_PATHS=()
+for scenario in "${SCENARIOS[@]}"; do
+    path="$SCRIPT_DIR/scenarios_esp/$scenario"
+    [[ "$scenario" == */* ]] && path="$scenario"
+    if [[ ! -f "$path" ]]; then
+        echo "ERROR: scenario not found: $path" >&2
+        exit 2
+    fi
+    SCENARIO_PATHS+=("$path")
+done
 
 cd "$PROJECT_ROOT"
 
-echo "== Selected HIL scenarios =="
+echo "== On-ESP sim scenarios =="
 printf '  %s\n' "${SCENARIOS[@]}"
 
-echo "== Uploading WOKWI_SIM firmware to $PORT =="
-"$PIO" run -e wokwi_sim --target upload --upload-port "$PORT"
-
-for scenario_path in "${SCENARIO_PATHS[@]}"; do
-    echo "== Running HIL scenario: $scenario_path =="
-    python3 "$SCRIPT_DIR/hil_runner.py" \
-        --port "$PORT" \
-        --scenario "$scenario_path"
-    echo "== Passed HIL scenario: $scenario_path =="
-done
-
-# --- RotorPy closed-loop demos (optional) ------------------------------------
-# These are NOT scripted hil_runner scenarios -- each is a standalone program
-# that flies the firmware against the RotorPy physics model. They run with the
-# RotorPy venv's python, after the normal scenarios. Skipped if the venv is
-# missing so a plain HIL run still works.
-ROTORPY_PY="$SCRIPT_DIR/.venv-rotorpy/bin/python"
-ROTORPY_DIR="$SCRIPT_DIR/scenarios_rotor_py"
-if [[ -x "$ROTORPY_PY" && -d "$ROTORPY_DIR" ]]; then
-    for demo in "$ROTORPY_DIR"/*.py; do
-        [[ -e "$demo" ]] || continue
-        echo "== Running RotorPy closed-loop demo: $(basename "$demo") =="
-        "$ROTORPY_PY" "$demo" --port "$PORT"
-        echo "== Finished RotorPy demo: $(basename "$demo") =="
-    done
-else
-    echo "== Skipping RotorPy demos (no .venv-rotorpy venv found) =="
+# Flash the sim firmware once (all scenarios share the one `sim` build).
+if [[ "${NO_UPLOAD:-0}" != "1" ]]; then
+    echo "== Flashing sim firmware to $PORT =="
+    "$PIO" run -e sim --target upload --upload-port "$PORT"
 fi
 
-echo "== All selected HIL scenarios passed =="
+pass=0; fail=0
+for path in "${SCENARIO_PATHS[@]}"; do
+    name="$(basename "$path")"
+    out="$SCRIPT_DIR/logs/${name%.py}.json"
+    echo "== Running on-ESP sim: $name =="
+    if "$PY" "$path" --port "$PORT" --out "$out"; then
+        echo "PASS  $name  (-> $out)"; ((pass++)) || true
+    else
+        echo "FAIL  $name"; ((fail++)) || true
+    fi
+done
+
+echo ""
+echo "================================"
+echo "Results: $pass passed, $fail failed"
+echo "================================"
+[[ $fail -eq 0 ]]

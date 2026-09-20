@@ -358,6 +358,12 @@ struct Cruise_HoverSettle {
 };
 struct Trip_HoverSettle {
   unsigned long enteredAtMs = 0;
+  double        anchorLat   = 0.0;  // hold over this spot while settling (no coasting)
+  double        anchorLon   = 0.0;
+  Trip_HoverSettle& operator=(const volatile Trip_HoverSettle& o) {
+    enteredAtMs=o.enteredAtMs; anchorLat=o.anchorLat; anchorLon=o.anchorLon;
+    return *this;
+  }
 };
 
 // --- LANDING ---

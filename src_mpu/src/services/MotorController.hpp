@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../models/ControlTypes.hpp"
+#include "../state/FlightConfig.hpp"   // HOVER_THROTTLE_FF
 #include "PID.hpp"
 
 // Control service: converts targets and measurements into motor commands.
@@ -9,12 +10,20 @@
 class MotorController {
 public:
   MotorController()
-    : altitudePID(0.08f, 0.01f, 0.05f, 0.0f, 1.0f),
+    // Altitude PID now trims AROUND the hover feed-forward, so its output is a
+    // correction that can go negative (to descend) -- clamp +/-0.45, not 0..1.
+    // P is deliberately gentle (0.02): the old 0.08 saturated the clamp at only
+    // ~6 ft of error, turning height control into bang-bang that porpoised the
+    // drone. This only surfaced once RotorPy closed the loop the HIL tests fake.
+    : altitudePID(0.02f, 0.008f, 0.10f, -0.45f, 0.45f),
       rollPID(0.01f, 0.001f, 0.005f, -0.3f, 0.3f),
       pitchPID(0.01f, 0.001f, 0.005f, -0.3f, 0.3f),
       yawPID(0.005f, 0.0001f, 0.001f, -0.2f, 0.2f),
-      navNorthPID(0.5f, 0.0f, 0.1f, -15.0f, 15.0f),
-      navEastPID(0.5f, 0.0f, 0.1f, -15.0f, 15.0f) {}
+      // Gentle, well-damped GPS navigation: a ±6 deg tilt cap so it doesn't slam
+      // to full lean over long legs (which built too much speed and made it
+      // overshoot/orbit each waypoint), with strong D to brake on approach.
+      navNorthPID(0.35f, 0.0f, 0.6f, -6.0f, 6.0f),
+      navEastPID(0.35f, 0.0f, 0.6f, -6.0f, 6.0f) {}
 
   void reset() {
     altitudePID.reset();
@@ -38,7 +47,10 @@ public:
                            float altFt, float roll, float pitch,
                            float compassHeading, float gyroZ, float dt) {
     MotorMix out;
-    out.baseThrottle = altitudePID.compute(targetAltFt, altFt, dt);
+    // Hover feed-forward + PID trim: the baseline throttle holds the drone up,
+    // the PID only corrects the error around it (much less integral windup and
+    // altitude hunting than making the integral supply all of hover from zero).
+    out.baseThrottle = HOVER_THROTTLE_FF + altitudePID.compute(targetAltFt, altFt, dt);
 
     // Throttle tilt compensation: when the drone banks, only cos(tilt) of its
     // thrust points up, so it sinks unless we push harder. Scale base throttle by

@@ -3,7 +3,7 @@
 // ============================================================================
 // LOG service -- thread-safe serial logging.
 // The nav / physics / CRSF tasks all print from different cores; this holds a
-// mutex so two lines never tear together on the wire. Under WOKWI_SIM these
+// mutex so two lines never tear together on the wire. Under SIM these
 // exact strings are also the HIL protocol, so keep messages verbatim.
 // ============================================================================
 

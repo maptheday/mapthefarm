@@ -6,11 +6,9 @@
 // (carrying arm-time + launch point forward from the previous flight phase),
 // hands off to the new phase's onEnter(), and records the new phase.
 //
-// Under WOKWI_SIM it also runs the HIL gate: instead of switching immediately,
-// the first call records a "requested" transition and the test harness must
-// approve it (ALLOW:) before hilGateBlocked() actually applies it on the next
-// task tick. That makes phase changes observable + controllable from tests.
-// On real hardware there is no gate -- transitions happen immediately.
+// Transitions are immediate -- the same on a real drone and in the on-chip
+// simulator (SIM). (The old laptop HIL "gate" that paused for a test harness to
+// approve each transition is gone, along with the whole serial-injection rig.)
 // ============================================================================
 
 #include "../state/PhaseState.hpp"
@@ -19,30 +17,8 @@
 #include "PhaseSwitch.hpp"           // transitionTo() declaration (this file is its body)
 #include "../services/Log.hpp"       // logLine
 #include "../models/FlightModel.hpp"
-#ifdef WOKWI_SIM
-#include "../state/HilState.hpp"  // sim GPS + HIL gate state
-#endif
-
-#ifdef WOKWI_SIM
-// Returns true only once the harness has approved this exact transition.
-inline bool hilGateAllows(FlightPhase next, TransitionReason reason) {
-  if (!hilGatePending) {
-    hilGatePending = true;
-    hilGateApproved = false;
-    hilGateNext = next;
-    hilGateReason = reason;
-    logLine(String("[HIL_GATE] request=") + phaseName(next) +
-            " reason=" + reasonName(reason));
-    return false;
-  }
-  return hilGateNext == next && hilGateApproved;
-}
-#endif
 
 inline void transitionTo(FlightPhase next, TransitionReason reason) {
-#ifdef WOKWI_SIM
-  if (!hilGateAllows(next, reason)) return;
-#endif
   withMutex([&]() {
     // Build the entry context ONCE here (the machine's job), including carrying
     // the arm time + launch point forward from the previous flight phase. Each
@@ -54,10 +30,6 @@ inline void transitionTo(FlightPhase next, TransitionReason reason) {
     ctx.currentHeadingDeg = shared.raw.compassHeadingDeg;
     ctx.currentLat        = shared.raw.gps.lat;
     ctx.currentLon        = shared.raw.gps.lon;
-  #ifdef WOKWI_SIM
-    ctx.currentLat        = simGpsLat;
-    ctx.currentLon        = simGpsLon;
-  #endif
 
     switch (ctx.prevPhase) {
       case PHASE_RAISE:
@@ -95,21 +67,3 @@ inline void transitionTo(FlightPhase next, TransitionReason reason) {
     shared.transitionReason = reason;
   });
 }
-
-#ifdef WOKWI_SIM
-// Called at the top of each task loop: if a gated transition has been approved,
-// apply it now. Returns true while a transition is still pending (so the task
-// skips its normal work until the harness lets the drone move on).
-inline bool hilGateBlocked() {
-  if (!hilGatePending) return false;
-  if (hilGateApproved) {
-    FlightPhase next = hilGateNext;
-    TransitionReason reason = hilGateReason;
-    transitionTo(next, reason);
-    hilGatePending = false;
-    hilGateApproved = false;
-    hilGateReason = REASON_NONE;
-  }
-  return true;
-}
-#endif

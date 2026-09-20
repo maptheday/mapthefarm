@@ -15,9 +15,6 @@
 #include "NavMath.hpp"                 // gpsDistanceMeters
 #include "Log.hpp"                     // logLine
 #include "../phases/PhaseSwitch.hpp"   // transitionTo
-#ifdef WOKWI_SIM
-#include "../state/HilState.hpp"       // sim GPS
-#endif
 
 inline void checkCoreFailsafes(unsigned long armedAtMs, double launchLat, double launchLon) {
   bool tripRTL = false;
@@ -41,18 +38,8 @@ inline void checkCoreFailsafes(unsigned long armedAtMs, double launchLat, double
     lon     = shared.raw.gps.lon;
     lastFix = shared.raw.gps.lastFixMs;
   });
-#ifdef WOKWI_SIM
-  fix      = simGpsFix;
-  lat      = simGpsLat;
-  lon      = simGpsLon;
-  lastFix  = fix ? millis() : lastFix;
-#endif
 
-#ifdef WOKWI_SIM
-  if (launchLat != 0.0) {
-#else
   if (fix && launchLat != 0.0) {
-#endif
     if (gpsDistanceMeters(lat, lon, launchLat, launchLon) > GEOFENCE_RADIUS_M) {
       logLine("[SAFETY] Geofence exceeded — forcing RTL.");
       tripRTL = true;

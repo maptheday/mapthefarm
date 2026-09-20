@@ -8,7 +8,7 @@
 //
 // crsfHandleStart()/crsfHandleStop() are the "what the pilot asked for"
 // handlers. They're shared: the real crsfTask calls them from parsed radio
-// frames, and (under WOKWI_SIM) the SimAdapter calls them from fake serial
+// frames, and (under SIM) the SimAdapter calls them from fake serial
 // commands -- so the sim exercises the exact same intent logic as hardware.
 // ============================================================================
 
@@ -76,7 +76,7 @@ inline void crsfHandleManualOff() {
   }
 }
 
-#ifndef WOKWI_SIM
+#ifndef SIM
 // Convert a raw CRSF channel (172..1811, mid 992) to a signed -1..1 deflection.
 inline float crsfNorm(uint16_t raw) {
   float v = ((float)raw - CRSF_RAW_MID) / (float)(CRSF_RAW_MAX - CRSF_RAW_MID);
@@ -176,4 +176,4 @@ inline void crsfTask(void* parameter) {
     vTaskDelay(pdMS_TO_TICKS(2)); // yield; 2 ms is well within the 4 ms frame interval
   }
 }
-#endif // !WOKWI_SIM
+#endif // !SIM

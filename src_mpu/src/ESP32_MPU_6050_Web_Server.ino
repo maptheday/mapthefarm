@@ -5,7 +5,6 @@
 #include "models/SensorTypes.hpp"
 #include "models/ControlTypes.hpp"
 #include "state/PhaseState.hpp"
-#include "state/HilState.hpp"
 #include "services/Log.hpp"
 #include "services/MotorController.hpp"
 #include "services/Motors.hpp"
@@ -15,10 +14,11 @@
 #include "services/Altimeter.hpp"     // barometer height-above-ground
 #include "phases/IFlightPhase.hpp"
 #include "phases/PhaseRegistry.hpp"
-#include "phases/PhaseMachine.hpp"   // transitionTo() + HIL gate
+#include "phases/PhaseMachine.hpp"   // transitionTo()
 #include "services/Failsafes.hpp"    // checkCoreFailsafes()
 #include "services/RcInput.hpp"      // CRSF radio + START/STOP handlers
-#include "services/SimAdapter.hpp"   // HIL serial protocol (sim only)
+#include "services/OnboardSim.hpp"   // on-chip physics simulation (SIM only)
+#include "services/SimAdapter.hpp"   // DUMPLOG serial command (SIM only)
 
 // Pin/timing config lives in FlightConfig.hpp; every sensor and actuator lives
 // behind its own service (Imu, Altimeter, Gps, Compass, Motors).
@@ -69,7 +69,7 @@ Imu             imu;             // accel/gyro + attitude filter
 Altimeter       altimeter;       // barometer height-above-ground
 
 // ==========================================
-// The phase machine (transitionTo) + HIL gate live in phases/PhaseMachine.hpp.
+// The phase machine (transitionTo) lives in phases/PhaseMachine.hpp.
 
 // ==========================================
 // SHARED STATE (repository)
@@ -92,20 +92,10 @@ void navigationTask(void* parameter) {
   const float navDt           = NAV_LOOP_MS / 1000.0f;
 
   for (;;) {
-#ifdef WOKWI_SIM
-    if (hilGateBlocked()) {
-      vTaskDelay(pdMS_TO_TICKS(NAV_LOOP_MS));
-      continue;
-    }
-#endif
-#ifdef WOKWI_SIM
-    withMutex([&]() {
-  shared.raw.gps.lat = simGpsLat;
-  shared.raw.gps.lon = simGpsLon;
-  shared.raw.gps.fix = simGpsFix;
-  if (simGpsFix) shared.raw.gps.lastFixMs = millis();
-  shared.raw.gps.sats = simGpsFix ? 8 : 0;
-    });
+#if defined(SIM)
+    // On-chip sim: QuadSim wrote GPS in the physics tick. Here we just run the
+    // autonomous mission driver, heading feed, and flight logging.
+    onboardSimNav();
 #else
     RawGpsReading g;
     if (gps.read(g)) {
@@ -139,17 +129,16 @@ void physicsTask(void* parameter) {
   TickType_t lastWakeTime     = xTaskGetTickCount();
 
   for (;;) {
-#ifdef WOKWI_SIM
-    if (hilGateBlocked()) {
-      vTaskDelay(pdMS_TO_TICKS(PHYSICS_LOOP_MS));
-      continue;
-    }
-#endif
     unsigned long now = micros();
     float dt          = (now - lastGyroMicros) / 1000000.0f;
     lastGyroMicros    = now;
 
-#ifndef WOKWI_SIM
+#if defined(SIM)
+    // On-chip sim: advance the QuadSim physics with the last commanded mix and
+    // write the resulting attitude/altitude/GPS back as fake sensor readings.
+    // This runs BEFORE the phase's physicsTick, so the controller sees fresh state.
+    onboardSimStep(dt);
+#else
     RawImuReading r;
     imu.read(r, dt);
     float baroAlt = altimeter.readAltitudeFt();
@@ -164,12 +153,6 @@ void physicsTask(void* parameter) {
       shared.raw.imu.temp       = r.temp;
       shared.raw.baroAltitudeFt = baroAlt;
     });
-#else
-    // Sim mode: no MPU6050 or barometer hardware present.
-    // IMU is left at zero -- attitude control is not exercised in HIL tests.
-    // baroAltitudeFt is driven by the HIL runner via ALT: serial commands
-    // and written directly into shared.raw by parseSimInput().
-    (void)dt;
 #endif
 
     FlightPhase phase;
@@ -191,13 +174,13 @@ void setup() {
   serialMutex     = xSemaphoreCreateMutex();
   
   Serial.begin(115200);
-#ifdef WOKWI_SIM
+#ifdef SIM
   // ESP32-S3 native USB CDC takes a moment to enumerate after reset.
   // Without this delay, early Serial output is dropped before the host
   // sees the port. 2s is enough for macOS to reconnect and open the port.
   delay(2000);
 #endif
-#ifndef WOKWI_SIM
+#ifndef SIM
   Wire.begin(16, 15);
   imu.begin();
   compass.begin();
@@ -207,14 +190,16 @@ void setup() {
   logLine("[ESC] DShot600 channels initialized, all motors disarmed.");
   altimeter.begin();   // samples + locks in the ground-altitude reference
 #else
-  // In sim there is no sensor hardware: the HIL runner injects heading, GPS,
-  // and altitude over serial (see SimAdapter). Nothing to bring up here.
-  logLine("[SENSORS] Sim mode -- sensors driven by the HIL runner.");
+  // In sim there is no sensor hardware: the QuadSim physics (OnboardSim) provides
+  // every sensor reading. Bring it up: mount LittleFS, open the flight log, seed
+  // GPS at home.
+  logLine("[SENSORS] Sim mode -- sensors driven by on-chip QuadSim physics.");
+  onboardSimBegin();
 #endif
 
   xTaskCreatePinnedToCore(navigationTask, "NavTask",    8192, NULL, 1, NULL, 0);
   xTaskCreatePinnedToCore(physicsTask,    "PhysicsTask", 8192, NULL, 2, NULL, 1);
-#ifndef WOKWI_SIM
+#ifndef SIM
   // No real ELRS receiver exists in the Wokwi diagram, and CRSF_RX_PIN
   // currently collides with the I2C bus (see the pin-conflict note below).
   // Sim builds trigger START/STOP via parseSimInput() -> crsfHandleStart/Stop()
@@ -235,8 +220,9 @@ void setup() {
 // LOOP (Core 0)
 // ==========================================
 void loop() {
-#ifdef WOKWI_SIM
-  // In sim, the HIL runner drives the drone over serial.
+#ifdef SIM
+  // In sim, the flight is autonomous; this only listens for the DUMPLOG command
+  // to stream the recorded flight log back over USB.
   parseSimInput();
 #else
   // On real hardware everything runs in the nav/physics/CRSF tasks;

@@ -5,7 +5,7 @@
 // A phase computes a MotorMix and hands it here; this forwards it to the DShot
 // motors. Nothing else in the code touches motor pins directly.
 //
-// Under WOKWI_SIM there is no motor hardware, so every method is a no-op --
+// Under SIM there is no motor hardware, so every method is a no-op --
 // the HIL tests exercise the flight logic, not the ESC wiring.
 // ============================================================================
 
@@ -18,7 +18,7 @@ public:
   // Bring up each motor's RMT channel and confirm all are disarmed (at zero).
   // DShot600 has no calibration/arming beep sequence -- that's a PWM-ESC ritual.
   void begin() {
-#ifndef WOKWI_SIM
+#ifndef SIM
     const int           pins[4] = { 4, 5, 6, 7 };            // M1..M4
     const rmt_channel_t ch[4]   = { RMT_CHANNEL_0, RMT_CHANNEL_1,
                                     RMT_CHANNEL_2, RMT_CHANNEL_3 };
@@ -29,7 +29,10 @@ public:
 
   // Push one computed mix to all 4 motors.
   void writeMix(const MotorMix& mix) {
-#ifndef WOKWI_SIM
+#ifdef SIM
+    lastMix = mix;   // on-chip SITL feeds this back into the QuadSim physics
+#endif
+#ifndef SIM
     esc_[0].write(mix.m1);
     esc_[1].write(mix.m2);
     esc_[2].write(mix.m3);
@@ -41,26 +44,33 @@ public:
 
   // Cut all motors immediately (DShot disarm command, not a PWM "min throttle").
   void disarmAll() {
-#ifndef WOKWI_SIM
+#ifdef SIM
+    lastMix = MotorMix{};   // no thrust -> QuadSim rests on the ground
+#endif
+#ifndef SIM
     for (int i = 0; i < 4; i++) esc_[i].disarm();
 #endif
   }
 
   // Bench test helpers -- motor is 1-based (M1..M4), PROPS OFF.
   void writeOne(int motor, float throttle) {
-#ifndef WOKWI_SIM
+#ifndef SIM
     esc_[motor - 1].write(throttle);
 #else
     (void)motor; (void)throttle;
 #endif
   }
   void disarmOne(int motor) {
-#ifndef WOKWI_SIM
+#ifndef SIM
     esc_[motor - 1].disarm();
 #else
     (void)motor;
 #endif
   }
+
+#ifdef SIM
+  MotorMix lastMix{};   // last mix commanded, read by the on-chip physics
+#endif
 
 private:
   EspESC esc_[4]; // index 0=M1, 1=M2, 2=M3, 3=M4

@@ -10,6 +10,7 @@
 #include "../state/FlightConfig.hpp"        // MISSION_COMPLETE_HOVER_MS
 #include "../services/Motors.hpp"           // motors
 #include "../services/MotorController.hpp"  // motorController
+#include "../services/NavMath.hpp"          // gpsDistanceMeters, gpsBearing, bearingToNorthEast
 #include "../services/Log.hpp"              // logLine
 #include "PhaseSwitch.hpp"                  // transitionTo
 
@@ -19,6 +20,8 @@ public:
 
   void onEnter(const EnterContext& ctx) override {
     shared.trip_hoverSettle.enteredAtMs        = ctx.now;
+    shared.trip_hoverSettle.anchorLat          = ctx.currentLat;  // hold here, don't coast
+    shared.trip_hoverSettle.anchorLon          = ctx.currentLon;
     shared.cruise_hoverSettle.targetAltFt      = ctx.currentAltFt;
     shared.cruise_hoverSettle.yawTargetHeading = ctx.currentHeadingDeg;
     shared.cruise_hoverSettle.targetRollDeg    = 0.0f;
@@ -29,8 +32,12 @@ public:
     shared.dashboard_hoverSettle.m4            = 0.0f;
   }
 
-  void navTick(float /*navDt*/) override {
+  void navTick(float navDt) override {
+    RawGpsReading    gps;
+    Trip_HoverSettle trip;
     withMutex([&]() {
+      gps  = shared.raw.gps;
+      trip = shared.trip_hoverSettle;
       shared.dashboard_hoverSettle.altitudeFt     = shared.raw.baroAltitudeFt;
       shared.dashboard_hoverSettle.compassHeading = shared.raw.compassHeadingDeg;
       shared.dashboard_hoverSettle.roll           = shared.raw.imu.gyroX;
@@ -38,10 +45,19 @@ public:
       shared.dashboard_hoverSettle.yaw            = shared.raw.imu.gyroZ;
     });
 
-    unsigned long enteredAt;
-    withMutex([&]() { enteredAt = shared.trip_hoverSettle.enteredAtMs; });
+    // Actively hold over the spot where the mission ended (lean back to brake
+    // off leftover momentum) instead of coasting away while we settle.
+    float distM   = gpsDistanceMeters(gps.lat, gps.lon, trip.anchorLat, trip.anchorLon);
+    float bearing = gpsBearing(gps.lat, gps.lon, trip.anchorLat, trip.anchorLon);
+    float northM;
+    float eastM;
+    bearingToNorthEast(distM, bearing, northM, eastM);
+    withMutex([&]() {
+      shared.cruise_hoverSettle.targetRollDeg  = motorController.eastNavigationCorrection(eastM, navDt);
+      shared.cruise_hoverSettle.targetPitchDeg = motorController.northNavigationCorrection(northM, navDt);
+    });
 
-    if (millis() - enteredAt >= MISSION_COMPLETE_HOVER_MS) {
+    if (millis() - trip.enteredAtMs >= MISSION_COMPLETE_HOVER_MS) {
       transitionTo(PHASE_LANDING, REASON_HOVER_COMPLETE);
       logLine("[NAV] Hover complete — beginning automatic landing.");
     }

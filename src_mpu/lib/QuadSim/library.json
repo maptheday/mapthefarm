@@ -1,0 +1,13 @@
+{
+  "name": "QuadSim",
+  "version": "0.1.0",
+  "description": "A tiny, dependency-free quadrotor physics simulator for on-chip software-in-the-loop (SITL). Pure C++ (only <cmath>) so the same model runs on an MCU and on a desktop. The embedded cousin of RotorPy.",
+  "keywords": ["drone", "quadcopter", "simulation", "sitl", "physics", "multirotor", "uav"],
+  "license": "MIT",
+  "frameworks": "*",
+  "platforms": "*",
+  "headers": "QuadSim.h",
+  "export": {
+    "include": ["src", "examples", "README.md", "LICENSE"]
+  }
+}
