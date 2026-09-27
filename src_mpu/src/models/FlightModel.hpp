@@ -39,7 +39,8 @@ enum TransitionReason {
   REASON_EMERGENCY_STOP,
   REASON_CALIBRATION_COMPLETE,
   REASON_MANUAL_ON,   // pilot took manual stick control
-  REASON_MANUAL_OFF   // pilot handed control back to auto-hover
+  REASON_MANUAL_OFF,  // pilot handed control back to auto-hover
+  REASON_RC_LOST      // radio link lost -> came home / landed on its own
 };
 
 inline const char* phaseName(FlightPhase phase) {
@@ -82,6 +83,7 @@ inline const char* reasonName(TransitionReason reason) {
     case REASON_CALIBRATION_COMPLETE: return "CALIBRATION_COMPLETE";
     case REASON_MANUAL_ON:        return "MANUAL_ON";
     case REASON_MANUAL_OFF:       return "MANUAL_OFF";
+    case REASON_RC_LOST:          return "RC_LOST";
   }
   return "UNKNOWN";
 }

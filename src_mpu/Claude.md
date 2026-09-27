@@ -214,6 +214,7 @@ src/
 │   ├── RcInput.hpp                 the radio (CRSF/ELRS): sticks + switches
 │   ├── OnboardSim.hpp              sim-only: on-chip physics (QuadSim) + flight logging
 │   ├── SimAdapter.hpp              sim-only: the DUMPLOG serial command
+│   ├── BenchTest.hpp               real-only: props-off bench checkout (spin one motor, stream sensors)
 │   ├── Log.hpp                     thread-safe serial printing + PANIC()
 │   ├── Imu.hpp                     accel/gyro → attitude (MPU6050 + Madgwick)
 │   ├── Gps.hpp                     GPS receiver (BN-880 via TinyGPSPlus)
@@ -222,7 +223,7 @@ src/
 │
 └── hardware/       the lowest level: individual chips & pins
     ├── IESC.hpp                    interface: "an ESC" (see note in §11)
-    ├── EspESC.hpp                  DShot600 motor driver (ESP32 RMT peripheral)
+    ├── EspPwmESC.hpp               PWM motor driver (ESP32 LEDC)
     ├── IBarometer.hpp              interface: "a barometer"
     └── EspBarometer.hpp            BME280 barometer driver
 ```
@@ -382,7 +383,7 @@ Owns six PIDs (altitude, roll, pitch, yaw, and two for GPS navigation). Its main
 #### [`Motors.hpp`](src/services/Motors.hpp)
 **ELI5:** the hands — the only code allowed to touch the 4 motors.
 
-Wraps four `EspESC` drivers. `writeMix()` sends the four throttles; `disarmAll()` cuts them. In sim, every method is a no-op (no motor hardware). Nothing else in the codebase talks to motor pins — that's what keeps motor control in one auditable place.
+Wraps four `EspPwmESC` drivers. `writeMix()` sends the four throttles; `disarmAll()` cuts them. `runEscCalibration()` is the one-time, props-off ESC range calibration (turned on with `CALIBRATE_ESCS_ON_BOOT` in [`FlightConfig.hpp`](#flightconfighpp); it walks you through the steps over the serial monitor, then halts). In sim, every method is a no-op (no motor hardware). Nothing else in the codebase talks to motor pins — that's what keeps motor control in one auditable place.
 
 #### [`NavMath.hpp`](src/services/NavMath.hpp)
 **ELI5:** the map math — "how far, which way, and how does that split into north/east?"
@@ -393,6 +394,8 @@ Pure geometry, no state: `gpsDistanceMeters` (haversine distance), `gpsBearing` 
 **ELI5:** the safety net that every flying phase checks constantly.
 
 `checkCoreFailsafes(...)`, three checks in priority order: **max flight time** → force RTL; **geofence breach** (flew too far from launch) → force RTL; **GPS lost too long** → abort straight to LANDING (can't fly home blind). Called from HOLD, MISSION, and RTL's nav ticks. (Note: MANUAL deliberately does *not* run these — manual is manual, STOP is the safety.)
+
+Plus `checkRadioFailsafe()`: if no radio frame arrives for `RC_LOSS_TIMEOUT_MS` (1 s), the pilot's STOP/MANUAL switches can't reach the drone, so it comes home by itself: RTL, or LANDING if it's below `RC_LOSS_LAND_BELOW_FT` or has no GPS. Called from RAISE, HOLD, MISSION **and** MANUAL (with no radio there is no pilot, even in manual). It only arms once a radio has actually been heard, so it's inert in the sim unless the `rcloss` scenario fakes one.
 
 #### [`RcInput.hpp`](src/services/RcInput.hpp)
 **ELI5:** the radio receiver — reads your transmitter's sticks and switches.
@@ -408,6 +411,10 @@ This is what makes a `SIM` build fly. Each physics tick it takes the last motor 
 **ELI5:** a tiny USB command listener for the sim. Sim builds only.
 
 `parseSimInput()` reads text lines over USB and acts on just two: `DUMPLOG` streams the recorded flight log back (so the laptop can pull it and build the map replay), and `PING:` is a liveness check. (The old HIL protocol — sensor injection, the phase-change gate, stick faking — is gone; the flight is fully autonomous now.)
+
+#### [`BenchTest.hpp`](src/services/BenchTest.hpp)
+**ELI5:** a props-off "is everything plugged in right?" checklist, run over the serial monitor. Real hardware only.
+Turned on with `BENCH_TEST_ON_BOOT` in [`FlightConfig.hpp`](#flightconfighpp). Runs from `setup()` before the flight tasks start and never returns, so the drone can't fly while it's on. Type `1`–`4` to spin one motor slowly (checks corner and spin direction), or `s` to stream every sensor for 20 s (tilt the drone and check the numbers move the right way).
 
 #### [`Log.hpp`](src/services/Log.hpp)
 **ELI5:** safe printing (so two cores don't scramble each other's messages) + a "halt on fatal bug" macro.
@@ -439,11 +446,11 @@ The bottom of the stack: code that talks to specific chips and pins.
 
 #### [`IESC.hpp`](src/hardware/IESC.hpp)
 **ELI5:** the idea of "an ESC" as an interface, with the motor layout diagram.
-Defines what any ESC driver *should* offer (initialize/write/disarm/getMotor) and documents the physical motor numbering (M1 front-left … M4 rear-right, with spin directions). **See the note in [section 11](#11-honest-notes--rough-edges):** the real driver doesn't currently inherit from this interface.
+Defines what any ESC driver *should* offer (initialize/write/disarm/getMotor) and documents the physical motor numbering and spin directions: M1 front-left and M4 rear-right spin **clockwise**, M2 front-right and M3 rear-left **counter-clockwise** (seen from above). Those directions must match the mixer's yaw signs: a prop twists the body the opposite way, so speeding up the CCW pair (M2 + M3) turns the drone clockwise. **See the note in [section 11](#11-honest-notes--rough-edges):** the real driver doesn't currently inherit from this interface.
 
-#### [`EspESC.hpp`](src/hardware/EspESC.hpp)
-**ELI5:** the actual motor driver — speaks "DShot600," the digital language ESCs understand.
-One instance per motor. Uses the ESP32's **RMT** peripheral (a precise pulse generator) to send DShot600 frames: it converts a 0.0–1.0 throttle to the DShot number range, builds the 16-bit frame with a checksum, and transmits it as precisely-timed pulses. This is the most hardware-specific file in the project.
+#### [`EspPwmESC.hpp`](src/hardware/EspPwmESC.hpp)
+**ELI5:** the actual motor driver — sends each ESC a stream of pulses whose *width* is the throttle.
+One instance per motor. Standard PWM, which every ESC understands: 1000 µs = stopped, 2000 µs = full, repeated `ESC_PWM_HZ` (400) times a second. The ESP32's **LEDC** peripheral generates the pulses in hardware. PWM ESCs need a one-time range calibration (see [`Motors`](#motorshpp)). (An older DShot600 driver was removed: budget ESCs usually don't support DShot, and PWM works with every ESC.)
 
 #### [`IBarometer.hpp`](src/hardware/IBarometer.hpp)
 **ELI5:** the idea of "a barometer" as an interface.
@@ -485,6 +492,7 @@ The scenario list is a simple array at the top of that script. Each one picks it
 | `geofence_breach.py` | fly past a shrunk fence → geofence failsafe forces RTL |
 | `gps_loss.py` | GPS fix drops → abort straight to LANDING (can't RTL blind) |
 | `max_timeout.py` | flight-time limit hit → RTL |
+| `rc_loss.py` | radio link cut mid-mission → radio failsafe → RTL → land |
 | `manual_flight.py` | MANUAL mode flies the drone on the sticks against the physics |
 | `stabilization.py` | a gust rolls it ~22° → the controller recovers to level |
 
@@ -525,7 +533,7 @@ Each injects its fault by nudging the on-chip state (dropping the GPS fix, shrin
 ## 10. Glossary
 
 - **ESC** — Electronic Speed Controller. The board that drives one motor. You send 0.0–1.0; it spins the motor.
-- **DShot600** — a digital protocol for talking to ESCs (more precise than old analog PWM). Implemented in [`EspESC.hpp`](src/hardware/EspESC.hpp).
+- **PWM (ESC signal)** — the classic pulse-width signal every ESC understands (1000–2000 µs). Implemented in [`EspPwmESC.hpp`](src/hardware/EspPwmESC.hpp).
 - **IMU** — Inertial Measurement Unit (accelerometer + gyroscope). Tells you tilt and rotation.
 - **Madgwick filter** — the math that fuses accel + gyro into stable angles.
 - **PID** — the target-vs-actual control formula. See [`PID.hpp`](src/services/PID.hpp).
@@ -548,7 +556,7 @@ Each injects its fault by nudging the on-chip state (dropping the GPS fix, shrin
 Because this code was largely AI-written, here are a few things a newcomer should know so they aren't confused:
 
 - **The filename is misleading.** [`ESP32_MPU_6050_Web_Server.ino`](src/ESP32_MPU_6050_Web_Server.ino) has no web server. It's a stale name from an earlier version.
-- **`IESC.hpp` is not actually used as an interface.** [`EspESC`](src/hardware/EspESC.hpp) does *not* inherit from [`IESC`](src/hardware/IESC.hpp), and [`Motors`](src/services/Motors.hpp) uses `EspESC` directly. The interface documents intent (and the useful motor-layout diagram) but isn't wired in polymorphically. [`IBarometer`](src/hardware/IBarometer.hpp) *is* implemented by [`EspBarometer`](src/hardware/EspBarometer.hpp), but it too is used concretely, not through the interface.
+- **`IESC.hpp` is not actually used as an interface.** [`EspPwmESC`](src/hardware/EspPwmESC.hpp) doesn't inherit from [`IESC`](src/hardware/IESC.hpp), and [`Motors`](src/services/Motors.hpp) uses `EspPwmESC` directly. The interface documents intent (and the useful motor-layout diagram) but isn't wired in polymorphically. [`IBarometer`](src/hardware/IBarometer.hpp) *is* implemented by [`EspBarometer`](src/hardware/EspBarometer.hpp), but it too is used concretely, not through the interface.
 - **IMU field names are a little wrong.** In [`Imu.hpp`](src/services/Imu.hpp), the fused roll/pitch/yaw angles are stored in fields named `gyroX/gyroY/gyroZ`. They're angles, not raw gyro rates. This naming flows through the whole codebase. The one true rate is `yawRateDps` (deg/s, + = clockwise), which the yaw damping uses. Its sign assumes the MPU6050 is mounted flat and right side up; check it on the bench (turn the drone clockwise by hand → it should read positive).
 - **The altitude controller uses a hover feed-forward.** A baseline throttle (`HOVER_THROTTLE_FF` in [`FlightConfig.hpp`](src/state/FlightConfig.hpp)) holds the drone up and the altitude PID only trims around it — this replaced the old integral-windup-from-zero approach that made the height hunt up and down. Tune `HOVER_THROTTLE_FF` per airframe.
 - **Phases intentionally duplicate code.** The near-identical `physicsTick()` in each phase is a deliberate choice (full isolation, so one phase can't break another), not an oversight. Resist the urge to "DRY" them into a base class unless you really mean to change that design decision.

@@ -5,7 +5,7 @@
 // Sim builds only. The flight itself is fully autonomous (see OnboardSim); this
 // only listens for two text commands over USB:
 //   SCENARIO:<name>  pick the test scenario at boot (full / geofence / gpsloss /
-//                    timeout / manual / stab) -- default is "full"
+//                    timeout / rcloss / manual / stab) -- default is "full"
 //   DUMPLOG          stream the recorded flight log back (between clear markers)
 //   PING:            liveness check -- confirms the firmware is up
 // (The old laptop HIL protocol -- sensor injection, the approval gate, per-tick

@@ -1902,13 +1902,13 @@ From [`IESC.hpp`](src/hardware/IESC.hpp), looking down at the drone:
 
 ```text
               FRONT
-        M1 (CCW)    M2 (CW)
+        M1 (CW)     M2 (CCW)
             ╲        ╱
              ╲      ╱
               [body]
              ╱      ╲
             ╱        ╲
-        M3 (CW)     M4 (CCW)
+        M3 (CCW)    M4 (CW)
               REAR
 ```
 
@@ -1924,7 +1924,9 @@ roll correction     left pair vs. right pair          → lean left / lean right
 yaw correction      one diagonal vs. the other        → spin left / spin right
 ```
 
-Why diagonals for yaw? Each spinning prop pushes air, and air pushes back, twisting the drone the *opposite* way to the prop's spin (like the kick when you start a drill). M1 and M4 spin one way (CCW), M2 and M3 spin the other (CW). Normally the twists cancel. Speed up one diagonal pair, slow the other, and the twists stop cancelling, so the drone rotates.
+Why diagonals for yaw? Each spinning prop pushes air, and air pushes back, twisting the drone the *opposite* way to the prop's spin (like the kick when you start a drill). M1 and M4 spin clockwise, M2 and M3 counter-clockwise (seen from above). Normally the twists cancel. Speed up one diagonal pair, slow the other, and the twists stop cancelling, so the drone rotates.
+
+Which way? The body twists *opposite* to the props you sped up. Speed up the counter-clockwise pair (M2 + M3) and the body turns **clockwise**, so the heading goes up. That's why the mixer adds `+yaw` to M2 and M3: a positive yaw push means "turn clockwise." (A true story: an earlier version of the motor diagram had the directions backward, which would have made the yaw control push the wrong way. It was caught by exactly this reasoning, before anything was built.)
 
 ### 💻 In the code
 

@@ -30,7 +30,7 @@ public:
   void physicsTick(float /*dt*/) override {
     motorController.reset();
     // Disarm every tick so an e-stop never relies on an ESC-side timeout.
-    // DShot has no PWM "min throttle" -- disarm() sends the real stop command.
+    // disarm() sends the 1000 us "stopped" pulse to every ESC.
     motors.disarmAll();
   }
 };

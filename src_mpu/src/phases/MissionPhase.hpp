@@ -59,6 +59,7 @@ public:
     });
 
     checkCoreFailsafes(trip.armedAtMs, trip.launchLat, trip.launchLon);
+    if (checkRadioFailsafe()) return;
     withMutex([&]() { trip = shared.trip_mission; }); // reload in case a failsafe changed phase
 
     if (!trip.active) return;

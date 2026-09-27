@@ -1,5 +1,7 @@
 # ESC Code — Why We Did What We Did
 
+> **Update (2026-09-26):** the DShot driver described here (`EspESC.hpp`) has been **removed**. The drone now drives its ESCs with standard **PWM** ([`EspPwmESC.hpp`](src/hardware/EspPwmESC.hpp)), because the budget 40A ESCs in the parts list almost certainly don't support DShot. This page is kept as background: the general ideas (the ESC as the middleman, 0–1 throttle, `constrain`) still apply, but the DShot/RMT details no longer match the code.
+
 Notes written for someone who is learning as they build. No assumed knowledge.
 
 ---

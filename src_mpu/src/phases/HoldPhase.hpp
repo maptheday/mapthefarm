@@ -11,7 +11,7 @@
 #include "../state/FlightConfig.hpp"        // TAKEOFF_ALTITUDE_FT, MAX_FLIGHT_TIME_MS
 #include "../services/Motors.hpp"           // motors
 #include "../services/MotorController.hpp"  // motorController
-#include "../services/Failsafes.hpp"        // checkCoreFailsafes
+#include "../services/Failsafes.hpp"        // checkCoreFailsafes, checkRadioFailsafe
 
 class HoldPhase : public IFlightPhase {
 public:
@@ -50,6 +50,7 @@ public:
     });
 
     checkCoreFailsafes(armedAt, launchLat, launchLon);
+    checkRadioFailsafe();
   }
 
   void physicsTick(float dt) override {

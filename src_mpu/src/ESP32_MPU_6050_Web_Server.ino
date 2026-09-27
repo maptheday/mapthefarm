@@ -12,6 +12,7 @@
 #include "services/Gps.hpp"           // GPS receiver
 #include "services/Imu.hpp"           // accel/gyro + attitude filter
 #include "services/Altimeter.hpp"     // barometer height-above-ground
+#include "services/BenchTest.hpp"     // props-off bench checkout (real hardware only)
 #include "phases/IFlightPhase.hpp"
 #include "phases/PhaseRegistry.hpp"
 #include "phases/PhaseMachine.hpp"   // transitionTo()
@@ -44,13 +45,9 @@
 // holding the switch up does not repeatedly re-arm or re-trigger.
 // STOP is level-triggered: any frame with Ch6 below threshold kills motors.
 //
-// PLACEHOLDER pin -- moved off GPIO16 because it collided with
-// Wire.begin(16, 15) (I2C SDA). GPIO4 is clear of every pin this file
-// knows about (I2C: 16/15, GPS: 17/18), but EspESC.hpp's pin usage is
-// NOT visible from this file -- confirm GPIO4 is actually free on your
-// board before wiring the receiver. See the boot-time warning below.
-// GPIO8 is confirmed clear of every pin this project defines: I2C
-// (16/15), GPS (17/18), and ESC M1-M4 (4/5/6/7, per EspESC.hpp). Still
+// The receiver is on GPIO8 (CRSF_RX_PIN in FlightConfig.hpp), clear of every
+// pin this project defines: I2C (16/15), GPS (17/18), and ESC M1-M4
+// (4/5/6/7, set in Motors.hpp). Still
 // worth a final visual check against your actual board silkscreen --
 // GPIO8 is unused on most ESP32-S3 DevKitC-1 boards but isn't a
 // hardware-enforced guarantee the way the others above are.
@@ -188,8 +185,18 @@ void setup() {
   logLine("[COMPASS] QMC5883L ready.");
   gps.begin();
   motors.begin();
-  logLine("[ESC] DShot600 channels initialized, all motors disarmed.");
+  logLine("[ESC] PWM channels initialized, all motors stopped.");
+  // One-time ESC range calibration (props off). Runs before the flight tasks
+  // start, and halts when done -- see CALIBRATE_ESCS_ON_BOOT in FlightConfig.hpp.
+  if (CALIBRATE_ESCS_ON_BOOT) {
+    motors.runEscCalibration();
+  }
   altimeter.begin();   // samples + locks in the ground-altitude reference
+  // Props-off bench checkout. Runs before the flight tasks start and never
+  // returns -- see BENCH_TEST_ON_BOOT in FlightConfig.hpp.
+  if (BENCH_TEST_ON_BOOT) {
+    runBenchTest();
+  }
 #else
   // In sim there is no sensor hardware: the QuadSim physics (OnboardSim) provides
   // every sensor reading. Bring it up: mount LittleFS, open the flight log, seed
@@ -201,11 +208,7 @@ void setup() {
   xTaskCreatePinnedToCore(navigationTask, "NavTask",    8192, NULL, 1, NULL, 0);
   xTaskCreatePinnedToCore(physicsTask,    "PhysicsTask", 8192, NULL, 2, NULL, 1);
 #ifndef SIM
-  // No real ELRS receiver exists in the Wokwi diagram, and CRSF_RX_PIN
-  // currently collides with the I2C bus (see the pin-conflict note below).
-  // Sim builds trigger START/STOP via parseSimInput() -> crsfHandleStart/Stop()
-  // instead. TODO(hardware): CRSF_RX_PIN == 16 == Wire SDA. Move CRSF_RX_PIN
-  // to a free GPIO once EspESC.hpp's pin usage is confirmed.
+  // Real radio only. Sim builds fake START/STOP from OnboardSim instead.
   xTaskCreatePinnedToCore(crsfTask,       "CRSFTask",    4096, NULL, 1, NULL, 0);
 
   // Optional compass calibration on boot. It's a normal phase now: the nav/

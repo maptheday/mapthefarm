@@ -25,6 +25,7 @@ SCENARIOS=(
     "geofence_breach.py"   # fly past the fence -> RTL
     "gps_loss.py"          # GPS drops -> abort straight to LANDING
     "max_timeout.py"       # flight-time limit hit -> RTL
+    "rc_loss.py"           # radio link lost mid-mission -> RTL -> land
     "manual_flight.py"     # MANUAL mode flies the drone on the sticks
     "stabilization.py"     # a gust rolls it ~22 deg -> recovers to level
 )

@@ -237,8 +237,8 @@ inline void onboardSimNav() {
   });
 
   const String sc = onboard::scenario();
-  // "full", "geofence" and "timeout" fly the real mission; the others act in HOLD.
-  const bool missionScenario = (sc == "full" || sc == "geofence" || sc == "timeout");
+  // "full", "geofence", "timeout" and "rcloss" fly the real mission; the others act in HOLD.
+  const bool missionScenario = (sc == "full" || sc == "geofence" || sc == "timeout" || sc == "rcloss");
 
   // --- autostart: PARKED -> RAISE, then (mission scenarios) HOLD -> MISSION.
   // t>2500 leaves time for the SCENARIO: command to arrive before takeoff.
@@ -268,6 +268,25 @@ inline void onboardSimNav() {
       onboard::scenarioActed() = true;
       onboard::scenarioMs() = now;
       logLine("[SCENARIO] manual control on");
+    }
+  }
+
+  // --- radio-loss scenario: a fake radio that goes silent mid-mission --------
+  // Stamps rcLastFrameMs like the real crsfTask does, which arms the radio
+  // failsafe. 10 s into the MISSION it stops -- the failsafe must bring the
+  // drone home (RTL) and land. Other scenarios never stamp it, so for them
+  // the radio failsafe stays inert.
+  if (sc == "rcloss") {
+    if (phase == PHASE_MISSION && !onboard::scenarioActed()) {
+      onboard::scenarioActed() = true;
+      onboard::scenarioMs() = now;
+    }
+    bool radioAlive = !onboard::scenarioActed() || now - onboard::scenarioMs() < 10000;
+    if (radioAlive) {
+      withMutex([&]() { shared.rcLastFrameMs = millis(); });
+    } else if (!onboard::scenarioDone()) {
+      onboard::scenarioDone() = true;
+      logLine("[SCENARIO] radio link cut");
     }
   }
 

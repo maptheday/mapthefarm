@@ -464,8 +464,14 @@ struct Trip_Manual {
   double anchorLat = 0.0;
   double anchorLon = 0.0;
   bool   anchored  = false;  // is an anchor currently dropped?
+  // Carried in from HOLD (and out again), so the failsafes know where home is.
+  // Zero if MANUAL was entered on the ground from PARKED (no launch point yet).
+  unsigned long armedAtMs = 0;
+  double        launchLat = 0.0;
+  double        launchLon = 0.0;
   Trip_Manual& operator=(const volatile Trip_Manual& o) {
     anchorLat=o.anchorLat; anchorLon=o.anchorLon; anchored=o.anchored;
+    armedAtMs=o.armedAtMs; launchLat=o.launchLat; launchLon=o.launchLon;
     return *this;
   }
 };
@@ -527,6 +533,7 @@ struct SharedState {
   Trip_Manual           trip_manual;
 
   RawSticks             sticks;   // latest RC stick input (real hardware only)
+  unsigned long         rcLastFrameMs = 0;   // when the last radio frame arrived (0 = never heard a radio)
 };
 
 // ----------------------------------------------------------------------------

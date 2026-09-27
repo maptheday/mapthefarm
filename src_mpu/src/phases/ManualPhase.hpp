@@ -23,6 +23,7 @@
 #include "../services/Motors.hpp"           // motors
 #include "../services/MotorController.hpp"  // motorController
 #include "../services/NavMath.hpp"          // gpsDistanceMeters, gpsBearing, bearingToNorthEast
+#include "../services/Failsafes.hpp"        // checkRadioFailsafe
 
 class ManualPhase : public IFlightPhase {
 public:
@@ -37,6 +38,9 @@ public:
     shared.cruise_manual.targetRollDeg    = 0.0f;
     shared.cruise_manual.targetPitchDeg   = 0.0f;
     shared.trip_manual.anchored           = false;  // no anchor until sticks are centered
+    shared.trip_manual.armedAtMs          = ctx.carriedArmedAtMs;  // keep "where is home"
+    shared.trip_manual.launchLat          = ctx.carriedLaunchLat;  // for the failsafes
+    shared.trip_manual.launchLon          = ctx.carriedLaunchLon;
     shared.dashboard_manual.m1            = 0.0f;
     shared.dashboard_manual.m2            = 0.0f;
     shared.dashboard_manual.m3            = 0.0f;
@@ -59,6 +63,9 @@ public:
       shared.dashboard_manual.pitch          = shared.raw.imu.gyroY;
       shared.dashboard_manual.yaw            = shared.raw.imu.gyroZ;
     });
+    // Manual skips the core failsafes (manual is manual), but with no radio
+    // there IS no pilot -- so the radio-loss check still applies here.
+    if (checkRadioFailsafe()) return;
 
     // throttle: 0..1 with 0.5 centered -> -1..1 deflection (up = climb).
     float climb   = deadband((s.throttle - 0.5f) * 2.0f) * MANUAL_CLIMB_RATE_FPS;

@@ -11,6 +11,7 @@
 #include "../services/Motors.hpp"           // motors
 #include "../services/MotorController.hpp"  // motorController
 #include "../services/Log.hpp"              // logLine
+#include "../services/Failsafes.hpp"        // checkRadioFailsafe
 #include "PhaseSwitch.hpp"                  // transitionTo
 
 class RaisePhase : public IFlightPhase {
@@ -42,6 +43,7 @@ public:
       shared.dashboard_raise.pitch          = shared.raw.imu.gyroY;
       shared.dashboard_raise.yaw            = shared.raw.imu.gyroZ;
     });
+    if (checkRadioFailsafe()) return;
 
     bool ready = false;
     withMutex([&]() {

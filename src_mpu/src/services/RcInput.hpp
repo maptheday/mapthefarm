@@ -100,8 +100,8 @@ inline uint16_t crsfChannel(const uint8_t* payload, int chIdx) {
 }
 
 inline void crsfTask(void* parameter) {
-  logLine("[CRSF] WARNING: CRSF_RX_PIN (GPIO" + String(CRSF_RX_PIN) + ") is a placeholder -- "
-          "verify it doesn't collide with EspESC.hpp's pins before first flight.");
+  logLine("[CRSF] Receiver on GPIO" + String(CRSF_RX_PIN) + " -- check your wiring matches "
+          "(ESCs use GPIO4-7, set in Motors.hpp).");
   Serial1.begin(CRSF_BAUD, SERIAL_8N1, CRSF_RX_PIN, -1 /* TX unused */);
   logLine("[CRSF] Listening -- sticks + START/STOP/MANUAL switches");
 
@@ -149,6 +149,7 @@ inline void crsfTask(void* parameter) {
           shared.sticks.pitch    = pitch;
           shared.sticks.yaw      = yaw;
           shared.sticks.throttle = throttle;
+          shared.rcLastFrameMs   = millis();   // the radio link is alive (Failsafes.hpp)
         });
 
         // STOP: level-triggered, highest priority -- any low frame cuts motors.

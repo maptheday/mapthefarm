@@ -10,6 +10,21 @@ const unsigned long NAV_LOOP_MS     = 100;
 const bool          CALIBRATE_COMPASS_ON_BOOT = false;
 const unsigned long COMPASS_CAL_DURATION_MS   = 30000;
 
+// ESCs: standard PWM (see EspPwmESC.hpp).
+// ESC calibration teaches the ESCs the throttle range (1000-2000 us). Do it once
+// when the ESCs are new: set true, flash, follow the prompts in the serial
+// monitor with PROPS OFF, then set back to false and flash again. While true,
+// the drone never flies -- it halts after calibrating.
+const bool CALIBRATE_ESCS_ON_BOOT = false;
+// Pulses per second sent to the ESCs. 400 suits multirotor ESCs (SimonK,
+// BLHeli). If the motors stutter or won't arm, some plane ESCs only accept 50.
+const int  ESC_PWM_HZ             = 400;
+
+// Bench test: a props-OFF checkout of the finished drone (see BenchTest.hpp).
+// Set true, flash, and use the serial monitor to spin each motor and watch the
+// sensors. While true, the drone never flies. Set back to false when done.
+const bool BENCH_TEST_ON_BOOT     = false;
+
 #if defined(SIM)
 // Mutable in sim so a test scenario can shorten the limit to trip a failsafe on
 // purpose (e.g. the timeout / geofence scenarios). On real hardware they're const.
@@ -20,6 +35,11 @@ const unsigned long MAX_FLIGHT_TIME_MS = 5UL * 60UL * 1000UL;
 const float         GEOFENCE_RADIUS_M  = 450.0f;   // must enclose the whole field
 #endif
 const unsigned long GPS_LOSS_ABORT_MS   = 3000;
+// Radio link loss: no radio frame for this long -> come home (see Failsafes.hpp).
+const unsigned long RC_LOSS_TIMEOUT_MS  = 1000;
+// ...unless we're this low (or have no GPS): then land in place instead, so a
+// link drop on the ground never starts a climb.
+const float         RC_LOSS_LAND_BELOW_FT = 5.0f;
 const float         RTL_ALTITUDE_FT     = 60.0f;
 const unsigned long RTL_SETTLE_MS       = 3000;   // hover this long over launch before landing
 // Hover throttle feed-forward: the altitude PID only trims deviations around
