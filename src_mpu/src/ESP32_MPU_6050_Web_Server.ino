@@ -147,6 +147,7 @@ void physicsTask(void* parameter) {
       shared.raw.imu.gyroX      = r.gyroX;
       shared.raw.imu.gyroY      = r.gyroY;
       shared.raw.imu.gyroZ      = r.gyroZ;
+      shared.raw.imu.yawRateDps = r.yawRateDps;
       shared.raw.imu.accX       = r.accX;
       shared.raw.imu.accY       = r.accY;
       shared.raw.imu.accZ       = r.accZ;

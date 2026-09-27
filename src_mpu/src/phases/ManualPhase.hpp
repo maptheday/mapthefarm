@@ -47,8 +47,10 @@ public:
     RawSticks     s;
     RawGpsReading gps;
     Trip_Manual   trip;
+    float         headingDeg;
     withMutex([&]() {
       s    = shared.sticks;
+      headingDeg = shared.raw.compassHeadingDeg;
       gps  = shared.raw.gps;
       trip = shared.trip_manual;
       shared.dashboard_manual.altitudeFt     = shared.raw.baroAltitudeFt;
@@ -83,8 +85,10 @@ public:
       float bearing = gpsBearing(gps.lat, gps.lon, trip.anchorLat, trip.anchorLon);
       float northM, eastM;
       bearingToNorthEast(distM, bearing, northM, eastM);
-      targetRoll  = motorController.eastNavigationCorrection(eastM, navDt);
-      targetPitch = motorController.northNavigationCorrection(northM, navDt);
+      float forwardM, rightM;   // world north/east -> the drone's own forward/right
+      northEastToForwardRight(northM, eastM, headingDeg, forwardM, rightM);
+      targetRoll  = motorController.rightNavigationCorrection(rightM, navDt);
+      targetPitch = motorController.forwardNavigationCorrection(forwardM, navDt);
     } else {
       // Manual lean (or hold disabled / no GPS fix): fly by the sticks and drop
       // the anchor, so we re-anchor to the new spot next time you center.
@@ -118,7 +122,7 @@ public:
 
     MotorMix mix = motorController.computeMotorMix(
       c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
-      r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, r.imu.gyroZ, dt);
+      r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, r.imu.yawRateDps, dt);
 
     motors.writeMix(mix);
 

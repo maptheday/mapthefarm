@@ -22,30 +22,34 @@ public:
       // Gentle, well-damped GPS navigation: a ±6 deg tilt cap so it doesn't slam
       // to full lean over long legs (which built too much speed and made it
       // overshoot/orbit each waypoint), with strong D to brake on approach.
-      navNorthPID(0.35f, 0.0f, 0.6f, -6.0f, 6.0f),
-      navEastPID(0.35f, 0.0f, 0.6f, -6.0f, 6.0f) {}
+      // Fed the nav error in the drone's OWN frame (forward/right metres, see
+      // northEastToForwardRight in NavMath.hpp): forward -> pitch, right -> roll.
+      navForwardPID(0.35f, 0.0f, 0.6f, -6.0f, 6.0f),
+      navRightPID(0.35f, 0.0f, 0.6f, -6.0f, 6.0f) {}
 
   void reset() {
     altitudePID.reset();
     rollPID.reset();
     pitchPID.reset();
     yawPID.reset();
-    navNorthPID.reset();
-    navEastPID.reset();
+    navForwardPID.reset();
+    navRightPID.reset();
   }
 
-  float northNavigationCorrection(float error, float dt) {
-    return navNorthPID.computeWithError(error, dt);
+  // error = metres to go AHEAD of the nose -> target pitch (deg)
+  float forwardNavigationCorrection(float error, float dt) {
+    return navForwardPID.computeWithError(error, dt);
   }
 
-  float eastNavigationCorrection(float error, float dt) {
-    return navEastPID.computeWithError(error, dt);
+  // error = metres to go to the drone's RIGHT -> target roll (deg)
+  float rightNavigationCorrection(float error, float dt) {
+    return navRightPID.computeWithError(error, dt);
   }
 
   MotorMix computeMotorMix(float targetAltFt, float targetRollDeg,
                            float targetPitchDeg, float yawTargetHeading,
                            float altFt, float roll, float pitch,
-                           float compassHeading, float gyroZ, float dt) {
+                           float compassHeading, float yawRateDps, float dt) {
     MotorMix out;
     // Hover feed-forward + PID trim: the baseline throttle holds the drone up,
     // the PID only corrects the error around it (much less integral windup and
@@ -69,8 +73,13 @@ public:
     if (yawError > 180.0f) yawError -= 360.0f;
     if (yawError < -180.0f) yawError += 360.0f;
 
+    // Rate damping: push against how fast we're already turning. This needs a
+    // RATE (deg/s, + = heading increasing), not the fused yaw angle -- feeding it
+    // the angle made the push scale with which way the nose pointed. The total is
+    // capped at the yaw PID's own +/-0.2 authority so yaw can never starve roll
+    // and pitch of motor range.
     float baseYawCorrection = yawPID.computeWithError(yawError, dt);
-    float yawCorrection = baseYawCorrection - (gyroZ * 0.02f);
+    float yawCorrection = constrain(baseYawCorrection - (yawRateDps * 0.02f), -0.2f, 0.2f);
 
     out.m1 = constrain(out.baseThrottle + out.pitchCorrection +
                        out.rollCorrection - yawCorrection, 0.0f, 1.0f);
@@ -88,8 +97,8 @@ private:
   PID rollPID;
   PID pitchPID;
   PID yawPID;
-  PID navNorthPID;
-  PID navEastPID;
+  PID navForwardPID;
+  PID navRightPID;
 };
 
 // The one MotorController instance (defined in the .ino).

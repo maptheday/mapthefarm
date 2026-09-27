@@ -26,12 +26,15 @@ struct RawImuReading {
   float gyroX = 0.0f;
   float gyroY = 0.0f;
   float gyroZ = 0.0f;
+  // Yaw RATE in deg/s (+ = heading increasing, i.e. clockwise seen from above).
+  // The one true rate in this struct: the gyroX/Y/Z fields above are angles.
+  float yawRateDps = 0.0f;
   float temp  = 0.0f;
 
   RawImuReading& operator=(const volatile RawImuReading& other) {
     accX = other.accX; accY = other.accY; accZ = other.accZ;
     gyroX = other.gyroX; gyroY = other.gyroY;
-    gyroZ = other.gyroZ; temp = other.temp;
+    gyroZ = other.gyroZ; yawRateDps = other.yawRateDps; temp = other.temp;
     return *this;
   }
 };

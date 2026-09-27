@@ -33,6 +33,21 @@ inline void bearingToNorthEast(float distM, float bearingDeg, float& northM, flo
   eastM  = distM * sin(rad);
 }
 
+// Turn a WORLD offset (north/east metres) into the drone's OWN frame
+// (forward/right metres), given its compass heading. GPS thinks in north/east,
+// but pitch moves the drone forward and roll moves it right -- so the nav error
+// must be rotated into the body frame before it becomes a lean. Each output is
+// the error projected onto that body direction (a dot product):
+//   forward is bearing h:       (cos h,  sin h) in (north, east)
+//   right   is bearing h + 90:  (-sin h, cos h)
+// At heading 0 (nose north) this is a no-op: forward = north, right = east.
+inline void northEastToForwardRight(float northM, float eastM, float headingDeg,
+                                    float& forwardM, float& rightM) {
+  float h = radians(headingDeg);
+  forwardM =  northM * cos(h) + eastM * sin(h);
+  rightM   = -northM * sin(h) + eastM * cos(h);
+}
+
 // Line-following "carrot" target (L1-style). Instead of flying straight at the
 // next waypoint -- which lets the drone cut to the INSIDE of each turn and bow
 // off the straight leg -- steer toward a point that rides ALONG the segment from

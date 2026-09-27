@@ -55,8 +55,10 @@ public:
       float eastM;
       bearingToNorthEast(distM, bearing, northM, eastM);
       withMutex([&]() {
-        shared.cruise_landing.targetRollDeg  = motorController.eastNavigationCorrection(eastM, navDt);
-        shared.cruise_landing.targetPitchDeg = motorController.northNavigationCorrection(northM, navDt);
+        float forwardM, rightM;   // world north/east -> the drone's own forward/right
+        northEastToForwardRight(northM, eastM, shared.raw.compassHeadingDeg, forwardM, rightM);
+        shared.cruise_landing.targetRollDeg  = motorController.rightNavigationCorrection(rightM, navDt);
+        shared.cruise_landing.targetPitchDeg = motorController.forwardNavigationCorrection(forwardM, navDt);
       });
     } else {
       withMutex([&]() {
@@ -92,7 +94,7 @@ public:
 
     MotorMix mix = motorController.computeMotorMix(
       c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
-      r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, r.imu.gyroZ, dt);
+      r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, r.imu.yawRateDps, dt);
 
     motors.writeMix(mix);
 

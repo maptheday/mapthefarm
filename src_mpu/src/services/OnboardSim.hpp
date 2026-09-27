@@ -21,9 +21,12 @@
 //   reported pitch = -quadsim_pitch        (stability: firmware +pitch = nose up)
 //   reported north = -quadsim_pos[0]       (QuadSim body-Forward faces world +x, so
 //   reported east  = -quadsim_pos[1]        the nav axes are swapped AND flipped)
-//   yaw is pinned to 0 in the sim; heading is fed toward the current target so
-//   the firmware's yaw controller stays quiet and the flat north->pitch /
-//   east->roll nav mapping holds.
+//   yaw is NOT free-flying: the sim turns the nose itself, toward the current
+//   target at up to SIM_YAW_RATE_DPS (standing in for a yaw loop that works),
+//   and reports that TRUE heading on the compass plus the true turn rate. So
+//   the firmware must rotate its north/east nav error into forward/right
+//   (northEastToForwardRight) to fly straight -- the sim now checks that.
+//   QuadSim yaw = +heading (validated on the laptop: every heading converges).
 //
 // It also drives the mission autonomously (fakes the START switch) and logs the
 // whole flight to LittleFS as CSV; DUMPLOG streams it back over USB.
@@ -74,6 +77,11 @@ inline File& logFile() { static File f; return f; }
 inline unsigned long& t0Ms()      { static unsigned long v = 0; return v; }
 inline unsigned long& lastStartMs(){ static unsigned long v = 0; return v; }
 inline unsigned long& lastLogMs()  { static unsigned long v = 0; return v; }
+
+// --- the nose: where it points now, and where the sim is turning it -----------
+static const float SIM_YAW_RATE_DPS = 90.0f;   // how fast the sim turns the nose
+inline float& yawDeg()     { static float v = 0.0f; return v; }  // compass heading, 0..360
+inline float& yawGoalDeg() { static float v = 0.0f; return v; }  // heading being turned toward
 
 // --- test-scenario state (set at boot by the SCENARIO: serial command) --------
 inline String& scenario()          { static String s = "full"; return s; }  // which test
@@ -143,8 +151,19 @@ inline void onboardSimStep(float dt) {
   quadsim::Multirotor& u = onboard::uav();
   u.step(m, dt);
 
-  // Pin yaw to 0: rebuild the quaternion from roll+pitch only, zero yaw rate,
-  // so the drone flies world-aligned and the flat nav mapping holds.
+  // Turn the nose toward the goal heading, the short way round (Lesson 4.7's
+  // wrap), no faster than SIM_YAW_RATE_DPS.
+  float turn = onboard::yawGoalDeg() - onboard::yawDeg();
+  if (turn > 180.0f)  turn -= 360.0f;
+  if (turn < -180.0f) turn += 360.0f;
+  float maxTurn = onboard::SIM_YAW_RATE_DPS * dt;
+  turn = constrain(turn, -maxTurn, maxTurn);
+  onboard::yawDeg() = fmodf(onboard::yawDeg() + turn + 360.0f, 360.0f);
+  float yawRate = turn / dt;                       // deg/s, + = heading increasing
+
+  // Pin yaw to that heading: rebuild the quaternion from roll, pitch and our
+  // heading, zero the physics' own yaw rate, so the nose is exactly where the
+  // compass says it is.
   float qr, qp, qy; u.rpyDeg(qr, qp, qy);
   // Stabilization scenario: hold an attitude disturbance (a gust that pins the
   // drone at ~22 deg roll) for a short window, then release and let the controller
@@ -155,8 +174,12 @@ inline void onboardSimStep(float dt) {
   if (kicking) qr = 22.0f;
   quadsim::State& s = u.mutableState();
   float hr = qr * DEG_TO_RAD * 0.5f, hp = qp * DEG_TO_RAD * 0.5f;
-  float cr = cosf(hr), sr = sinf(hr), cp = cosf(hp), sp = sinf(hp);
-  s.quat[0] = cr * cp; s.quat[1] = sr * cp; s.quat[2] = cr * sp; s.quat[3] = -sr * sp;
+  float hy = onboard::yawDeg() * DEG_TO_RAD * 0.5f;
+  float cr = cosf(hr), sr = sinf(hr), cp = cosf(hp), sp = sinf(hp), cy = cosf(hy), sy = sinf(hy);
+  s.quat[0] = cr * cp * cy + sr * sp * sy;   // standard roll-pitch-yaw -> quaternion
+  s.quat[1] = sr * cp * cy - cr * sp * sy;
+  s.quat[2] = cr * sp * cy + sr * cp * sy;
+  s.quat[3] = cr * cp * sy - sr * sp * cy;
   s.omega[2] = 0.0f;
   if (kicking) { s.omega[0] = 0.0f; s.omega[1] = 0.0f; }
 
@@ -176,7 +199,9 @@ inline void onboardSimStep(float dt) {
   withMutex([&]() {
     shared.raw.imu.gyroX = roll;   // fused roll  (Imu.hpp naming quirk)
     shared.raw.imu.gyroY = pitch;  // fused pitch
-    shared.raw.imu.gyroZ = 0.0f;   // yaw rate (pinned)
+    shared.raw.imu.gyroZ = onboard::yawDeg();    // fused yaw angle (naming quirk)
+    shared.raw.imu.yawRateDps = yawRate;         // the real turn rate
+    shared.raw.compassHeadingDeg = onboard::yawDeg();
     shared.raw.baroAltitudeFt = upFt;
     shared.raw.gps.lat       = lat;
     shared.raw.gps.lon       = lon;
@@ -187,8 +212,8 @@ inline void onboardSimStep(float dt) {
 }
 
 // ---------------------------------------------------------------------------
-// navTick (10 Hz): autonomously fly the mission (fake the START switch), keep
-// the compass heading pointed at the current target so yaw stays quiet, and
+// navTick (10 Hz): autonomously fly the mission (fake the START switch), aim
+// the nose at the current target (the step above turns it there), and
 // append one CSV sample to the flight log.
 // ---------------------------------------------------------------------------
 inline void onboardSimNav() {
@@ -268,7 +293,7 @@ inline void onboardSimNav() {
     logLine("[SCENARIO] ===SCENARIO_DONE===");
   }
 
-  // --- keep heading pointed at the current target so the yaw loop is quiet ---
+  // --- turn the nose toward the current target (onboardSimStep does the turning) ---
   double tgtLat = 0, tgtLon = 0; bool haveTgt = false;
   if (phase == PHASE_MISSION) {
     Waypoint w = getMissionWaypoint(wp, launchLat, launchLon);
@@ -278,7 +303,7 @@ inline void onboardSimNav() {
   }
   if (haveTgt) {
     float brg = gpsBearing(gps.lat, gps.lon, tgtLat, tgtLon);
-    withMutex([&]() { shared.raw.compassHeadingDeg = brg; });
+    onboard::yawGoalDeg() = brg;
   }
 
   // --- log one sample at ~10 Hz ---

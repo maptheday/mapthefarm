@@ -45,6 +45,12 @@ public:
     out.gyroX = filter_.getRoll();
     out.gyroY = filter_.getPitch();
     out.gyroZ = filter_.getYaw();
+    // Raw yaw rate, before the filter. The MPU6050's z axis points up when the
+    // board lies flat, so a positive gz is a counter-clockwise turn -- the
+    // opposite of compass heading, hence the minus. If the board is mounted
+    // upside down, drop the minus. (Bench check: turn the drone clockwise by
+    // hand; yawRateDps must read positive.)
+    out.yawRateDps = -gz;
     out.accX  = a.acceleration.x;
     out.accY  = a.acceleration.y;
     out.accZ  = a.acceleration.z;

@@ -377,7 +377,7 @@ A PID controller answers "target is X, actual is Y — how hard do I push?" usin
 #### [`MotorController.hpp`](src/services/MotorController.hpp)
 **ELI5:** the brain that turns "what I want" into "how much each of the 4 motors spins."
 
-Owns six PIDs (altitude, roll, pitch, yaw, and two for GPS navigation). Its main method, `computeMotorMix(...)`, takes the targets + current sensor readings and produces a `MotorMix`. The **mixing** is the clever bit: to climb, add throttle to all four; to roll, add to one side and subtract from the other; to yaw, speed up the diagonal pair. Those `m1..m4 = base ± pitch ± roll ± yaw` lines are how a quadcopter steers. It also exposes `northNavigationCorrection` / `eastNavigationCorrection` used by MISSION, RTL, and MANUAL's position hold.
+Owns six PIDs (altitude, roll, pitch, yaw, and two for GPS navigation). Its main method, `computeMotorMix(...)`, takes the targets + current sensor readings and produces a `MotorMix`. The **mixing** is the clever bit: to climb, add throttle to all four; to roll, add to one side and subtract from the other; to yaw, speed up the diagonal pair. Those `m1..m4 = base ± pitch ± roll ± yaw` lines are how a quadcopter steers. It also exposes `forwardNavigationCorrection` / `rightNavigationCorrection` used by MISSION, RTL, and MANUAL's position hold — fed the GPS error *after* it's rotated from north/east into the drone's own forward/right by `northEastToForwardRight` ([`NavMath.hpp`](#navmathhpp)). Yaw damping uses the real turn rate `yawRateDps`, and the total yaw push is capped at ±0.2 so yaw can never starve roll/pitch.
 
 #### [`Motors.hpp`](src/services/Motors.hpp)
 **ELI5:** the hands — the only code allowed to touch the 4 motors.
@@ -387,7 +387,7 @@ Wraps four `EspESC` drivers. `writeMix()` sends the four throttles; `disarmAll()
 #### [`NavMath.hpp`](src/services/NavMath.hpp)
 **ELI5:** the map math — "how far, which way, and how does that split into north/east?"
 
-Pure geometry, no state: `gpsDistanceMeters` (haversine distance), `gpsBearing` (which compass direction to fly), `bearingToNorthEast` (split a heading+distance into north and east meters), and `getMissionWaypoint` (fetch a waypoint, or hover over launch past the end). Used by MISSION, RTL, and MANUAL position hold.
+Pure geometry, no state: `gpsDistanceMeters` (haversine distance), `gpsBearing` (which compass direction to fly), `bearingToNorthEast` (split a heading+distance into north and east meters), `northEastToForwardRight` (rotate a north/east error into the drone's own forward/right using its compass heading), and `getMissionWaypoint` (fetch a waypoint, or hover over launch past the end). Used by MISSION, RTL, and MANUAL position hold.
 
 #### [`Failsafes.hpp`](src/services/Failsafes.hpp)
 **ELI5:** the safety net that every flying phase checks constantly.
@@ -402,7 +402,7 @@ Two layers: the **intent handlers** (`crsfHandleStart`, `crsfHandleStop`, `crsfH
 #### [`OnboardSim.hpp`](src/services/OnboardSim.hpp)
 **ELI5:** the flight simulator that runs *on the drone's own chip*. Sim builds only.
 
-This is what makes a `SIM` build fly. Each physics tick it takes the last motor command, advances the **QuadSim** physics library (a tiny standalone quad simulator in `lib/QuadSim/`), and writes the resulting attitude/altitude/GPS back into `shared.raw` as fake sensor readings — so the real controller flies against real physics at the real 200 Hz, all on the ESP. It also drives the mission autonomously (fakes the START switch), keeps the heading pointed at the current target so the yaw loop stays quiet, and logs the whole flight to LittleFS. The sign/frame mapping is documented at the top of the file (validated on the laptop first — see [section 8](#8-simulation--testing)).
+This is what makes a `SIM` build fly. Each physics tick it takes the last motor command, advances the **QuadSim** physics library (a tiny standalone quad simulator in `lib/QuadSim/`), and writes the resulting attitude/altitude/GPS back into `shared.raw` as fake sensor readings — so the real controller flies against real physics at the real 200 Hz, all on the ESP. It also drives the mission autonomously (fakes the START switch), turns the nose toward the current target (up to 90°/s) and reports that *true* heading and turn rate — so the firmware's north/east → forward/right rotation is exercised every flight — and logs the whole flight to LittleFS. The sign/frame mapping is documented at the top of the file (validated on the laptop first — see [section 8](#8-simulation--testing)).
 
 #### [`SimAdapter.hpp`](src/services/SimAdapter.hpp)
 **ELI5:** a tiny USB command listener for the sim. Sim builds only.
@@ -549,7 +549,7 @@ Because this code was largely AI-written, here are a few things a newcomer shoul
 
 - **The filename is misleading.** [`ESP32_MPU_6050_Web_Server.ino`](src/ESP32_MPU_6050_Web_Server.ino) has no web server. It's a stale name from an earlier version.
 - **`IESC.hpp` is not actually used as an interface.** [`EspESC`](src/hardware/EspESC.hpp) does *not* inherit from [`IESC`](src/hardware/IESC.hpp), and [`Motors`](src/services/Motors.hpp) uses `EspESC` directly. The interface documents intent (and the useful motor-layout diagram) but isn't wired in polymorphically. [`IBarometer`](src/hardware/IBarometer.hpp) *is* implemented by [`EspBarometer`](src/hardware/EspBarometer.hpp), but it too is used concretely, not through the interface.
-- **IMU field names are a little wrong.** In [`Imu.hpp`](src/services/Imu.hpp), the fused roll/pitch/yaw angles are stored in fields named `gyroX/gyroY/gyroZ`. They're angles, not raw gyro rates. This naming flows through the whole codebase.
+- **IMU field names are a little wrong.** In [`Imu.hpp`](src/services/Imu.hpp), the fused roll/pitch/yaw angles are stored in fields named `gyroX/gyroY/gyroZ`. They're angles, not raw gyro rates. This naming flows through the whole codebase. The one true rate is `yawRateDps` (deg/s, + = clockwise), which the yaw damping uses. Its sign assumes the MPU6050 is mounted flat and right side up; check it on the bench (turn the drone clockwise by hand → it should read positive).
 - **The altitude controller uses a hover feed-forward.** A baseline throttle (`HOVER_THROTTLE_FF` in [`FlightConfig.hpp`](src/state/FlightConfig.hpp)) holds the drone up and the altitude PID only trims around it — this replaced the old integral-windup-from-zero approach that made the height hunt up and down. Tune `HOVER_THROTTLE_FF` per airframe.
 - **Phases intentionally duplicate code.** The near-identical `physicsTick()` in each phase is a deliberate choice (full isolation, so one phase can't break another), not an oversight. Resist the urge to "DRY" them into a base class unless you really mean to change that design decision.
 - **The `#ifdef SIM` blocks matter.** When reading a file, notice which branch is the "real" one and which is the "sim" one; behavior genuinely differs (especially sensor input: real chips vs. the on-chip QuadSim physics).
