@@ -14,6 +14,7 @@
 #include "../services/MotorController.hpp"  // motorController
 #include "../services/NavMath.hpp"          // gpsDistanceMeters, gpsBearing, bearingToNorthEast
 #include "../services/Log.hpp"              // logLine
+#include "../services/Failsafes.hpp"        // checkBatteryFailsafe
 #include "PhaseSwitch.hpp"                  // transitionTo
 
 class RtlReturnPhase : public IFlightPhase {
@@ -47,6 +48,8 @@ public:
       shared.dashboard_rtlReturn.pitch          = shared.raw.imu.gyroY;
       shared.dashboard_rtlReturn.yaw            = shared.raw.imu.gyroZ;
     });
+    // Battery low on the way home (or while settling)? Land right here.
+    if (checkBatteryFailsafe()) return;
 
     float distM   = gpsDistanceMeters(gps.lat, gps.lon, trip.launchLat, trip.launchLon);
     float bearing = gpsBearing(gps.lat, gps.lon, trip.launchLat, trip.launchLon);

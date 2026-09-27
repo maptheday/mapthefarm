@@ -3,13 +3,15 @@
 // ============================================================================
 // FAILSAFES service -- the safety net every flying phase runs each nav tick.
 // Three independent checks, in priority order:
-//   1. Max flight time  -> force RTL
+//   1. Max flight time  -> LAND where it is (on a big field, flying home could
+//                          cost more battery than is left)
 //   2. Geofence breach  -> force RTL
 //   3. GPS fix lost      -> abort straight to LANDING (can't RTL without GPS)
 // It reads the shared state and, when a limit is hit, drives transitionTo().
 //
-// Plus a separate radio-link check, checkRadioFailsafe() (bottom of this file):
-//   radio silent for RC_LOSS_TIMEOUT_MS -> RTL (or LAND if low / no GPS).
+// Plus two separate checks at the bottom of this file:
+//   checkRadioFailsafe()   radio silent for RC_LOSS_TIMEOUT_MS -> RTL (or LAND if low / no GPS)
+//   checkBatteryFailsafe() battery WARNING or CRITICAL -> LAND where it is
 // ============================================================================
 
 #include "../state/PhaseState.hpp"
@@ -23,11 +25,16 @@ inline void checkCoreFailsafes(unsigned long armedAtMs, double launchLat, double
   bool tripRTL = false;
   TransitionReason rtlReason = REASON_NONE;
 
-  // 1. Max flight time
-  if (armedAtMs > 0 && (millis() - armedAtMs) >= MAX_FLIGHT_TIME_MS) {
-    logLine("[SAFETY] Max flight time reached — forcing RTL.");
-    tripRTL = true;
-    rtlReason = REASON_MAX_FLIGHT_TIME;
+  FlightPhase phase;
+  withMutex([&]() { phase = shared.phase; });
+
+  // 1. Max flight time -> land right here. The timer is a fuel gauge, and once
+  //    it runs out there may not be enough left to fly home across a big field.
+  if (armedAtMs > 0 && (millis() - armedAtMs) >= MAX_FLIGHT_TIME_MS &&
+      phase != PHASE_LANDING && phase != PHASE_LANDED) {
+    logLine("[SAFETY] Max flight time reached — landing here.");
+    transitionTo(PHASE_LANDING, REASON_MAX_FLIGHT_TIME);
+    return;
   }
 
   // 2. Geofence
@@ -56,9 +63,6 @@ inline void checkCoreFailsafes(unsigned long armedAtMs, double launchLat, double
     transitionTo(PHASE_LANDING, REASON_GPS_LOSS); // can't RTL without GPS
     return;
   }
-
-  FlightPhase phase;
-  withMutex([&]() { phase = shared.phase; });
 
   bool alreadyComingHome = phase == PHASE_RTL_CLIMB || phase == PHASE_RTL_RETURN ||
                            phase == PHASE_RTL_SETTLE || phase == PHASE_LANDING ||
@@ -114,6 +118,41 @@ inline bool checkRadioFailsafe() {
   } else {
     logLine("[SAFETY] Radio link lost — returning to launch.");
     transitionTo(PHASE_RTL_CLIMB, REASON_RC_LOST);
+  }
+  return true;
+}
+
+
+// ----------------------------------------------------------------------------
+// BATTERY -- the Battery service (Battery.hpp) watches three gauges: estimated
+// mAh used, filtered voltage, and (here, via checkCoreFailsafes) flight time.
+// As soon as it reports WARNING or CRITICAL, LAND WHERE WE ARE. Don't try to
+// fly home: on a big field, the trip back could cost more than is left.
+//
+// Called from every phase that's in the air: RAISE, HOLD, MISSION, MANUAL,
+// HOVER_SETTLE and the three RTL phases. Returns true if it changed phase.
+// ----------------------------------------------------------------------------
+inline bool checkBatteryFailsafe() {
+  uint8_t     state;
+  FlightPhase phase;
+  withMutex([&]() {
+    state = shared.raw.battery.state;
+    phase = shared.phase;
+  });
+
+  if (state == BATTERY_OK) return false;
+
+  bool airborne = phase == PHASE_RAISE || phase == PHASE_HOLD || phase == PHASE_MISSION ||
+                  phase == PHASE_MANUAL || phase == PHASE_HOVER_SETTLE ||
+                  phase == PHASE_RTL_CLIMB || phase == PHASE_RTL_RETURN || phase == PHASE_RTL_SETTLE;
+  if (!airborne) return false;   // on the ground, or already landing
+
+  if (state == BATTERY_CRITICAL) {
+    logLine("[SAFETY] Battery critical — landing here.");
+    transitionTo(PHASE_LANDING, REASON_BATTERY_CRITICAL);
+  } else {
+    logLine("[SAFETY] Battery low — landing here.");
+    transitionTo(PHASE_LANDING, REASON_BATTERY_LOW);
   }
   return true;
 }

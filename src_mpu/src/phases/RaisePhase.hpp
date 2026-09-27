@@ -44,6 +44,7 @@ public:
       shared.dashboard_raise.yaw            = shared.raw.imu.gyroZ;
     });
     if (checkRadioFailsafe()) return;
+    if (checkBatteryFailsafe()) return;
 
     bool ready = false;
     withMutex([&]() {

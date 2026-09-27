@@ -12,6 +12,7 @@
 #include "../services/MotorController.hpp"  // motorController
 #include "../services/NavMath.hpp"          // gpsDistanceMeters, gpsBearing, bearingToNorthEast
 #include "../services/Log.hpp"              // logLine
+#include "../services/Failsafes.hpp"        // checkBatteryFailsafe
 #include "PhaseSwitch.hpp"                  // transitionTo
 
 class HoverSettlePhase : public IFlightPhase {
@@ -44,6 +45,8 @@ public:
       shared.dashboard_hoverSettle.pitch          = shared.raw.imu.gyroY;
       shared.dashboard_hoverSettle.yaw            = shared.raw.imu.gyroZ;
     });
+    // Battery low on the way home (or while settling)? Land right here.
+    if (checkBatteryFailsafe()) return;
 
     // Actively hold over the spot where the mission ended (lean back to brake
     // off leftover momentum) instead of coasting away while we settle.

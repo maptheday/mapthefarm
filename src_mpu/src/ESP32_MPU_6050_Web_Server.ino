@@ -12,6 +12,7 @@
 #include "services/Gps.hpp"           // GPS receiver
 #include "services/Imu.hpp"           // accel/gyro + attitude filter
 #include "services/Altimeter.hpp"     // barometer height-above-ground
+#include "services/Battery.hpp"       // battery voltage + estimated mAh used
 #include "services/BenchTest.hpp"     // props-off bench checkout (real hardware only)
 #include "phases/IFlightPhase.hpp"
 #include "phases/PhaseRegistry.hpp"
@@ -59,6 +60,7 @@
 // .ino is the composition root).
 // ==========================================
 Motors          motors;          // the 4 ESCs
+Battery         battery;         // fuel gauge: voltage + estimated mAh
 MotorController motorController;  // PID + motor mixing
 Compass         compass;         // magnetometer + calibration
 Gps             gps;             // GPS receiver
@@ -157,6 +159,24 @@ void physicsTask(void* parameter) {
     withMutex([&]() { phase = shared.phase; });
 
     phaseFor(phase)->physicsTick(dt);
+
+    // Battery: filtered voltage, estimated current and mAh used, and the
+    // OK / WARNING / CRITICAL state the battery failsafe acts on.
+#if defined(SIM)
+    float packVolts = onboardSimPackVolts();   // the on-chip sim's fake LiFe pack
+#else
+    float packVolts = battery.readPackVolts(); // the real pack, through the divider
+#endif
+    battery.update(packVolts, motors.lastMix, dt);
+    RawBattery b = battery.reading();
+    withMutex([&]() {
+      shared.raw.battery.present   = b.present;
+      shared.raw.battery.packVolts = b.packVolts;
+      shared.raw.battery.cellVolts = b.cellVolts;
+      shared.raw.battery.amps      = b.amps;
+      shared.raw.battery.mAhUsed   = b.mAhUsed;
+      shared.raw.battery.state     = b.state;
+    });
     vTaskDelayUntil(&lastWakeTime, xFrequency);
   }
 }
@@ -185,6 +205,7 @@ void setup() {
   logLine("[COMPASS] QMC5883L ready.");
   gps.begin();
   motors.begin();
+  battery.begin();
   logLine("[ESC] PWM channels initialized, all motors stopped.");
   // One-time ESC range calibration (props off). Runs before the flight tasks
   // start, and halts when done -- see CALIBRATE_ESCS_ON_BOOT in FlightConfig.hpp.

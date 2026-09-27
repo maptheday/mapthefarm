@@ -32,18 +32,29 @@ inline void crsfHandleStop() {
 inline void crsfHandleStart() {
   FlightPhase phase;
   bool hasFix;
-  withMutex([&]() { phase = shared.phase; hasFix = shared.raw.gps.fix; });
+  RawBattery batt;
+  withMutex([&]() { phase = shared.phase; hasFix = shared.raw.gps.fix; batt = shared.raw.battery; });
 
   // LANDED re-arms like PARKED: motors are already confirmed off in both, so a
   // landed drone isn't "busy" -- it can fly again without a separate reset.
   if (phase == PHASE_PARKED || phase == PHASE_LANDED) {
     if (!hasFix) {
       logLine("[CRSF] START ignored -- no GPS fix.");
+    } else if (batt.state != BATTERY_OK) {
+      logLine("[CRSF] START ignored -- battery low. Swap in a charged pack.");
+    } else if (batt.present && batt.cellVolts < CELL_TAKEOFF_MIN_V) {
+      // Motors are off here, so this is the resting voltage.
+      logLine("[CRSF] START ignored -- battery too low to take off (" +
+              String(batt.cellVolts, 2) + " V/cell). Charge it first.");
     } else {
       logLine("[CRSF] START switch -- arming and taking off.");
       transitionTo(PHASE_RAISE, REASON_OPERATOR_START);
     }
   } else if (phase == PHASE_HOLD) {
+    if (batt.state != BATTERY_OK) {
+      logLine("[CRSF] START ignored -- battery low, not starting the mission.");
+      return;
+    }
     logLine("[CRSF] START switch -- starting waypoint mission.");
     transitionTo(PHASE_MISSION, REASON_OPERATOR_START);
   } else {

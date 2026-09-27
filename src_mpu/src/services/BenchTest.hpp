@@ -10,7 +10,8 @@
 //   1..4  spin ONE motor slowly for 2 seconds -- check it's the right corner
 //         and spinning the right direction (see the diagram in IESC.hpp)
 //   s     stream every sensor for 20 seconds -- tilt the drone by hand and
-//         check the numbers move the right way
+//         check the numbers move the right way (and read the battery voltage,
+//         to compare against a multimeter)
 // Real hardware only (no motors or sensors exist in a SIM build).
 // ============================================================================
 
@@ -22,6 +23,7 @@
 #include "Compass.hpp"                 // compass
 #include "Altimeter.hpp"               // altimeter
 #include "Gps.hpp"                     // gps
+#include "Battery.hpp"                 // battery
 
 #ifndef SIM
 
@@ -78,6 +80,7 @@ inline void benchStreamSensors() {
     lastMicros = now;
     imu.read(imuReading, dt);         // keep the attitude filter fed at ~100 Hz
     gps.read(gpsReading);             // keep the GPS parser fed
+    battery.update(battery.readPackVolts(), MotorMix{}, dt);   // motors off: idle current only
     if (millis() - lastPrint >= 500) {
       lastPrint = millis();
       logLine("roll " + String(imuReading.gyroX, 1) +
@@ -87,7 +90,11 @@ inline void benchStreamSensors() {
               "  | height " + String(altimeter.readAltitudeFt(), 1) + " ft" +
               "  | GPS " + (gpsReading.fix ? String(gpsReading.lat, 6) + ", " + String(gpsReading.lon, 6)
                                            : String("no fix")) +
-              " (" + gpsReading.sats + " sats)");
+              " (" + gpsReading.sats + " sats)" +
+              "  | battery " + (battery.reading().present
+                                   ? String(battery.reading().packVolts, 2) + " V (" +
+                                     String(battery.reading().cellVolts, 2) + " V/cell)"
+                                   : String("not detected")));
     }
     delay(10);
   }

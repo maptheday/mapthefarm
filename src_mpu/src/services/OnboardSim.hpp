@@ -83,6 +83,19 @@ static const float SIM_YAW_RATE_DPS = 90.0f;   // how fast the sim turns the nos
 inline float& yawDeg()     { static float v = 0.0f; return v; }  // compass heading, 0..360
 inline float& yawGoalDeg() { static float v = 0.0f; return v; }  // heading being turned toward
 
+// --- the fake flight pack: a 3S LiFePO4 that drains as the motors run ---------
+static const float SIM_CELL_RESISTANCE_OHM = 0.012f;   // sag per cell = amps × this
+inline float& chargeFrac() { static float v = 1.0f; return v; }   // TRUE charge left, 0..1
+inline float& packVolts()  { static float v = 0.0f; return v; }   // what the "divider" reads
+
+// LiFe resting voltage per cell vs. charge left: flat ~3.30-3.40 V for most of
+// the pack, then a cliff below 20% (see Lesson 4.1 of the battery course).
+inline float lifeRestCellVolts(float charge) {
+  if (charge >= 0.2f) return 3.30f + 0.10f * (charge - 0.2f) / 0.8f;
+  if (charge <= 0.0f) return 2.50f;
+  return 2.50f + 0.80f * (charge / 0.2f);
+}
+
 // --- test-scenario state (set at boot by the SCENARIO: serial command) --------
 inline String& scenario()          { static String s = "full"; return s; }  // which test
 inline bool& gpsLossFault()        { static bool b = false; return b; }      // drop GPS fix
@@ -99,7 +112,8 @@ inline unsigned long& scenarioMs() { static unsigned long v = 0; return v; } // 
 inline void onboardSimSetScenario(const String& s) {
   onboard::scenario() = s;
   if (s == "geofence") GEOFENCE_RADIUS_M  = 40.0f;     // shrink the fence -> trips soon after takeoff
-  if (s == "timeout")  MAX_FLIGHT_TIME_MS = 18000UL;   // ~18 s of flight -> max-time RTL
+  if (s == "timeout")  MAX_FLIGHT_TIME_MS = 18000UL;   // ~18 s of flight -> max-time landing
+  if (s == "lowbatt")  onboard::chargeFrac() = 0.25f;  // pack only 25% charged; the drone assumes full
   logLine(String("[SCENARIO] selected: ") + s);
 }
 
@@ -113,7 +127,7 @@ inline void onboardSimBegin() {
     onboard::logFile() = LittleFS.open(ONBOARD_LOG_PATH, "w");
     if (onboard::logFile()) {
       onboard::logFile().printf("# home_lat=%.6f home_lon=%.6f\n", ONBOARD_HOME_LAT, ONBOARD_HOME_LON);
-      onboard::logFile().println("t_s,phase,north_m,east_m,up_ft,roll_deg,pitch_deg,dist_m,wp");
+      onboard::logFile().println("t_s,phase,north_m,east_m,up_ft,roll_deg,pitch_deg,dist_m,wp,cell_v,mah_est");
       onboard::logFile().flush();
     }
     logLine("[ONBOARD] log open " ONBOARD_LOG_PATH);
@@ -135,6 +149,10 @@ inline void onboardSimBegin() {
   logLine("[ONBOARD] on-chip SITL ready -- autonomous flight.");
 }
 
+// The fake pack's voltage, as the divider would read it (fed to the Battery
+// service by the .ino in SIM builds, in place of the real ADC reading).
+inline float onboardSimPackVolts() { return onboard::packVolts(); }
+
 // ---------------------------------------------------------------------------
 // physicsTick (200 Hz): step the physics with the LAST commanded mix, then write
 // the resulting attitude / altitude / GPS back into shared.raw as fake sensors.
@@ -150,6 +168,15 @@ inline void onboardSimStep(float dt) {
 
   quadsim::Multirotor& u = onboard::uav();
   u.step(m, dt);
+
+  // Drain the fake pack with the same current model the firmware estimates
+  // with, then work out the voltage the divider would read (sagging under load).
+  float amps = CURRENT_IDLE_A + CURRENT_MOTOR_FULL_A *
+               (m[0]*m[0]*m[0] + m[1]*m[1]*m[1] + m[2]*m[2]*m[2] + m[3]*m[3]*m[3]);
+  onboard::chargeFrac() -= amps * dt / 3.6f / BATTERY_CAPACITY_MAH;
+  if (onboard::chargeFrac() < 0.0f) onboard::chargeFrac() = 0.0f;
+  onboard::packVolts() = BATTERY_CELLS *
+      (onboard::lifeRestCellVolts(onboard::chargeFrac()) - amps * onboard::SIM_CELL_RESISTANCE_OHM);
 
   // Turn the nose toward the goal heading, the short way round (Lesson 4.7's
   // wrap), no faster than SIM_YAW_RATE_DPS.
@@ -222,10 +249,12 @@ inline void onboardSimNav() {
 
   FlightPhase  phase;
   RawGpsReading gps;
-  float roll, pitch, upFt;
+  float roll, pitch, upFt, cellV, mAh;
   int   wp;
   double launchLat, launchLon;
   withMutex([&]() {
+    cellV = shared.raw.battery.cellVolts;
+    mAh   = shared.raw.battery.mAhUsed;
     phase = shared.phase;
     gps   = shared.raw.gps;
     roll  = shared.raw.imu.gyroX;
@@ -237,8 +266,9 @@ inline void onboardSimNav() {
   });
 
   const String sc = onboard::scenario();
-  // "full", "geofence", "timeout" and "rcloss" fly the real mission; the others act in HOLD.
-  const bool missionScenario = (sc == "full" || sc == "geofence" || sc == "timeout" || sc == "rcloss");
+  // "full", "geofence", "timeout", "rcloss" and "lowbatt" fly the real mission; the others act in HOLD.
+  const bool missionScenario = (sc == "full" || sc == "geofence" || sc == "timeout" ||
+                                sc == "rcloss" || sc == "lowbatt");
 
   // --- autostart: PARKED -> RAISE, then (mission scenarios) HOLD -> MISSION.
   // t>2500 leaves time for the SCENARIO: command to arrive before takeoff.
@@ -331,8 +361,8 @@ inline void onboardSimNav() {
     float north = (gps.lat - ONBOARD_HOME_LAT) * M_PER_DEG_LAT;
     float east  = (gps.lon - ONBOARD_HOME_LON) * (M_PER_DEG_LAT * cos(ONBOARD_HOME_LAT * DEG_TO_RAD));
     float dist  = sqrtf(north * north + east * east);
-    onboard::logFile().printf("%.2f,%s,%.1f,%.1f,%.1f,%.2f,%.2f,%.1f,%d\n",
-        t / 1000.0f, phaseName(phase), north, east, upFt, roll, pitch, dist, wp);
+    onboard::logFile().printf("%.2f,%s,%.1f,%.1f,%.1f,%.2f,%.2f,%.1f,%d,%.3f,%.0f\n",
+        t / 1000.0f, phaseName(phase), north, east, upFt, roll, pitch, dist, wp, cellV, mAh);
     if (phase == PHASE_LANDED) onboard::logFile().flush();
   }
 }

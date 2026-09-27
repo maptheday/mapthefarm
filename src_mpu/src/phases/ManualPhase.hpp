@@ -66,6 +66,7 @@ public:
     // Manual skips the core failsafes (manual is manual), but with no radio
     // there IS no pilot -- so the radio-loss check still applies here.
     if (checkRadioFailsafe()) return;
+    if (checkBatteryFailsafe()) return;
 
     // throttle: 0..1 with 0.5 centered -> -1..1 deflection (up = climb).
     float climb   = deadband((s.throttle - 0.5f) * 2.0f) * MANUAL_CLIMB_RATE_FPS;

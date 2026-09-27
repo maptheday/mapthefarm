@@ -158,7 +158,7 @@ The best way to learn the code is to follow what happens, in order, during a rea
 
 5. **Takeoff (RAISE).** [`RaisePhase`](src/phases/RaisePhase.hpp) slowly raises its *target altitude* from 0 to 15 ft. Each fast tick it calls the [`MotorController`](src/services/MotorController.hpp), which runs a PID and produces four motor numbers, handed to [`Motors`](src/services/Motors.hpp). When it reaches height, it switches to **HOLD**.
 
-6. **Hover (HOLD).** [`HoldPhase`](src/phases/HoldPhase.hpp) just holds altitude and waits. It also runs the **failsafes** ([`Failsafes.hpp`](src/services/Failsafes.hpp)) every tick — the safety net that forces a return-home if you fly too long, too far, or lose GPS.
+6. **Hover (HOLD).** [`HoldPhase`](src/phases/HoldPhase.hpp) just holds altitude and waits. It also runs the **failsafes** ([`Failsafes.hpp`](src/services/Failsafes.hpp)) every tick — the safety net that lands the drone if it flies too long or the battery runs low, brings it home if it flies too far or loses the radio, and lands it if it loses GPS.
 
 7. **You flip START again** → the mission begins. [`MissionPhase`](src/phases/MissionPhase.hpp) reads the waypoint list from [`FlightConfig.hpp`](src/state/FlightConfig.hpp), uses [`NavMath`](src/services/NavMath.hpp) to work out "how far and which way to the next point," tilts the drone to fly there, and advances through the list.
 
@@ -210,7 +210,8 @@ src/
 │   ├── MotorController.hpp         PIDs + motor mixing (targets → 4 motor numbers)
 │   ├── Motors.hpp                  the only thing that talks to the 4 ESCs
 │   ├── NavMath.hpp                 GPS geometry (distance, bearing, N/E split)
-│   ├── Failsafes.hpp               the safety net (timeout / geofence / GPS loss)
+│   ├── Failsafes.hpp               the safety net (timeout / geofence / GPS loss / radio loss / battery)
+│   ├── Battery.hpp                 fuel gauge: pack voltage + estimated mAh used → OK / WARNING / CRITICAL
 │   ├── RcInput.hpp                 the radio (CRSF/ELRS): sticks + switches
 │   ├── OnboardSim.hpp              sim-only: on-chip physics (QuadSim) + flight logging
 │   ├── SimAdapter.hpp              sim-only: the DUMPLOG serial command
@@ -351,7 +352,7 @@ Motors cut. START can re-arm from here.
 
 #### The RTL trio: [`RtlClimbPhase.hpp`](src/phases/RtlClimbPhase.hpp) · [`RtlReturnPhase.hpp`](src/phases/RtlReturnPhase.hpp) · [`RtlSettlePhase.hpp`](src/phases/RtlSettlePhase.hpp)
 **ELI5:** the "uh-oh, come home" autopilot — three ordinary phases, run back-to-back.
-A failsafe (max flight time / geofence) drops the drone into **RTL_CLIMB** (rise to `RTL_ALTITUDE_FT`), which hands off to **RTL_RETURN** (fly back over the launch point using the same GPS nav as MISSION), which hands off to **RTL_SETTLE** (hover for `RTL_SETTLE_MS` to bleed off momentum) → LANDING. Each is a normal, self-contained, individually-triggerable phase with its own `Dashboard_/Cruise_/Trip_` block — **not** a "phase inside a phase." The launch point is carried forward from one step to the next by `transitionTo()` (see the `case PHASE_RTL_CLIMB` / `case PHASE_RTL_RETURN` blocks in [`PhaseMachine.hpp`](src/phases/PhaseMachine.hpp)), exactly like the arm-time/launch-point carry between the normal flight phases.
+A failsafe (geofence, or radio loss) drops the drone into **RTL_CLIMB** (rise to `RTL_ALTITUDE_FT`), which hands off to **RTL_RETURN** (fly back over the launch point using the same GPS nav as MISSION), which hands off to **RTL_SETTLE** (hover for `RTL_SETTLE_MS` to bleed off momentum) → LANDING. Each is a normal, self-contained, individually-triggerable phase with its own `Dashboard_/Cruise_/Trip_` block — **not** a "phase inside a phase." The launch point is carried forward from one step to the next by `transitionTo()` (see the `case PHASE_RTL_CLIMB` / `case PHASE_RTL_RETURN` blocks in [`PhaseMachine.hpp`](src/phases/PhaseMachine.hpp)), exactly like the arm-time/launch-point carry between the normal flight phases.
 
 #### [`CalibratePhase.hpp`](src/phases/CalibratePhase.hpp)
 **ELI5:** ground maintenance — spin the drone around to teach the compass.
@@ -393,9 +394,15 @@ Pure geometry, no state: `gpsDistanceMeters` (haversine distance), `gpsBearing` 
 #### [`Failsafes.hpp`](src/services/Failsafes.hpp)
 **ELI5:** the safety net that every flying phase checks constantly.
 
-`checkCoreFailsafes(...)`, three checks in priority order: **max flight time** → force RTL; **geofence breach** (flew too far from launch) → force RTL; **GPS lost too long** → abort straight to LANDING (can't fly home blind). Called from HOLD, MISSION, and RTL's nav ticks. (Note: MANUAL deliberately does *not* run these — manual is manual, STOP is the safety.)
+`checkCoreFailsafes(...)`, three checks in priority order: **max flight time** → **land where it is** (on a big field, flying home could cost more battery than is left); **geofence breach** (flew too far from launch) → force RTL; **GPS lost too long** → abort straight to LANDING (can't fly home blind). Called from HOLD and MISSION. (Note: MANUAL deliberately does *not* run these — manual is manual, STOP is the safety.)
 
 Plus `checkRadioFailsafe()`: if no radio frame arrives for `RC_LOSS_TIMEOUT_MS` (1 s), the pilot's STOP/MANUAL switches can't reach the drone, so it comes home by itself: RTL, or LANDING if it's below `RC_LOSS_LAND_BELOW_FT` or has no GPS. Called from RAISE, HOLD, MISSION **and** MANUAL (with no radio there is no pilot, even in manual). It only arms once a radio has actually been heard, so it's inert in the sim unless the `rcloss` scenario fakes one.
+
+Plus `checkBatteryFailsafe()`: as soon as the [`Battery`](#batteryhpp) service reports **WARNING or CRITICAL**, the drone **lands where it is**, never flying home first. Called from every airborne phase (RAISE, HOLD, MISSION, MANUAL, HOVER_SETTLE, and the three RTL phases), so it also cuts a return-home short if the battery runs low on the way.
+
+#### [`Battery.hpp`](src/services/Battery.hpp)
+**ELI5:** the fuel gauge, modeled on INAV's battery code.
+Three independent gauges, because none is trustworthy alone: (1) **pack voltage**, read on GPIO 1 through a two-resistor divider and smoothed with a 1 Hz filter so throttle punches don't trip it; (2) **estimated mAh used**, from INAV's "virtual current sensor" idea: `amps ≈ CURRENT_IDLE_A + CURRENT_MOTOR_FULL_A × (m1³ + m2³ + m3³ + m4³)` (prop power grows with speed cubed), added up over time; and (3) the **flight-time limit** in `Failsafes.hpp`. The voltage and mAh gauges each give OK / WARNING / CRITICAL (with a small buffer so it doesn't flicker), and the worse one wins. For LiFePO4, whose voltage is flat until the end, the mAh estimate is the main gauge and voltage is the backup. The START switch also refuses to take off on a low pack. All thresholds live in [`FlightConfig.hpp`](#flightconfighpp). If the divider isn't wired, the voltage gauge is skipped and the other two still work. In SIM, [`OnboardSim`](#onboardsimhpp) supplies a fake LiFe pack that drains, sags, and has the voltage "cliff".
 
 #### [`RcInput.hpp`](src/services/RcInput.hpp)
 **ELI5:** the radio receiver — reads your transmitter's sticks and switches.
@@ -491,7 +498,8 @@ The scenario list is a simple array at the top of that script. Each one picks it
 | `field_patrol.py` | full flight: takeoff → whole fence line → land (also drives the Clover map) |
 | `geofence_breach.py` | fly past a shrunk fence → geofence failsafe forces RTL |
 | `gps_loss.py` | GPS fix drops → abort straight to LANDING (can't RTL blind) |
-| `max_timeout.py` | flight-time limit hit → RTL |
+| `max_timeout.py` | flight-time limit hit → lands where it is (no RTL) |
+| `low_battery.py` | pack only 25% charged → voltage gauge → lands where it is |
 | `rc_loss.py` | radio link cut mid-mission → radio failsafe → RTL → land |
 | `manual_flight.py` | MANUAL mode flies the drone on the sticks against the physics |
 | `stabilization.py` | a gust rolls it ~22° → the controller recovers to level |

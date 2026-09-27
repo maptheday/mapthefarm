@@ -104,7 +104,10 @@ def fly_and_pull(port, scenario="full", wait=320.0, verbose=True):
                         "north": float(north), "east": float(east),
                         "up": round(float(up_ft) / FT_PER_M, 1),   # meters
                         "roll": float(roll), "pitch": float(pitch),
-                        "dist": float(dist), "wp": int(wp), "heading": 0.0})
+                        "dist": float(dist), "wp": int(wp), "heading": 0.0,
+                        # battery columns (newer firmware logs them; older logs don't)
+                        "cell_v": float(f[9]) if len(f) > 10 else 0.0,
+                        "mah": float(f[10]) if len(f) > 10 else 0.0})
 
     corners = [{"n": n, "e": e} for (e, n) in (corner_en(la, lo) for (la, lo) in CORNERS_LATLON)]
     return {"home": {"lat": HOME_LAT, "lon": HOME_LON}, "geofence_m": GEOFENCE_M,

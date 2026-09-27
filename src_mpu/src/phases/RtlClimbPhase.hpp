@@ -14,6 +14,7 @@
 #include "../services/MotorController.hpp"  // motorController
 #include "../services/NavMath.hpp"          // gpsDistanceMeters, gpsBearing, bearingToNorthEast
 #include "../services/Log.hpp"              // logLine
+#include "../services/Failsafes.hpp"        // checkBatteryFailsafe
 #include "PhaseSwitch.hpp"                  // transitionTo
 
 class RtlClimbPhase : public IFlightPhase {
@@ -51,6 +52,8 @@ public:
       shared.dashboard_rtlClimb.pitch          = shared.raw.imu.gyroY;
       shared.dashboard_rtlClimb.yaw            = shared.raw.imu.gyroZ;
     });
+    // Battery low on the way home (or while settling)? Land right here.
+    if (checkBatteryFailsafe()) return;
 
     // Climb IN PLACE: lean back toward the spot where RTL triggered to brake off
     // the mission's momentum, so we rise straight up instead of coasting away.

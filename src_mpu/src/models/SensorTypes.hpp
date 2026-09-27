@@ -55,15 +55,41 @@ struct RawGpsReading {
   }
 };
 
+// Battery health, from best to worst. WARNING or CRITICAL makes the battery
+// failsafe land the drone right where it is.
+enum BatteryState : uint8_t {
+  BATTERY_OK       = 0,
+  BATTERY_WARNING  = 1,
+  BATTERY_CRITICAL = 2
+};
+
+// The Battery service's latest view of the flight pack (see Battery.hpp).
+struct RawBattery {
+  bool    present   = false;   // a pack voltage is being measured (divider wired, pack plugged in)
+  float   packVolts = 0.0f;    // filtered pack voltage
+  float   cellVolts = 0.0f;    // filtered average voltage per cell
+  float   amps      = 0.0f;    // ESTIMATED current, from the motor commands
+  float   mAhUsed   = 0.0f;    // ESTIMATED charge used since the pack was plugged in
+  uint8_t state     = BATTERY_OK;
+
+  RawBattery& operator=(const volatile RawBattery& o) {
+    present = o.present; packVolts = o.packVolts; cellVolts = o.cellVolts;
+    amps = o.amps; mAhUsed = o.mAhUsed; state = o.state;
+    return *this;
+  }
+};
+
 struct RawSensors {
   RawImuReading imu;
   RawGpsReading gps;
+  RawBattery    battery;
   float compassHeadingDeg = 0.0f;
   float baroAltitudeFt = 0.0f;
 
   RawSensors& operator=(const volatile RawSensors& other) {
     imu = other.imu;
     gps = other.gps;
+    battery = other.battery;
     compassHeadingDeg = other.compassHeadingDeg;
     baroAltitudeFt = other.baroAltitudeFt;
     return *this;

@@ -29,9 +29,7 @@ public:
 
   // Push one computed mix to all 4 motors.
   void writeMix(const MotorMix& mix) {
-#ifdef SIM
-    lastMix = mix;   // on-chip SITL feeds this back into the QuadSim physics
-#endif
+    lastMix = mix;   // read by the battery estimate (and, in SIM, the physics)
 #ifndef SIM
     esc_[0].write(mix.m1);
     esc_[1].write(mix.m2);
@@ -44,9 +42,7 @@ public:
 
   // Cut all motors immediately (the 1000 us "stopped" pulse).
   void disarmAll() {
-#ifdef SIM
-    lastMix = MotorMix{};   // no thrust -> QuadSim rests on the ground
-#endif
+    lastMix = MotorMix{};   // motors stopped
 #ifndef SIM
     for (int i = 0; i < 4; i++) esc_[i].disarm();
 #endif
@@ -103,9 +99,8 @@ public:
 #endif
   }
 
-#ifdef SIM
-  MotorMix lastMix{};   // last mix commanded, read by the on-chip physics
-#endif
+  MotorMix lastMix{};   // last mix commanded: the battery's current estimate uses it,
+                        // and in SIM the on-chip physics flies on it
 
 private:
   EspPwmESC esc_[4]; // index 0=M1, 1=M2, 2=M3, 3=M4

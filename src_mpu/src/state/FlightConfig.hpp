@@ -35,6 +35,32 @@ const unsigned long MAX_FLIGHT_TIME_MS = 5UL * 60UL * 1000UL;
 const float         GEOFENCE_RADIUS_M  = 450.0f;   // must enclose the whole field
 #endif
 const unsigned long GPS_LOSS_ABORT_MS   = 3000;
+// ---- Battery monitoring (see Battery.hpp, modeled on INAV's battery.c) -------
+// The flight pack: 3S LiFePO4, 2100 mAh (Pulse). Voltages below are PER CELL.
+const int   BATTERY_CELLS         = 3;
+const float BATTERY_CAPACITY_MAH  = 2100.0f;
+// Capacity thresholds (the main gauge for LiFe, whose voltage is flat until the end).
+// WARNING or CRITICAL -> land where it is. Landing from 30 ft takes ~20 s, well
+// inside the 10% left between the two.
+const float BATTERY_WARNING_USED  = 0.70f;   // estimated 70% used
+const float BATTERY_CRITICAL_USED = 0.80f;   // estimated 80% used (the 80% rule)
+// Voltage thresholds (the backup, catches a pack that wasn't full or a bad estimate).
+// LiFe values, measured under load after the 1 Hz filter. Starting guesses: tune
+// them from real flight logs.
+const float CELL_WARNING_V        = 3.00f;
+const float CELL_CRITICAL_V       = 2.85f;
+const float CELL_TAKEOFF_MIN_V    = 3.25f;   // at rest; START is refused below this
+// Voltage divider: battery+ --[100k]--+--[22k]-- GND, junction -> BATTERY_ADC_PIN.
+// It shrinks the ~11 V pack to ~2 V, which the ESP32 can measure.
+#define     BATTERY_ADC_PIN         1
+const float BATTERY_DIVIDER_SCALE = 5.545f;  // (100k + 22k) / 22k. Fine-tune with a multimeter.
+// Virtual current sensor (INAV's idea): no current sensor on this drone, so the
+// current is estimated from the motor commands. A propeller's power grows with
+// speed cubed, so:  amps ≈ IDLE + MOTOR_FULL × (m1³ + m2³ + m3³ + m4³).
+// Tune CURRENT_MOTOR_FULL_A until the estimated mAh matches what the charger puts back.
+const float CURRENT_IDLE_A        = 0.3f;    // electronics only, motors stopped
+const float CURRENT_MOTOR_FULL_A  = 16.0f;   // one motor at full throttle
+
 // Radio link loss: no radio frame for this long -> come home (see Failsafes.hpp).
 const unsigned long RC_LOSS_TIMEOUT_MS  = 1000;
 // ...unless we're this low (or have no GPS): then land in place instead, so a

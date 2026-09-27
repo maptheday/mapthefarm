@@ -24,7 +24,8 @@ SCENARIOS=(
     "field_patrol.py"      # full flight: takeoff -> whole fence line -> land (drives the Clover map)
     "geofence_breach.py"   # fly past the fence -> RTL
     "gps_loss.py"          # GPS drops -> abort straight to LANDING
-    "max_timeout.py"       # flight-time limit hit -> RTL
+    "max_timeout.py"       # flight-time limit hit -> land where it is
+    "low_battery.py"       # pack only 25% charged -> voltage gauge -> land where it is
     "rc_loss.py"           # radio link lost mid-mission -> RTL -> land
     "manual_flight.py"     # MANUAL mode flies the drone on the sticks
     "stabilization.py"     # a gust rolls it ~22 deg -> recovers to level

@@ -454,7 +454,7 @@ The bigger question is whether voltage tells you how much is **left**. That depe
 | Sag under hard throttle | small | **large** | small–medium | medium |
 | Best fuel gauge | voltage + timer | voltage + timer | **timer + "mAh the charger put back"** | timer |
 
-🔋 **Your pack:** trust the **flight timer** (your firmware's `MAX_FLIGHT_TIME_MS`) and the **mAh your charger puts back** after each flight. That number tells you how much the flight really used.
+🔋 **Your pack:** trust the **flight timer**, the firmware's **estimated mAh**, and the **mAh your charger puts back** after each flight. The charger's number is the truth: use it to check (and tune) the firmware's estimate. The firmware also watches voltage, but only as a backup, since for LiFe it only moves at the very end.
 
 **Takeaway:** *Voltage sags under load. For LiPo and Li-ion it works as a fuel gauge; for your LiFe it's flat until the cliff, so trust the timer and the charger's mAh.*
 
@@ -472,7 +472,12 @@ The bigger question is whether voltage tells you how much is **left**. That depe
  flight time:     1.68 Ah ÷ 13 A ≈ 7.7 minutes → call it 6–8 minutes
 ```
 
-Your firmware doesn't measure battery voltage. Its protection is the **5-minute flight limit** (`MAX_FLIGHT_TIME_MS`), which fits inside one pack with margin. **Leave it at 5 minutes** unless your charger shows you're consistently putting back well under 1680 mAh.
+Your firmware watches the battery with **three gauges**, the same way INAV (a popular open-source flight controller) does:
+1. **Estimated mAh used**, worked out from the motor commands (the main gauge for LiFe).
+2. **Pack voltage**, smoothed so throttle punches don't trip it (the backup: it catches a pack that wasn't full).
+3. **The flight timer** (`MAX_FLIGHT_TIME_MS`, **5 minutes**), which fits inside one pack with margin.
+
+As soon as any of them says "low", the drone **lands right where it is**. It doesn't try to fly home, because on a big field the trip back could cost more than is left. **Leave the timer at 5 minutes** until your charger's numbers show you're consistently putting back well under 1680 mAh.
 
 A good habit: after each flight write down the **flight time**, and after charging, **the mAh the charger put back in**.
 

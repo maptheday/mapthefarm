@@ -13,6 +13,7 @@
 #include "../services/MotorController.hpp"  // motorController
 #include "../services/NavMath.hpp"          // gpsDistanceMeters, gpsBearing, bearingToNorthEast
 #include "../services/Log.hpp"              // logLine
+#include "../services/Failsafes.hpp"        // checkBatteryFailsafe
 #include "PhaseSwitch.hpp"                  // transitionTo
 
 class RtlSettlePhase : public IFlightPhase {
@@ -48,6 +49,8 @@ public:
       shared.dashboard_rtlSettle.pitch          = shared.raw.imu.gyroY;
       shared.dashboard_rtlSettle.yaw            = shared.raw.imu.gyroZ;
     });
+    // Battery low on the way home (or while settling)? Land right here.
+    if (checkBatteryFailsafe()) return;
 
     // Actively hold over the launch pad while settling: lean back toward it to
     // brake off any leftover momentum, instead of going level and coasting away

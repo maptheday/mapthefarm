@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-ON-ESP scenario: MAX FLIGHT TIME -> RTL.
+ON-ESP scenario: MAX FLIGHT TIME -> LAND WHERE IT IS.
 
 Boot-selects the `timeout` scenario, which shortens the max-flight-time limit to
 ~18 s. The drone takes off and starts the mission; when the clock runs out the
-failsafe must force Return-To-Launch and land. (Replaces edge_max_flight_timeout.)
+failsafe must land right there -- NOT fly home, because on a big field the trip
+back could cost more battery than is left. (Replaces edge_max_flight_timeout.)
 """
 import argparse, sys
 import esp_sim
@@ -16,14 +17,15 @@ def run(args):
     if not s:
         print("[timeout] NO SAMPLES -- is the `sim` build flashed?"); return 1
     phases = list(dict.fromkeys(x["phase"] for x in s))
-    # when did RTL start?
-    rtl_t = next((x["t"] for x in s if x["phase"].startswith("RTL")), None)
-    print(f"[timeout] phases: {' -> '.join(phases)}   RTL began at "
-          f"{'%.0fs' % rtl_t if rtl_t is not None else 'never'}")
+    # when did the landing start?
+    land_t = next((x["t"] for x in s if x["phase"] == "LANDING"), None)
+    print(f"[timeout] phases: {' -> '.join(phases)}   LANDING began at "
+          f"{'%.0fs' % land_t if land_t is not None else 'never'}")
     esp_sim.save(data, args.out)
-    # RTL should trigger from the time limit (~18 s in), then land.
-    ok = (rtl_t is not None and rtl_t >= 15.0 and "LANDED" in phases)
-    print("[timeout] " + ("PASS (max flight time -> RTL -> landed)" if ok else "FAIL"))
+    # The time limit (~18 s in) should land it right there: no RTL at all.
+    ok = (land_t is not None and land_t >= 15.0 and "LANDED" in phases
+          and not any(p.startswith("RTL") for p in phases))
+    print("[timeout] " + ("PASS (max flight time -> landed where it was)" if ok else "FAIL"))
     return 0 if ok else 1
 
 

@@ -36,6 +36,7 @@ Change ☐ to ✅ as things arrive.
 | ☐ | ELRS 2.4 GHz receiver | [AliExpress](https://s.click.aliexpress.com/e/_c2Q2zSAx) | ~$10 | Outputs CRSF, which is what `RcInput.hpp` reads. |
 | ☐ | **2×** 3S 2100 mAh **LiFePO4** batteries | [Pulse 2100mAh 3S 9.9V 25C LiFePO4, XT60 (Boomerang RC Jets, Indiana)](https://www.boomerangrcjets.com/products/pulse-2100mah-3s-9-9v-25c-receiver-lifepo4-battery-xt60-connector) | $39.99 each | **The safer battery chemistry** (see the safety section). 168 g, XT60 + balance lead, 25C (≈52 A, plenty). About 6–8 minutes of flying per pack, so two packs = two flights per charge session. Cheaper alternative when in stock: [Liperior 3S 2100 LiFePO4](https://rcbattery.com/liperior-2100mah-3s-25c-9-9v-lifepo4-receiver-battery-pack-with-xt60-plug.html), $23.99. *(Replaces his 3S 5000 mAh LiPo.)* |
 | ☐ | 5V UBEC (optional) | [Readytosky 5V/3A, Amazon](https://www.amazon.com/Readytosky-Module-Adjustable-Switchable-Quadcopter/dp/B083HVVBR2) or AliExpress | ~$6 | **Probably not needed:** the Readytosky ESCs have a built-in 5V BEC. **Wiring rule if you use the ESC's BEC:** each ESC's 3-wire signal plug has a red 5V wire. Connect the red wire from **only one** ESC to the ESP32's 5V pin, and pull the red wire out of the other three plugs (tape it back). Four BECs tied together can fight each other. The ground (black/brown) and signal (white/yellow) wires from all four still connect. Buy the UBEC only if you'd rather keep the electronics' power separate. |
+| ☐ | Battery-sense resistors: **100 kΩ** and **22 kΩ**, 1/4 W (one of each) | any electronics store, or a resistor assortment kit (~$10 for hundreds) | ~$1 | Lets the ESP32 read the battery voltage (the "voltage divider" in Stage 4). Optional: a **0.1 µF** ceramic capacitor steadies the reading. |
 | ✅ | ESP32-S3 dev board | already owned | — | The brain: runs your firmware. |
 | ✅ | MPU6050 | already owned | — | Tilt sensor. Exactly what `Imu.hpp` uses. |
 | ✅ | BME280 | already owned | — | Height sensor. Exactly what the barometer code uses. |
@@ -51,7 +52,7 @@ Change ☐ to ✅ as things arrive.
 | ☐ | Soldering iron | [Pinecil (AliExpress)](https://s.click.aliexpress.com/e/_okrM6IL) | ~$40 | Skip if you have a temperature-controlled iron. |
 | ☐ | M3 standoffs + screws | [standoffs](https://www.aliexpress.us/item/3256803016697405.html), [thin-head screws](https://www.aliexpress.us/item/3256806779956979.html) (AliExpress) | ~$10 | For mounting the ESP32 and sensors. |
 | ☐ | Battery bag (sold as a "LiPo bag"; works for LiFe) | Amazon / AliExpress | ~$10 | See the safety section. |
-| ☐ | Cell checker with buzzer | Amazon / AliExpress | ~$6 | Your fuel gauge: the firmware doesn't watch battery voltage. |
+| ☐ | Cell checker | Amazon / AliExpress | ~$6 | Checks each cell before and after flights. The firmware watches the pack too (see the battery monitor below), but only the total, not each cell. |
 | ☐ | Smoke stopper (XT60) | Amazon / AliExpress | ~$8 | For the first power-up after soldering. |
 | ☐ | Small ABC fire extinguisher | hardware store | ~$20 | For the field (see "At the field"). |
 
@@ -65,9 +66,11 @@ I can make all of these when you're ready:
 2. ✅ **One-time ESC calibration (done, you run it once).** With **props off**: set `CALIBRATE_ESCS_ON_BOOT = true` in `FlightConfig.hpp`, flash, open the serial monitor (115200), and follow the prompts (type `GO`, plug in the battery, type `MIN` after the beep-beep). It halts when finished. Then set it back to `false` and flash again.
 3. ✅ **Bench-test mode (done).** `BENCH_TEST_ON_BOOT` in `FlightConfig.hpp`: spin one motor at a time and stream every sensor, props off. Used in Stage 6 of the build guide.
 4. ✅ **Motor spin directions fixed (done).** The old diagram in `IESC.hpp` had the directions backward for how the mixer steers yaw, which would have made yaw control push the wrong way. Build with **M1 + M4 clockwise, M2 + M3 counter-clockwise** (the guide's Stage 2).
-5. **Quick check that your BME280 is genuine.** Cheap "BME280" boards are sometimes relabeled BMP280s. If yours is one, the code stops at boot with a barometer error. It's easy to test by reading the chip's ID over I2C (0x60 = BME280, 0x58 = BMP280). If it turns out to be a BMP280, it still works fine; it just needs a small library change.
-6. **GPS check when it arrives.** M100-class GPS modules often run at **38400** baud (your code says 9600: `GPS_BAUD` in `FlightConfig.hpp`). The compass is usually a **QMC5883L**, which your code expects, but some newer modules use a **QMC5883P**, a different chip that would need a different library. Check the listing or the chip marking.
-7. **Update the sim thrust** once you weigh the real drone. The size already matches.
+5. ✅ **Battery monitor (done, modeled on INAV).** `Battery.hpp` watches three gauges: **estimated mAh used** (from the motor commands; the main gauge for LiFe), **pack voltage** through the two resistors (the backup), and the **flight timer**. START refuses to take off on a low pack. Settings live in `FlightConfig.hpp` under "Battery monitoring".
+6. ✅ **Low battery or time's up → land where it is (done).** The battery failsafe and the flight-time limit both **land right there** instead of flying home: on a big field, the trip back could cost more than is left. Geofence and radio loss still come home.
+7. **Quick check that your BME280 is genuine.** Cheap "BME280" boards are sometimes relabeled BMP280s. If yours is one, the code stops at boot with a barometer error. It's easy to test by reading the chip's ID over I2C (0x60 = BME280, 0x58 = BMP280). If it turns out to be a BMP280, it still works fine; it just needs a small library change.
+8. **GPS check when it arrives.** M100-class GPS modules often run at **38400** baud (your code says 9600: `GPS_BAUD` in `FlightConfig.hpp`). The compass is usually a **QMC5883L**, which your code expects, but some newer modules use a **QMC5883P**, a different chip that would need a different library. Check the listing or the chip marking.
+9. **Update the sim and hover throttle** once you weigh the real drone: tell me the weight, and I'll set the sim's airframe and `HOVER_THROTTLE_FF` (about 0.59 expected).
 
 ## 🛠️ Build guide: from boxes to first flight
 
@@ -180,6 +183,18 @@ Here's where every wire goes. **"TX goes to RX":** a device *talks* on its TX pi
 | GPS | VCC / GND | **5V** / **GND** | check the listing says 5V is OK (most say 3.3–5V) |
 | Receiver | TX | **GPIO 8** | your sticks and switches |
 | Receiver | 5V / GND | **5V** / **GND** | |
+| Battery + (a spare + pad on the bottom plate) | through the **100 kΩ** resistor | **GPIO 1** | battery voltage (see below) |
+| GPIO 1 | through the **22 kΩ** resistor | **GND** | completes the divider |
+
+**🧸 The voltage divider (battery sensing).** The battery is up to ~11 V, but an ESP32 pin can only handle about 3 V: connecting the battery straight to a pin would destroy the ESP32. Two resistors in a row act like a ramp that scales the voltage down. The pin sits at the point where the voltage is about 1/5.5 of the battery's (~2 V).
+
+```text
+  battery + ──[ 100 kΩ ]──●──[ 22 kΩ ]── GND
+                          │
+                       GPIO 1   (reads ~2 V when the pack is at 11 V)
+```
+
+⚠️ Double-check which resistor is which before soldering (read the color bands or measure with a multimeter): the **100 kΩ** goes on the **battery** side. Swapped, the pin would see ~9 V and the ESP32 would be damaged. The optional 0.1 µF capacitor goes from GPIO 1 to GND, next to the 22 kΩ.
 
 **🧸 The I2C bus** is like a party line: three sensors share the same two wires (SDA carries the data, SCL keeps the beat), and each answers to its own address. That's why SDA and SCL appear three times. A small piece of perf board with a row for SDA, a row for SCL, a row for 3V3, and a row for GND makes this tidy.
 
@@ -192,6 +207,7 @@ Here's where every wire goes. **"TX goes to RX":** a device *talks* on its TX pi
 1. **USB only first.** Plug the ESP32 into your laptop and open the serial monitor (115200). You should see the startup messages, including `[ESC] PWM channels initialized`. If the drone halts with an IMU, compass, or barometer error, recheck that sensor's four wires. (A barometer error could also mean your "BME280" is really a BMP280.)
 2. **Battery, through the smoke stopper.** Plug in the battery with the smoke stopper in between. If its bulb glows bright and stays bright, **unplug at once** and look for a short. A quick flash is normal.
 3. The ESCs play a startup tune. That's good: it means they're getting power *and* a signal.
+4. The serial monitor should show `[BATTERY] Connected: …` with roughly **10–11 V** (about 3.3–3.6 V per cell). If it doesn't appear, check the two divider resistors.
 
 ---
 
@@ -223,21 +239,77 @@ Each step below is a flag in [`FlightConfig.hpp`](src/state/FlightConfig.hpp): s
 
    ✅ With props off and the battery in, flip STOP down: the log should show the stop, and nothing can spin until it's back up.
 
+7. **☐ Battery voltage calibration** (bench test `s`): the stream shows the battery voltage. Measure the pack with a multimeter at the XT60 plug at the same time. If the two differ, adjust `BATTERY_DIVIDER_SCALE` in `FlightConfig.hpp`:
+
+   ```text
+   new scale = old scale × (multimeter volts ÷ volts shown)
+   e.g. 5.545 × (10.80 ÷ 10.62) = 5.639
+   ```
+   Flash again and recheck: they should agree within about 0.05 V.
+8. **☐ Check the mission's waypoints** in `FlightConfig.hpp` (`WAYPOINTS`) are the field you'll fly, and that `GEOFENCE_RADIUS_M` covers the whole field. Launch from near the first corner. The drone flies to fixed GPS points, wherever you launch from.
+9. **☐ Update the sim to your drone:** weigh the finished drone with the battery, and tell me the weight. I'll set the sim's airframe and `HOVER_THROTTLE_FF`.
+10. **☐ Run the full sim suite** (`./simulate/run_hil.sh`, sim build flashed): all 8 scenarios should PASS before the first real flight. Then flash the real build (`esp32dev`) again.
+
 ---
 
 ### Stage 7 — Props on, first flights
 
-1. **Props:** each prop has a direction. The thicker, rounded edge must **lead**, cutting into the air in the spin direction, and the curved (scooped) side faces **up**. Put CW props on M1/M4 and CCW props on M2/M3. Tighten the nuts firmly.
-2. **First hover: tethered.** Tie the drone to something heavy with a short rope (a cinder block works), in an open area. Finger on the **STOP** switch the whole time.
-3. **Watch for:**
-   - Spins in circles → yaw direction problem. **STOP**, then tell me.
-   - Flips over immediately on takeoff → a motor in the wrong corner or spinning backward. **STOP**, then redo Stage 6.
-   - Sinks or shoots up → hover throttle is off. Adjust `HOVER_THROTTLE_FF` (about 0.59 expected).
-4. **Only after several calm tethered hovers:** untethered low hovers, then short missions in the field. Follow the "At the field" rules below.
+**Before every flight (a 1-minute checklist):**
 
-> **If the radio link drops** (out of range, radio battery dies): after 1 second of silence the drone **comes home and lands by itself** (RTL). If it's lower than 5 ft or has no GPS, it **lands where it is** instead. Test it once on the tether, hovering **below 5 ft** (so it lands instead of climbing 60 ft against the rope): switch the radio off, and within about a second it should start landing. Switch the radio back on right away so STOP works again.
+- ☐ Freshly charged pack: the cell checker shows ~3.4–3.6 V per cell, all about equal
+- ☐ Props on the right motors (see below), nuts tight
+- ☐ STOP switch **UP**, MANUAL **down**, START **down**
+- ☐ **Plug in the battery at the launch spot and keep the drone still** for ~5 seconds. At power-up the barometer sets "ground = 0 ft" and the sensors settle, so don't power it up in the truck and carry it over.
+- ☐ GPS: wait until it has a fix (the START switch is ignored until it does)
+- ☐ Fire extinguisher nearby; green grass or dirt; nobody within 30 m
+
+**Step 1 — Props.** Each prop has a direction. The thicker, rounded edge must **lead**, cutting into the air in the spin direction, and the curved (scooped) side faces **up**. Put CW props on M1/M4 and CCW props on M2/M3.
+
+**Step 2 — First hovers: tethered, in MANUAL.** Tie the drone to something heavy with a short rope (a cinder block works). Flip **MANUAL** on while it's on the ground, then raise the throttle stick gently: in MANUAL the throttle stick sets the climb speed. Lift it 2–3 ft, hold, then lower the stick to come back down. Finger on **STOP** the whole time. (Don't use START on the tether: it climbs to 15 ft by itself.)
+
+Watch for:
+- Spins in circles → yaw direction problem. **STOP**, then tell me.
+- Flips over the moment it lifts → a motor in the wrong corner or spinning backward. **STOP**, then redo Stage 6.
+- Needs a lot of stick to lift, or leaps up → hover throttle is off. Adjust `HOVER_THROTTLE_FF`.
+
+**Step 3 — Radio-loss test on the tether.** Hover **below 5 ft**, then switch the radio off. Within about a second the drone should start landing by itself (below 5 ft it lands in place instead of trying to fly home). Switch the radio back on right away so STOP works again.
+
+**Step 4 — First free hover.** No tether, open field. Flip **START**: the drone takes off to 15 ft and holds. Watch it for 30–60 seconds: does it stay put and level? **To come down:** flip MANUAL on and lower the throttle stick gently; once it's on the ground, flip STOP. (There's no "land" switch yet; that would be a good small addition.)
+
+**Step 5 — First mission.** From a hover, flip **START** again to fly the waypoints. Stay ready on STOP (for emergencies) or MANUAL (to take over).
+- ⚠️ The full fence-line mission takes roughly 4–5 minutes, close to the **5-minute flight limit**. If time runs out, the drone **lands wherever it is**, which could be far across the field. For the first missions, consider a shorter route: I can make a 2-waypoint version of `WAYPOINTS`.
+
+**What happens on its own (so it doesn't surprise you):**
+
+| Event | What the drone does |
+|---|---|
+| Flight time reaches 5 minutes | **lands where it is** |
+| Battery low (estimated 70% used, or voltage ≤ 3.0 V/cell) | **lands where it is** |
+| Battery critical (80% used, or ≤ 2.85 V/cell) | **lands where it is** (even if it was already heading home) |
+| Radio lost for 1 second | comes home and lands (lands in place if low, no GPS, or home unknown) |
+| Flies past the geofence | comes home and lands |
+| GPS lost for 3 seconds | lands where it is |
+| STOP switch down | motors cut instantly |
 
 ---
+
+### Stage 8 — After the first few flights: tune the fuel gauge
+
+The firmware **estimates** how much battery it has used from the motor commands. After a few real flights, check the estimate against the truth, which is **how many mAh the charger puts back**.
+
+1. After each flight, write down the **flight time** (minutes). After charging, write down the **mAh the charger put back**.
+2. Work out the real average current:
+   ```text
+   real amps = mAh put back × 60 ÷ (1000 × flight minutes)
+   e.g. 1150 mAh after a 5-minute flight → 1150 × 60 ÷ 5000 = 13.8 A
+   ```
+3. Work out what the firmware estimates while hovering, using your hover throttle (`HOVER_THROTTLE_FF`, say 0.59):
+   ```text
+   estimated amps = CURRENT_IDLE_A + CURRENT_MOTOR_FULL_A × 4 × throttle³
+                  = 0.3 + 16 × 4 × 0.59³ = 13.4 A
+   ```
+4. If they differ, scale `CURRENT_MOTOR_FULL_A`: `new = old × (real − 0.3) ÷ (estimated − 0.3)`. In the example: 16 × 13.5 ÷ 13.1 = 16.5.
+5. **Only then think about a longer flight time.** If 5-minute flights reliably put back less than about 1100 mAh (about half the pack), you could raise `MAX_FLIGHT_TIME_MS` a minute at a time. The battery gauges still land the drone at 70% used either way.
 
 ## Charging and safety (don't skip)
 
