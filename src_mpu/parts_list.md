@@ -62,15 +62,18 @@ Change ☐ to ✅ as things arrive.
 
 I can make all of these when you're ready:
 
-1. ✅ **PWM motor driver (done).** `EspPwmESC.hpp` sends standard PWM (1000–2000 µs, 400 times a second), which every ESC understands, so it works whether or not the ESCs support DShot. If the motors stutter or won't arm, try `ESC_PWM_HZ = 50` in `FlightConfig.hpp` (some plane ESCs only accept 50).
-2. ✅ **One-time ESC calibration (done, you run it once).** With **props off**: set `CALIBRATE_ESCS_ON_BOOT = true` in `FlightConfig.hpp`, flash, open the serial monitor (115200), and follow the prompts (type `GO`, plug in the battery, type `MIN` after the beep-beep). It halts when finished. Then set it back to `false` and flash again.
-3. ✅ **Bench-test mode (done).** `BENCH_TEST_ON_BOOT` in `FlightConfig.hpp`: spin one motor at a time and stream every sensor, props off. Used in Stage 6 of the build guide.
+1. ✅ **PWM motor driver (done).** `EspPwmESC.hpp` sends standard PWM (1000–2000 µs, 400 times a second), which every ESC understands, so it works whether or not the ESCs support DShot. If the motors stutter or won't arm, try `"escPwmHz": 50` in `data/flightsettings.json` (some plane ESCs only accept 50).
+2. ✅ **One-time ESC calibration (done, you run it once).** It's its own app: with **props off**, flash it (`pio run -e esc_calibration -t upload`), open the serial monitor (115200), and follow the prompts (type `GO`, plug in the battery, type `MIN` after the beep-beep).
+3. ✅ **Bench-test app (done).** `pio run -e bench_test -t upload`: spin one motor at a time and stream every sensor, props off. Used in Stage 6 of the build guide.
 4. ✅ **Motor spin directions fixed (done).** The old diagram in `IESC.hpp` had the directions backward for how the mixer steers yaw, which would have made yaw control push the wrong way. Build with **M1 + M4 clockwise, M2 + M3 counter-clockwise** (the guide's Stage 2).
-5. ✅ **Battery monitor (done, modeled on INAV).** `Battery.hpp` watches three gauges: **estimated mAh used** (from the motor commands; the main gauge for LiFe), **pack voltage** through the two resistors (the backup), and the **flight timer**. START refuses to take off on a low pack. Settings live in `FlightConfig.hpp` under "Battery monitoring".
+5. ✅ **Battery monitor (done, modeled on INAV).** `Battery.hpp` watches three gauges: **estimated mAh used** (from the motor commands; the main gauge for LiFe), **pack voltage** through the two resistors (the backup), and the **flight timer**. START refuses to take off on a low pack. Its settings are the `battery` section of `data/flightsettings.json`.
 6. ✅ **Low battery or time's up → land where it is (done).** The battery failsafe and the flight-time limit both **land right there** instead of flying home: on a big field, the trip back could cost more than is left. Geofence and radio loss still come home.
-7. **Quick check that your BME280 is genuine.** Cheap "BME280" boards are sometimes relabeled BMP280s. If yours is one, the code stops at boot with a barometer error. It's easy to test by reading the chip's ID over I2C (0x60 = BME280, 0x58 = BMP280). If it turns out to be a BMP280, it still works fine; it just needs a small library change.
-8. **GPS check when it arrives.** M100-class GPS modules often run at **38400** baud (your code says 9600: `GPS_BAUD` in `FlightConfig.hpp`). The compass is usually a **QMC5883L**, which your code expects, but some newer modules use a **QMC5883P**, a different chip that would need a different library. Check the listing or the chip marking.
-9. **Update the sim and hover throttle** once you weigh the real drone: tell me the weight, and I'll set the sim's airframe and `HOVER_THROTTLE_FF` (about 0.59 expected).
+7. ✅ **LAND switch (done).** Radio channel 8: flip it UP and the drone lands right where it is, from anything that's flying. The gentle way down (STOP cuts the motors, which drops it).
+8. ✅ **Short first-flight route (done).** The `first_mission` app flies 30 m out along the first leg of your route and straight back, at 20 ft (about 35 seconds). The `fly` app flies the full route.
+9. ✅ **Settings file and apps (done).** Everything tunable lives in **`data/flightsettings.json`** (like `appsettings.json` in C#), and each job is its own app: `fly`, `first_mission`, `bench_test`, `esc_calibration`, `compass_calibration`, `sim`. The flight controller itself has no settings or test modes. Put the settings on the drone with `pio run -e fly -t uploadfs`, and again whenever you change them.
+10. **Quick check that your BME280 is genuine.** Cheap "BME280" boards are sometimes relabeled BMP280s. If yours is one, the code stops at boot with a barometer error. It's easy to test by reading the chip's ID over I2C (0x60 = BME280, 0x58 = BMP280). If it turns out to be a BMP280, it still works fine; it just needs a small library change.
+11. **GPS check when it arrives.** M100-class GPS modules often run at **38400** baud (your settings say 9600: `"gpsBaud"` in `data/flightsettings.json`). The compass is usually a **QMC5883L**, which your code expects, but some newer modules use a **QMC5883P**, a different chip that would need a different library. Check the listing or the chip marking.
+12. **Update the sim and hover throttle** once you weigh the real drone: tell me the weight, and I'll set the sim's airframe and `"hoverThrottle"` (about 0.59 expected).
 
 ## 🛠️ Build guide: from boxes to first flight
 
@@ -83,6 +86,28 @@ I can make all of these when you're ready:
 3. **Smoke stopper** between battery and drone for the first power-up after any soldering.
 4. **USB power first, battery second.** Plug the ESP32 into your laptop, check the messages, *then* plug in the battery.
 5. **Red is +, black is −.** Check twice before plugging anything in. Backwards battery wiring destroys ESCs instantly.
+
+### What you can test at home, before a real mission
+
+Most of the testing happens at home. Only the last few steps need an open field.
+
+| Where | What | App | Props? |
+|---|---|---|---|
+| 🏠 **Desk, before the drone is even built** | the full sim suite: every flight, failsafe and scenario, flown by the real flight code against simulated physics | `sim` (via `./simulate/run_hil.sh`) | no drone needed, just the ESP on USB |
+| 🏠 Desk | motor order and spin direction, one motor at a time | `bench_test` (type `1`–`4`) | **OFF** |
+| 🏠 Desk | every sensor: tilt, heading, height, battery voltage | `bench_test` (type `s`) | **OFF** |
+| 🏠 Desk | teach the ESCs the throttle range (once) | `esc_calibration` | **OFF** |
+| 🏠 Desk | battery-voltage calibration against a multimeter | `bench_test` (type `s`) | **OFF** |
+| 🏠 Desk | radio: bind it, check each switch shows up, STOP cuts everything, LAND is ignored on the ground | `fly` | **OFF** |
+| 🌳 Back yard, away from cars and metal | compass calibration (once) | `compass_calibration` | **OFF** (motors never spin) |
+| 🌳 Back yard | GPS gets a fix (8+ satellites) | `bench_test` (type `s`) | **OFF** |
+| 🌳 Big, open back yard, **tethered** | first hovers, 2–3 ft up, in MANUAL | `fly` | ON |
+| 🌳 Big, open back yard, **tethered** | radio-loss test (below 5 ft, it lands) | `fly` | ON |
+| 🌾 **The field** | first free hover, then LAND | `fly` | ON |
+| 🌾 The field | first missions: the short 30 m out-and-back | `first_mission` | ON |
+| 🌾 The field | the full fence line | `fly` | ON |
+
+**The rule of thumb:** anything with props **off** is fine indoors. Anything with props **on** needs open space outside and a tether until the drone has proven it hovers calmly. Missions only happen at the field, because the routes are GPS points at the farm.
 
 ### The big picture
 
@@ -213,10 +238,12 @@ Here's where every wire goes. **"TX goes to RX":** a device *talks* on its TX pi
 
 ### Stage 6 — Software setup on the bench (props OFF)
 
-Each step below is a flag in [`FlightConfig.hpp`](src/state/FlightConfig.hpp): set it to `true`, flash, follow the serial monitor, then set it back to `false`.
+Each step below uses one of the small **apps**: flash it with `pio run -e <app> -t upload`, follow the serial monitor (115200), and flash the `fly` app again when you're done. Settings changes go in [`data/flightsettings.json`](data/flightsettings.json), then `pio run -e fly -t uploadfs` to put them on the drone.
 
-1. **☐ ESC calibration** (`CALIBRATE_ESCS_ON_BOOT`): teaches the ESCs the throttle range. Type `GO`, plug in the battery, type `MIN` after the beep-beep. Done once.
-2. **☐ Motor order and direction** (`BENCH_TEST_ON_BOOT`, then type `1`, `2`, `3`, `4`): each motor spins slowly for 2 seconds.
+0. **☐ Put the settings on the drone:** `pio run -e fly -t uploadfs`. Every app reads them at power-up, and refuses to run (listing what's missing) if they aren't there.
+
+1. **☐ ESC calibration** (app `esc_calibration`): teaches the ESCs the throttle range. Type `GO`, plug in the battery, type `MIN` after the beep-beep. Done once.
+2. **☐ Motor order and direction** (app `bench_test`, then type `1`, `2`, `3`, `4`): each motor spins slowly for 2 seconds.
    - Wrong **corner** spinning? That ESC's signal wire is on the wrong GPIO pin.
    - Wrong **direction**? Unplug the battery and swap any two of that motor's three wires.
    - Trick for seeing direction: touch a strip of paper *lightly* against the motor's side. It flicks in the spin direction.
@@ -227,8 +254,8 @@ Each step below is a flag in [`FlightConfig.hpp`](src/state/FlightConfig.hpp): s
    - Lift it ~1 m → height goes up ~3 ft.
 
    If roll or pitch goes the wrong way, the MPU6050 is rotated relative to what the code expects. Tell me which way each number moves, and we'll fix it in code or by turning the sensor.
-4. **☐ Compass calibration** (`CALIBRATE_COMPASS_ON_BOOT`): do it **outdoors**, away from cars and metal. Slowly rotate the drone through every orientation (every side facing down, then spin it around) for 30 seconds. Saved permanently.
-5. **☐ GPS:** take it outside, run the bench test `s`, and wait (the first fix can take a few minutes). You want "sats" of 8 or more and a real latitude/longitude. If you see nothing at all, the baud rate may be 38400: change `GPS_BAUD` in `FlightConfig.hpp`.
+4. **☐ Compass calibration** (app `compass_calibration`): do it **outdoors**, away from cars and metal. Slowly rotate the drone through every orientation (every side facing down, then spin it around) for 30 seconds. Saved permanently.
+5. **☐ GPS:** take it outside, run the bench test `s`, and wait (the first fix can take a few minutes). You want "sats" of 8 or more and a real latitude/longitude. If you see nothing at all, the baud rate may be 38400: change `"gpsBaud"` in the settings file.
 6. **☐ Radio:** bind the receiver to your radio (the receiver's manual; usually plug in power 3 times quickly, then "Bind" on the radio). Set up the switches on these channels:
 
 | Radio channel | Job | Rule |
@@ -236,19 +263,20 @@ Each step below is a flag in [`FlightConfig.hpp`](src/state/FlightConfig.hpp): s
 | 5 | **START** | flip UP: take off, then (flip again) start the mission |
 | 6 | **STOP** | flip DOWN: **motors cut instantly**, any time. Keep it UP to fly. |
 | 7 | **MANUAL** | UP: you fly with the sticks |
+| 8 | **LAND** | flip UP: lands gently right where it is |
 
    ✅ With props off and the battery in, flip STOP down: the log should show the stop, and nothing can spin until it's back up.
 
-7. **☐ Battery voltage calibration** (bench test `s`): the stream shows the battery voltage. Measure the pack with a multimeter at the XT60 plug at the same time. If the two differ, adjust `BATTERY_DIVIDER_SCALE` in `FlightConfig.hpp`:
+7. **☐ Battery voltage calibration** (bench test `s`): the stream shows the battery voltage. Measure the pack with a multimeter at the XT60 plug at the same time. If the two differ, adjust `"dividerScale"` (battery section of the settings file):
 
    ```text
    new scale = old scale × (multimeter volts ÷ volts shown)
    e.g. 5.545 × (10.80 ÷ 10.62) = 5.639
    ```
-   Flash again and recheck: they should agree within about 0.05 V.
-8. **☐ Check the mission's waypoints** in `FlightConfig.hpp` (`WAYPOINTS`) are the field you'll fly, and that `GEOFENCE_RADIUS_M` covers the whole field. Launch from near the first corner. The drone flies to fixed GPS points, wherever you launch from.
-9. **☐ Update the sim to your drone:** weigh the finished drone with the battery, and tell me the weight. I'll set the sim's airframe and `HOVER_THROTTLE_FF`.
-10. **☐ Run the full sim suite** (`./simulate/run_hil.sh`, sim build flashed): all 8 scenarios should PASS before the first real flight. Then flash the real build (`esp32dev`) again.
+   Upload the settings again (`pio run -e fly -t uploadfs`) and recheck: they should agree within about 0.05 V.
+8. **☐ Check the mission route:** `"mission"` in the settings file is the field you'll fly, ending back at the launch point (corner 1). The routes are fixed GPS points, so **launch from corner 1**. Also check `"geofenceRadiusM"` covers the whole field.
+9. **☐ Update the sim to your drone:** weigh the finished drone with the battery, and tell me the weight. I'll set the sim's airframe and `"hoverThrottle"`.
+10. **☐ Run the full sim suite** (`./simulate/run_hil.sh`; it uploads the settings and flashes the `sim` app itself): all 10 scenarios should PASS before the first real flight. Then flash `first_mission` (or `fly`) again.
 
 ---
 
@@ -270,14 +298,15 @@ Each step below is a flag in [`FlightConfig.hpp`](src/state/FlightConfig.hpp): s
 Watch for:
 - Spins in circles → yaw direction problem. **STOP**, then tell me.
 - Flips over the moment it lifts → a motor in the wrong corner or spinning backward. **STOP**, then redo Stage 6.
-- Needs a lot of stick to lift, or leaps up → hover throttle is off. Adjust `HOVER_THROTTLE_FF`.
+- Needs a lot of stick to lift, or leaps up → hover throttle is off. Adjust `"hoverThrottle"` in the settings file.
 
 **Step 3 — Radio-loss test on the tether.** Hover **below 5 ft**, then switch the radio off. Within about a second the drone should start landing by itself (below 5 ft it lands in place instead of trying to fly home). Switch the radio back on right away so STOP works again.
 
-**Step 4 — First free hover.** No tether, open field. Flip **START**: the drone takes off to 15 ft and holds. Watch it for 30–60 seconds: does it stay put and level? **To come down:** flip MANUAL on and lower the throttle stick gently; once it's on the ground, flip STOP. (There's no "land" switch yet; that would be a good small addition.)
+**Step 4 — First free hover.** No tether, open field. Flip **START**: the drone takes off to 15 ft and holds. Watch it for 30–60 seconds: does it stay put and level? **To come down: flip LAND.** It descends gently and cuts the motors once it's down. Then flip LAND back down, ready for the next flight.
 
-**Step 5 — First mission.** From a hover, flip **START** again to fly the waypoints. Stay ready on STOP (for emergencies) or MANUAL (to take over).
-- ⚠️ The full fence-line mission takes roughly 4–5 minutes, close to the **5-minute flight limit**. If time runs out, the drone **lands wherever it is**, which could be far across the field. For the first missions, consider a shorter route: I can make a 2-waypoint version of `WAYPOINTS`.
+**Step 5 — First missions: the short test route.** Flash the **`first_mission`** app. From a hover, flip **START** again. The drone flies 30 m out along the first fence leg, back to corner 1, a short hover, then it lands by itself (about 35 seconds of flying). Stay ready on **LAND** (gentle), **MANUAL** (take over), or **STOP** (emergency only).
+
+**Step 6 — The full fence line.** After several clean test-route flights, flash the **`fly`** app. ⚠️ The full route takes roughly 4–5 minutes, close to the **5-minute flight limit**, and when time runs out the drone **lands wherever it is**, which could be far across the field. Do Stage 8 (tune the fuel gauge) first, so you know how much the battery allows.
 
 **What happens on its own (so it doesn't surprise you):**
 
@@ -289,7 +318,8 @@ Watch for:
 | Radio lost for 1 second | comes home and lands (lands in place if low, no GPS, or home unknown) |
 | Flies past the geofence | comes home and lands |
 | GPS lost for 3 seconds | lands where it is |
-| STOP switch down | motors cut instantly |
+| LAND switch up | **lands where it is** (gently) |
+| STOP switch down | motors cut instantly (emergency only: it drops) |
 
 ---
 
@@ -303,13 +333,13 @@ The firmware **estimates** how much battery it has used from the motor commands.
    real amps = mAh put back × 60 ÷ (1000 × flight minutes)
    e.g. 1150 mAh after a 5-minute flight → 1150 × 60 ÷ 5000 = 13.8 A
    ```
-3. Work out what the firmware estimates while hovering, using your hover throttle (`HOVER_THROTTLE_FF`, say 0.59):
+3. Work out what the firmware estimates while hovering, using your hover throttle (`"hoverThrottle"`, say 0.59):
    ```text
-   estimated amps = CURRENT_IDLE_A + CURRENT_MOTOR_FULL_A × 4 × throttle³
+   estimated amps = currentIdleA + currentMotorFullA × 4 × throttle³
                   = 0.3 + 16 × 4 × 0.59³ = 13.4 A
    ```
-4. If they differ, scale `CURRENT_MOTOR_FULL_A`: `new = old × (real − 0.3) ÷ (estimated − 0.3)`. In the example: 16 × 13.5 ÷ 13.1 = 16.5.
-5. **Only then think about a longer flight time.** If 5-minute flights reliably put back less than about 1100 mAh (about half the pack), you could raise `MAX_FLIGHT_TIME_MS` a minute at a time. The battery gauges still land the drone at 70% used either way.
+4. If they differ, scale `"currentMotorFullA"` (battery section): `new = old × (real − 0.3) ÷ (estimated − 0.3)`. In the example: 16 × 13.5 ÷ 13.1 = 16.5.
+5. **Only then think about a longer flight time.** If 5-minute flights reliably put back less than about 1100 mAh (about half the pack), you could raise `"maxFlightTimeMs"` a minute at a time. The battery gauges still land the drone at 70% used either way.
 
 ## Charging and safety (don't skip)
 
@@ -335,7 +365,7 @@ That's the right trade for a drone flying over someone's crops. **"Less likely" 
  2.50 V per cell   EMPTY. Below this the cell is damaged.
 ```
 
-**LiFe's quirk: its voltage barely moves until it's nearly empty.** Most of the flight it sits around 3.2–3.3 V per cell, then it drops off a cliff at the end. So the voltage **can't tell you "half full"**. Your fuel gauge is the **flight timer**, and the charger's "mAh put back in" number. The firmware's 5-minute limit (`MAX_FLIGHT_TIME_MS`) fits comfortably inside one pack.
+**LiFe's quirk: its voltage barely moves until it's nearly empty.** Most of the flight it sits around 3.2–3.3 V per cell, then it drops off a cliff at the end. So the voltage **can't tell you "half full"**. Your fuel gauge is the **flight timer**, and the charger's "mAh put back in" number. The firmware's 5-minute limit (`"maxFlightTimeMs"`) fits comfortably inside one pack.
 
 The small white plug on the battery is the **balance lead**. It lets the charger see (and even out) each cell separately.
 
@@ -403,4 +433,4 @@ Rough weight: frame ~280 g + motors ~210 g + ESCs ~130 g + battery ~170 g + prop
 
 Thrust: about 850 g per motor on a 3S LiPo (11.1 V). A 3S LiFePO4 is 9.9 V, and thrust grows roughly with voltage squared, so expect about 850 × (9.9 ÷ 11.1)² ≈ 680 g per motor, ≈ 2.7 kg total. Thrust-to-weight is then **about 2.9:1** (less voltage, but a lighter drone), versus the sim's 4:1. Expected hover throttle ≈ √(1 ÷ 2.9) ≈ **0.59**, versus the current `HOVER_THROTTLE_FF` of 0.50. Weigh the finished drone, update the sim, then find the true hover throttle on a tether.
 
-Flight time: a 2100 mAh LiFe pack holds about 21 Wh. Using at most 80% of it at roughly 130 W of hover power gives **about 6–8 minutes** per pack (an estimate; time your real flights). Your firmware's 5-minute limit (`MAX_FLIGHT_TIME_MS`) fits inside that with margin, so leave it at 5 minutes for this battery.
+Flight time: a 2100 mAh LiFe pack holds about 21 Wh. Using at most 80% of it at roughly 130 W of hover power gives **about 6–8 minutes** per pack (an estimate; time your real flights). Your firmware's 5-minute limit (`"maxFlightTimeMs"`) fits inside that with margin, so leave it at 5 minutes for this battery.

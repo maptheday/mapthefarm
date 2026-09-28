@@ -70,7 +70,8 @@ def fly_and_pull(port, scenario="full", wait=320.0, verbose=True):
             continue
         if verbose and any(k in line for k in ("NAV", "LAND", "Mission", "SAFETY", "SCENARIO")):
             print("   " + line)
-        if "LANDED" in line or "SCENARIO_DONE" in line:
+        # The firmware says "[NAV] Landed -- motors disarmed." (mixed case).
+        if "landed" in line.lower() or "SCENARIO_DONE" in line:
             done = True
             time.sleep(1.0)
             break

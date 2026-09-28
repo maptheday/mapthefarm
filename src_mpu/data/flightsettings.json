@@ -1,0 +1,155 @@
+{
+  "airframe": {
+    "hoverThrottle": 0.50,
+    "altitudePid": {
+      "kp": 0.02,
+      "ki": 0.008,
+      "kd": 0.10,
+      "min": -0.45,
+      "max": 0.45
+    },
+    "rollPid": {
+      "kp": 0.01,
+      "ki": 0.001,
+      "kd": 0.005,
+      "min": -0.3,
+      "max": 0.3
+    },
+    "pitchPid": {
+      "kp": 0.01,
+      "ki": 0.001,
+      "kd": 0.005,
+      "min": -0.3,
+      "max": 0.3
+    },
+    "yawPid": {
+      "kp": 0.005,
+      "ki": 0.0001,
+      "kd": 0.001,
+      "min": -0.2,
+      "max": 0.2
+    },
+    "yawRateDamping": 0.02,
+    "navPid": {
+      "kp": 0.35,
+      "ki": 0.0,
+      "kd": 0.6,
+      "min": -6.0,
+      "max": 6.0
+    }
+  },
+  "flight": {
+    "takeoffAltitudeFt": 15.0,
+    "climbRateFps": 3.0,
+    "landDescentRateFps": 1.5,
+    "waypointAcceptRadiusM": 4.0,
+    "waypointLookaheadM": 18.0,
+    "missionCompleteHoverMs": 10000
+  },
+  "safety": {
+    "maxFlightTimeMs": 300000,
+    "geofenceRadiusM": 450.0,
+    "gpsLossAbortMs": 3000,
+    "radioLossTimeoutMs": 1000,
+    "radioLossLandBelowFt": 5.0,
+    "rtlAltitudeFt": 60.0,
+    "rtlSettleMs": 3000
+  },
+  "battery": {
+    "cells": 3,
+    "capacityMah": 2100,
+    "warningUsed": 0.70,
+    "criticalUsed": 0.80,
+    "cellWarningV": 3.00,
+    "cellCriticalV": 2.85,
+    "cellTakeoffMinV": 3.25,
+    "dividerScale": 5.545,
+    "currentIdleA": 0.3,
+    "currentMotorFullA": 16.0
+  },
+  "manual": {
+    "maxLeanDeg": 15.0,
+    "climbRateFps": 3.0,
+    "yawRateDps": 45.0,
+    "stickDeadband": 0.05,
+    "positionHold": true
+  },
+  "radio": {
+    "channels": {
+      "roll": 0,
+      "pitch": 1,
+      "throttle": 2,
+      "yaw": 3,
+      "start": 4,
+      "stop": 5,
+      "manual": 6,
+      "land": 7
+    },
+    "switchHighThreshold": 1700,
+    "switchLowThreshold": 1300
+  },
+  "wiring": {
+    "motorPins": [
+      4,
+      5,
+      6,
+      7
+    ],
+    "escPwmHz": 400,
+    "i2cSda": 16,
+    "i2cScl": 15,
+    "gpsRx": 17,
+    "gpsTx": 18,
+    "gpsBaud": 9600,
+    "radioRx": 8,
+    "batteryAdc": 1
+  },
+  "calibration": {
+    "compassDurationMs": 30000
+  },
+  "mission": {
+    "name": "Farmer field fence line",
+    "route": [
+      {
+        "lat": 35.947693,
+        "lon": -78.240760,
+        "altFt": 30.0
+      },
+      {
+        "lat": 35.947806,
+        "lon": -78.239370,
+        "altFt": 30.0
+      },
+      {
+        "lat": 35.947923,
+        "lon": -78.239510,
+        "altFt": 30.0
+      },
+      {
+        "lat": 35.948327,
+        "lon": -78.238051,
+        "altFt": 30.0
+      },
+      {
+        "lat": 35.949061,
+        "lon": -78.238292,
+        "altFt": 30.0
+      },
+      {
+        "lat": 35.948587,
+        "lon": -78.240529,
+        "altFt": 30.0
+      },
+      {
+        "lat": 35.948500,
+        "lon": -78.240432,
+        "altFt": 30.0
+      },
+      {
+        "lat": 35.948305,
+        "lon": -78.241377,
+        "altFt": 30.0
+      }
+    ]
+  }
+}

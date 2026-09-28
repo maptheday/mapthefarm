@@ -27,6 +27,8 @@ SCENARIOS=(
     "max_timeout.py"       # flight-time limit hit -> land where it is
     "low_battery.py"       # pack only 25% charged -> voltage gauge -> land where it is
     "rc_loss.py"           # radio link lost mid-mission -> RTL -> land
+    "land_switch.py"       # LAND switch while hovering -> lands where it is
+    "test_route.py"        # the short first-flight route: 30 m out and back
     "manual_flight.py"     # MANUAL mode flies the drone on the sticks
     "stabilization.py"     # a gust rolls it ~22 deg -> recovers to level
 )
@@ -93,9 +95,12 @@ cd "$PROJECT_ROOT"
 echo "== On-ESP sim scenarios =="
 printf '  %s\n' "${SCENARIOS[@]}"
 
-# Flash the sim firmware once (all scenarios share the one `sim` build).
+# Flash the sim app once (all scenarios share it), plus the settings file
+# (data/flightsettings.json) it loads from the ESP's flash at startup.
 if [[ "${NO_UPLOAD:-0}" != "1" ]]; then
-    echo "== Flashing sim firmware to $PORT =="
+    echo "== Uploading flight settings (data/) to $PORT =="
+    "$PIO" run -e sim --target uploadfs --upload-port "$PORT"
+    echo "== Flashing sim app to $PORT =="
     "$PIO" run -e sim --target upload --upload-port "$PORT"
 fi
 

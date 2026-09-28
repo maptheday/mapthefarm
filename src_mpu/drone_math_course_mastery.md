@@ -77,7 +77,7 @@ Every lesson in this course lives in one of those boxes. When you get lost, come
 
 ### 💻 In the code
 
-This loop really exists. In [`ESP32_MPU_6050_Web_Server.ino`](src/ESP32_MPU_6050_Web_Server.ino) there are two tasks:
+This loop really exists. In [`FlightController.hpp`](src/flight/FlightController.hpp) there are two tasks:
 
 ```text
 navigationTask   every 100 ms (10×/sec)   slow thinking: "which way to the waypoint?"
@@ -316,7 +316,7 @@ radians → degrees:   multiply by 180/π  (≈ 57.2958)
 
 ### 💻 In the code
 
-In [`MotorController.hpp`](src/services/MotorController.hpp):
+In [`MotorController.hpp`](src/flight/services/MotorController.hpp):
 
 ```cpp
 float rollRad  = roll  * 0.0174532925f;   // degrees × (π/180) = radians
@@ -381,7 +381,7 @@ A drone makes 20 N of thrust and needs 18 N of "up" to hover. It tilts 30°. Doe
 
 ## Lesson 1.5 — Tilt compensation: reading the real code
 
-This is the first time the math becomes a real line of firmware. Here's the code from [`MotorController.hpp`](src/services/MotorController.hpp):
+This is the first time the math becomes a real line of firmware. Here's the code from [`MotorController.hpp`](src/flight/services/MotorController.hpp):
 
 ```cpp
 float rollRad  = roll  * 0.0174532925f;
@@ -777,7 +777,7 @@ A negative bearing just means "143° **counter**-clockwise from north." Compasse
 
 ### 💻 In the code
 
-`gpsBearing()` in [`NavMath.hpp`](src/services/NavMath.hpp):
+`gpsBearing()` in [`NavMath.hpp`](src/flight/services/NavMath.hpp):
 
 ```cpp
 inline float gpsBearing(double lat1, double lon1, double lat2, double lon2) {
@@ -935,13 +935,13 @@ Math books write length as `|v|` or `‖v‖` and call it the **magnitude**. Sam
 
 ### 💻 In the code
 
-[`NavMath.hpp`](src/services/NavMath.hpp), inside `lineFollowNorthEast()`:
+[`NavMath.hpp`](src/flight/services/NavMath.hpp), inside `lineFollowNorthEast()`:
 
 ```cpp
 float segLen = sqrt(segE * segE + segN * segN);
 ```
 
-That's `√(east² + north²)`: the length of the leg between two waypoints. And in [`OnboardSim.hpp`](src/services/OnboardSim.hpp), the flight log computes distance from home the same way:
+That's `√(east² + north²)`: the length of the leg between two waypoints. And in the sim app's [`SimIo.hpp`](src/apps/sim/SimIo.hpp), the flight log computes distance from home the same way:
 
 ```cpp
 float dist = sqrtf(north * north + east * east);
@@ -1385,7 +1385,7 @@ Units: ft ÷ s = ft/s. A derivative always has "per second" glued on.
 
 ### 💻 In the code
 
-In [`PID.hpp`](src/services/PID.hpp):
+In [`PID.hpp`](src/flight/services/PID.hpp):
 
 ```cpp
 float derivative = (error - _lastError) / dt;
@@ -1440,7 +1440,7 @@ tick 3:   total = 2   + 2 × 0.5 = 3 m     → after 1.5 s at 2 m/s, you've gone
 
 ### 💻 In the code
 
-In [`PID.hpp`](src/services/PID.hpp):
+In [`PID.hpp`](src/flight/services/PID.hpp):
 
 ```cpp
 _integral += error * dt;
@@ -1489,7 +1489,7 @@ A drone's altitude error readings, every 0.1 s, are: 4, 4, 3, 2. (dt = 0.1)
 
 # Part 4 — PID: "how hard should I push?"
 
-PID is the heart of the drone. Six PIDs run inside [`MotorController.hpp`](src/services/MotorController.hpp): altitude, roll, pitch, yaw, and two for GPS navigation. They're all the same 40-line class, [`PID.hpp`](src/services/PID.hpp). Learn it once and you understand all six.
+PID is the heart of the drone. Six PIDs run inside [`MotorController.hpp`](src/flight/services/MotorController.hpp): altitude, roll, pitch, yaw, and two for GPS navigation. They're all the same 40-line class, [`PID.hpp`](src/flight/services/PID.hpp). Learn it once and you understand all six.
 
 ## Lesson 4.1 — The problem: error
 
@@ -1692,7 +1692,7 @@ Read it like a conversation: P says "we're 5 ft low, push up!" I says "we've bee
 
 ### 💻 In the code
 
-The whole `compute()` from [`PID.hpp`](src/services/PID.hpp), now fully readable:
+The whole `compute()` from [`PID.hpp`](src/flight/services/PID.hpp), now fully readable:
 
 ```cpp
 float error = target - actual;                                   // 4.1
@@ -1734,10 +1734,10 @@ Driving on the highway, you don't start each second with your foot off the gas a
 ### 💻 In the code
 
 ```cpp
-out.baseThrottle = HOVER_THROTTLE_FF + altitudePID.compute(targetAltFt, altFt, dt);
+out.baseThrottle = settings().airframe.hoverThrottle + altitudePID.compute(targetAltFt, altFt, dt);
 ```
 
-`HOVER_THROTTLE_FF = 0.50` lives in [`FlightConfig.hpp`](src/state/FlightConfig.hpp). The altitude PID's output is clamped to ±0.45, so it's only ever a correction: throttle can range from 0.05 to 0.95 around that 0.50 baseline.
+The hover throttle, `"hoverThrottle": 0.50`, lives in the settings file [`flightsettings.json`](data/flightsettings.json). The altitude PID's output is clamped to ±0.45, so it's only ever a correction: throttle can range from 0.05 to 0.95 around that 0.50 baseline.
 
 Without feed-forward, the I term would have to build the entire hover throttle up from zero. That's slow, and when the grudge finally gets big enough it overshoots. That's the "altitude hunting" the code comment mentions. (Part 8 shows *why* 0.50 is exactly the hover throttle for the sim's airframe.)
 
@@ -1795,7 +1795,7 @@ float yawCorrection = baseYawCorrection - (gyroZ * 0.02f);
 
 The idea is extra damping: "if the drone is *spinning*, push against the spin." That needs a **rate**, something in **degrees per second**. For example, spinning at 20 °/s would give `20 × 0.02 = 0.4` of counter-push.
 
-Now check what `gyroZ` actually holds. In [`Imu.hpp`](src/services/Imu.hpp):
+Now check what `gyroZ` actually holds. In [`Imu.hpp`](src/flight/services/Imu.hpp):
 
 ```cpp
 out.gyroZ = filter_.getYaw();     // the fused yaw ANGLE, in degrees, not a rate
@@ -1812,7 +1812,7 @@ Put in numbers. If the drone happens to be facing 90°, then `90 × 0.02 = 1.8`.
 
 ### The fix
 
-Give the line the rate it asked for. [`Imu.hpp`](src/services/Imu.hpp) already had the raw gyro rate, `gz`, *before* it went into the filter. Now it's saved in its own, clearly named field:
+Give the line the rate it asked for. [`Imu.hpp`](src/flight/services/Imu.hpp) already had the raw gyro rate, `gz`, *before* it went into the filter. Now it's saved in its own, clearly named field:
 
 ```cpp
 out.yawRateDps = -gz;    // deg/s; minus because the chip's "+" is counter-clockwise,
@@ -1835,16 +1835,17 @@ Notice that `dps` in the name is a unit suffix (degrees per second), like `Ft` a
 
 ## Lesson 4.9 — Reading the gains
 
-Now the constructor in [`MotorController.hpp`](src/services/MotorController.hpp) is readable:
+Now the gains in the `airframe` section of [`flightsettings.json`](data/flightsettings.json) are readable:
 
-```cpp
-altitudePID(0.02f, 0.008f, 0.10f, -0.45f, 0.45f),   // Kp, Ki, Kd, outMin, outMax
-rollPID    (0.01f, 0.001f, 0.005f, -0.3f,  0.3f),
-pitchPID   (0.01f, 0.001f, 0.005f, -0.3f,  0.3f),
-yawPID     (0.005f, 0.0001f, 0.001f, -0.2f, 0.2f),
-navNorthPID(0.35f, 0.0f,   0.6f,   -6.0f,  6.0f),
-navEastPID (0.35f, 0.0f,   0.6f,   -6.0f,  6.0f)
+```json
+"altitudePid": { "kp": 0.02,  "ki": 0.008,  "kd": 0.10,  "min": -0.45, "max": 0.45 },
+"rollPid":     { "kp": 0.01,  "ki": 0.001,  "kd": 0.005, "min": -0.3,  "max": 0.3 },
+"pitchPid":    { "kp": 0.01,  "ki": 0.001,  "kd": 0.005, "min": -0.3,  "max": 0.3 },
+"yawPid":      { "kp": 0.005, "ki": 0.0001, "kd": 0.001, "min": -0.2,  "max": 0.2 },
+"navPid":      { "kp": 0.35,  "ki": 0.0,    "kd": 0.6,   "min": -6.0,  "max": 6.0 }
 ```
+
+([`MotorController.hpp`](src/flight/services/MotorController.hpp) loads them at startup; the nav gains are used twice, for forward and for right.)
 
 The units of each gain are "output per unit of error." That makes them readable:
 
@@ -1880,7 +1881,7 @@ Always try a change in the sim (`run_hil.sh`) before flying.
 - [ ] P as a rubber band: its two weaknesses
 - [ ] I as a grudge: what it fixes, what windup is, why the clamp divides by `Ki`
 - [ ] D as brakes: why its sign flips automatically, and what derivative kick is
-- [ ] feed-forward: why `HOVER_THROTTLE_FF` exists
+- [ ] feed-forward: why `hoverThrottle` exists
 - [ ] why yaw error is wrapped into ±180
 - [ ] how to read a gain's units
 
@@ -1898,7 +1899,7 @@ A quadcopter has no rudder, no flaps, nothing that moves except four propellers.
 
 ### 🖼️ Picture
 
-From [`IESC.hpp`](src/hardware/IESC.hpp), looking down at the drone:
+From [`IESC.hpp`](src/flight/hardware/IESC.hpp), looking down at the drone:
 
 ```text
               FRONT
@@ -1930,7 +1931,7 @@ Which way? The body twists *opposite* to the props you sped up. Speed up the cou
 
 ### 💻 In the code
 
-In [`MotorController.hpp`](src/services/MotorController.hpp):
+In [`MotorController.hpp`](src/flight/services/MotorController.hpp):
 
 ```cpp
 out.m1 = constrain(base + pitch + roll - yaw, 0.0f, 1.0f);   // front-left
@@ -2054,7 +2055,7 @@ latitude     cos       meters per 1° longitude
 
 ### 💻 In the code
 
-In `lineFollowNorthEast()`, [`NavMath.hpp`](src/services/NavMath.hpp):
+In `lineFollowNorthEast()`, [`NavMath.hpp`](src/flight/services/NavMath.hpp):
 
 ```cpp
 float mPerLat = 111320.0f;
@@ -2083,7 +2084,7 @@ For long distances, the flat-patch trick breaks: the Earth curves away underneat
 
 ### 💻 In the code
 
-`gpsDistanceMeters()` in [`NavMath.hpp`](src/services/NavMath.hpp):
+`gpsDistanceMeters()` in [`NavMath.hpp`](src/flight/services/NavMath.hpp):
 
 ```cpp
 float a = sin(dLat/2)*sin(dLat/2) + cos(radians(lat1))*cos(radians(lat2))*sin(dLon/2)*sin(dLon/2);
@@ -2113,10 +2114,10 @@ The mission uses it to decide when a waypoint has been reached:
 
 ```cpp
 float distM = gpsDistanceMeters(gps.lat, gps.lon, wp.lat, wp.lon);
-if (distM < WAYPOINT_ACCEPT_RADIUS_M) { /* advance to the next waypoint */ }
+if (distM < settings().flight.waypointAcceptRadiusM) { /* advance to the next waypoint */ }
 ```
 
-`WAYPOINT_ACCEPT_RADIUS_M` is 4 m in [`FlightConfig.hpp`](src/state/FlightConfig.hpp).
+`"waypointAcceptRadiusM"` is 4 m in [`flightsettings.json`](data/flightsettings.json).
 
 **Takeaway:** *Haversine = true distance on a sphere. It ends with `R × angle`, the radian definition of arc length.*
 
@@ -2197,9 +2198,9 @@ Four steps, each one a Part 2 lesson:
 
 ## Lesson 7.2 — Walking through `lineFollowNorthEast()` with numbers
 
-The function in [`NavMath.hpp`](src/services/NavMath.hpp), with a worked example alongside.
+The function in [`NavMath.hpp`](src/flight/services/NavMath.hpp), with a worked example alongside.
 
-**Setup.** Put the origin at the previous waypoint. The leg goes to a waypoint **60 m east, 80 m north**. The drone is at **40 m east, 20 m north**, a bit off to the side. The lookahead is `WAYPOINT_LOOKAHEAD_M = 18` m.
+**Setup.** Put the origin at the previous waypoint. The leg goes to a waypoint **60 m east, 80 m north**. The drone is at **40 m east, 20 m north**, a bit off to the side. The lookahead is `"waypointLookaheadM": 18` m (in the settings file).
 
 ### Step 0 — degrees to meters (Lesson 6.2)
 
@@ -2244,7 +2245,7 @@ Read the answer: "go 26.4 m north and 5.2 m west." The north part carries the dr
 
 ### Step 5 — turn meters into lean (Part 4)
 
-Back in [`MissionPhase.hpp`](src/phases/MissionPhase.hpp):
+Back in [`MissionPhase.hpp`](src/flight/phases/MissionPhase.hpp):
 
 ```cpp
 float forwardM, rightM;   // world north/east -> the drone's own forward/right
@@ -2369,7 +2370,7 @@ throttle   thrust (as a fraction of max)
 
 Half throttle gives only a quarter of the max thrust.
 
-The on-chip sim's airframe ([`OnboardSim.hpp`](src/services/OnboardSim.hpp)) is set up so that full throttle gives **4× the drone's weight** (a "4:1 thrust-to-weight ratio"):
+The on-chip sim's airframe ([`SimIo.hpp`](src/apps/sim/SimIo.hpp)) is set up so that full throttle gives **4× the drone's weight** (a "4:1 thrust-to-weight ratio"):
 
 ```text
 max thrust  = 4 × 11.77 = 47.09 N
@@ -2379,7 +2380,7 @@ hover: thrust = weight
        throttle          = 0.50
 ```
 
-**That's where `HOVER_THROTTLE_FF = 0.50` comes from.** (Lesson 4.6.) A real airframe with a different thrust-to-weight ratio hovers at a different throttle, which is why the project guide says to tune it per airframe. In general: `hover throttle = √(1 ÷ thrust-to-weight)`.
+**That's where `"hoverThrottle": 0.50` comes from.** (Lesson 4.6.) A real airframe with a different thrust-to-weight ratio hovers at a different throttle, which is why the project guide says to tune it per airframe. In general: `hover throttle = √(1 ÷ thrust-to-weight)`.
 
 ### ✍️ Your turn
 
@@ -2612,7 +2613,7 @@ These two lines are called a **rotation** (a 2D rotation matrix, if you remember
 
 ### 💻 In the code
 
-`northEastToForwardRight()` in [`NavMath.hpp`](src/services/NavMath.hpp) is exactly those two lines:
+`northEastToForwardRight()` in [`NavMath.hpp`](src/flight/services/NavMath.hpp) is exactly those two lines:
 
 ```cpp
 float h = radians(headingDeg);
@@ -2745,7 +2746,7 @@ yaw   = std::atan2(2.0f * (w * z + x * y), 1.0f - 2.0f * (y * y + z * z));
 
 ### On the real drone: Madgwick
 
-On real hardware, [`Imu.hpp`](src/services/Imu.hpp) uses a **Madgwick filter**, which keeps its own quaternion internally. 🧸 It combines two imperfect senses:
+On real hardware, [`Imu.hpp`](src/flight/services/Imu.hpp) uses a **Madgwick filter**, which keeps its own quaternion internally. 🧸 It combines two imperfect senses:
 
 - the **gyro** (how fast am I spinning?) is smooth and fast, but integrating it slowly **drifts**, like walking with your eyes closed;
 - the **accelerometer** (which way is gravity?) never drifts, but it's **noisy** and gets fooled by vibration.
@@ -2760,7 +2761,7 @@ Madgwick mostly trusts the gyro, and keeps gently nudging it toward the accelero
 
 Here's the payoff. Follow one moment of a MISSION flight through the real code, and name the lesson behind every step.
 
-### The slow loop: `navTick()`, 10 times a second ([`MissionPhase.hpp`](src/phases/MissionPhase.hpp))
+### The slow loop: `navTick()`, 10 times a second ([`MissionPhase.hpp`](src/flight/phases/MissionPhase.hpp))
 
 ```text
  1. Read GPS: lat/lon as doubles ..................................... 6.1  angles, not meters
@@ -2776,7 +2777,7 @@ Here's the payoff. Follow one moment of a MISSION flight through the real code, 
     north/east → forward/right using the compass heading ............. 10.1
 ```
 
-### The fast loop: `physicsTick()`, 200 times a second ([`MotorController.hpp`](src/services/MotorController.hpp))
+### The fast loop: `physicsTick()`, 200 times a second ([`MotorController.hpp`](src/flight/services/MotorController.hpp))
 
 ```text
  7. altitude PID + hover feed-forward → base throttle ................ 4.5, 4.6
