@@ -13,7 +13,7 @@
 // ============================================================================
 
 #include "flight/FlightController.hpp"
-#include "flight/io/HardwareIo.hpp"
+#include "flight/hardware/HardwareIo.hpp"
 
 HardwareIo hardware;
 
@@ -25,7 +25,7 @@ void setup() {
   if (!fc::loadSettings(errors, {"first_mission"}))
     fc::halt("Can't load flight settings:\n" + errors);
 
-  fc::begin(hardware);
+  fc::begin(hardware.io());
 }
 
 void loop() {

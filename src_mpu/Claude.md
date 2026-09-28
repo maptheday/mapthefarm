@@ -17,8 +17,8 @@
    - [`state/` — configuration & the shared notebook](#72-state--configuration--the-shared-notebook)
    - [`models/` — plain data shapes](#73-models--plain-data-shapes)
    - [`phases/` — the flight behaviors](#74-phases--the-flight-behaviors)
-   - [`services/` — the "how" (sensors, motors, math, safety)](#75-services--the-how)
-   - [`hardware/` — the lowest level (chips & pins)](#76-hardware--the-lowest-level)
+   - [`services/` — the "how" (motors, math, safety, radio switches)](#75-services--the-how)
+   - [`hardware/` — the real drone's parts](#76-hardware--the-real-drones-parts)
 8. [Simulation & testing](#8-simulation--testing)
 9. [Common tasks ("how do I…?")](#9-common-tasks)
 10. [Glossary](#10-glossary)
@@ -71,7 +71,7 @@ Here's the one mental model that makes everything else click:
 > **Think of the drone as a person doing a job, using a shared notebook.**
 
 - **The notebook** = one big shared data structure called `shared` (in [`PhaseState.hpp`](#phasestatehpp)). Everything the drone knows — sensor readings, what it's aiming for, which mode it's in — is written in this notebook.
-- **The senses** = the **services** (`Imu`, `Gps`, `Compass`, `Altimeter`). They read the physical chips and write fresh numbers into the notebook.
+- **The senses** = the **plugs** in [`FlightIo.hpp`](#flightiohpp) (`IImu`, `IGps`, `ICompass`, `IAltimeter`, …). The flight controller asks each one for a reading and writes it into the notebook. What's behind a plug (a real chip, or the simulator) is the app's choice.
 - **The current job** = the **phase** (PARKED, TAKEOFF, MISSION, LANDING, MANUAL, …). Only one phase is "active" at a time. The phase reads the notebook, decides what to aim for, and writes commands.
 - **The hands** = the **Motors** service, which takes the phase's decision and actually spins the props.
 - **The pen rule** = the **mutex**. Because two cores share the one notebook, you must "hold the pen" (`withMutex`) whenever you read or write it, so two writes never smear together.
@@ -79,8 +79,8 @@ Here's the one mental model that makes everything else click:
 Everything in the codebase is one of those roles. When you open a new file and wonder "what is this?", ask: *is it a sense, the notebook, a job, the hands, or the plumbing that connects them?*
 
 ```
-        SENSORS (services)                 THE NOTEBOOK                 THE JOB (phase)         THE HANDS
-   Imu / Gps / Compass / Altimeter  ──►   shared state   ──►    ParkedPhase / RaisePhase / ...  ──►  Motors ──► 4 ESCs
+        SENSORS (plugs)                    THE NOTEBOOK                 THE JOB (phase)         THE HANDS
+   IImu / IGps / ICompass / ...     ──►   shared state   ──►    ParkedPhase / RaisePhase / ...  ──►  Motors ──► IMotors
         "what's true right now"          (guarded by a         "given that, what do I aim for      "spin the
                                           mutex 'pen')          and how hard do I push?"            props"
 ```
@@ -100,7 +100,7 @@ The drone thinks at **two speeds**, set up in [`FlightController.hpp`](#flightco
 | **navigation task** | every 100 ms (**10 Hz**) | slow "where am I going" thinking: read GPS/compass, pick targets, run failsafes, switch phases |
 | **physics task** | every 5 ms (**200 Hz**) | fast "keep me stable" thinking: run the PID + motor math and drive the motors |
 
-Why two? Steering to a waypoint doesn't need to happen 200 times a second, but *staying upright* does. Splitting them means the fast stability loop is never slowed down by the slow navigation loop. The timing numbers live in [`FlightConfig.hpp`](#flightconfighpp) (`NAV_LOOP_MS`, `PHYSICS_LOOP_MS`).
+Why two? Steering to a waypoint doesn't need to happen 200 times a second, but *staying upright* does. Splitting them means the fast stability loop is never slowed down by the slow navigation loop. The timing numbers live in [`FlightConstants.hpp`](src/flight/state/FlightConstants.hpp) (`NAV_LOOP_MS`, `PHYSICS_LOOP_MS`). (A third, small loop listens to the radio every 2 ms.)
 
 ### Idea 2 — One shared notebook, guarded by a "pen"
 
@@ -124,7 +124,7 @@ The key design choice (this comes from the project's own rule): **phases share n
 
 ### Idea 4 — Services hide the "how"
 
-A **service** wraps one messy real-world thing behind a clean method. The phases never talk to a GPS chip's raw bytes; they just read `shared.raw.gps.lat`, which the [`Gps`](#gpshpp) service filled in. Motors are the same: a phase computes a `MotorMix` and hands it to [`Motors`](#motorshpp) — nothing else in the codebase touches motor pins. This is why you can swap real hardware for a simulator without the flight logic noticing.
+A **service** wraps one messy real-world thing behind a clean method. The phases never talk to a GPS chip's raw bytes; they just read `shared.raw.gps.lat`, which the flight controller filled in from the GPS plug. Motors are the same: a phase computes a `MotorMix` and hands it to [`Motors`](#motorshpp) — nothing else in the codebase touches motor pins. This is why you can swap real hardware for a simulator without the flight logic noticing.
 
 ### Idea 5 — One flight controller, many apps
 
@@ -135,13 +135,15 @@ The flight controller ([`src/flight/`](src/flight/)) is a **library with a publi
                                    │  fc::loadSettings()   fc::begin(io)   fc::start()  fc::land() ...
                                    ▼
                          the flight controller (src/flight)
-                                   │  asks the FlightIo for readings, hands it motor commands
+                                   │  asks each plug for a reading, hands the motors plug its commands
                                    ▼
-               HardwareIo (real sensors + ESCs)   or   SimIo (on-chip QuadSim physics)
+      the seven plugs (FlightIo.hpp): IImu  IAltimeter  IGps  ICompass  IBatterySensor  IMotors  IRadio
+                                   │
+               HardwareIo (the real chips)   or   the sim app's fakes (they read a simulated world)
 ```
 
 - **Settings** live in [`data/flightsettings.json`](#flightsettingsjson), like `appsettings.json` in C#. The drone reads it from its flash at power-up and **refuses to run if anything is missing**. There are no hidden defaults in the code.
-- **Inputs and outputs are injected** through the [`FlightIo`](#flightiohpp) interface. The real drone uses `HardwareIo`; the simulator is just another app with its own `SimIo`, which runs the QuadSim physics on the ESP. The flight logic in between is identical, and there is **no `SIM` compile flag** anywhere.
+- **Inputs and outputs are injected** through [`FlightIo`](#flightiohpp): **one small interface per sensor**, one for the motors, one for the radio (like constructor injection in C#). The real drone plugs in `HardwareIo`'s drivers; the simulator plugs in fakes that read a simulated world, and a sim scenario can wrap any one plug to break it on purpose. The flight logic in between is identical, and there is **no `SIM` compile flag** anywhere.
 - **Each job is its own flashable app** (`pio run -e <app> -t upload`): `fly`, `first_mission`, `bench_test`, `esc_calibration`, `compass_calibration`, `sim`.
 
 > **History:** this used to be one `.ino` program with a `SIM` compile flag and `*_ON_BOOT` switches for bench tests and calibrations. Before that, there was also a laptop "HIL" harness that injected sensors over USB. Both are gone: the settings file, the apps, and the `FlightIo` injection point replaced them.
@@ -152,11 +154,11 @@ The flight controller ([`src/flight/`](src/flight/)) is a **library with a publi
 
 The best way to learn the code is to follow what happens, in order, during a real flight. Each step links to the file that does the work.
 
-1. **Power on.** The chip runs `setup()` in the [`fly` app](src/apps/fly/main.cpp). It loads [`flightsettings.json`](#flightsettingsjson) and calls `fc::begin()` in [`FlightController.hpp`](src/flight/FlightController.hpp), which creates the two "pens" (mutexes), brings up the sensors, ESCs and radio through `HardwareIo`, and starts the nav + physics tasks. The drone starts in **PARKED** (motors off) — that's the default in [`PhaseState.hpp`](src/flight/state/PhaseState.hpp).
+1. **Power on.** The chip runs `setup()` in the [`fly` app](src/apps/fly/main.cpp). It loads [`flightsettings.json`](#flightsettingsjson) and calls `fc::begin()` in [`FlightController.hpp`](src/flight/FlightController.hpp), which creates the two "pens" (mutexes), brings up each plug (the real sensors, ESCs and radio from `HardwareIo`), and starts the nav, physics and radio tasks. The drone starts in **PARKED** (motors off) — that's the default in [`PhaseState.hpp`](src/flight/state/PhaseState.hpp).
 
 2. **Idle in PARKED.** [`ParkedPhase`](src/flight/phases/ParkedPhase.hpp) does almost nothing except keep disarming the motors every tick (belt-and-suspenders safety) and refresh the dashboard numbers.
 
-3. **You flip the START switch** on the radio. The [`RcInput`](src/flight/services/RcInput.hpp) service sees it and calls `crsfHandleStart()`. If there's a GPS fix, it switches the drone to **RAISE** (takeoff).
+3. **You flip the START switch** on the radio. The radio plug hands the flight controller a frame, and [`RcInput`](src/flight/services/RcInput.hpp) sees the switch flip and calls `crsfHandleStart()`. If there's a GPS fix, it switches the drone to **RAISE** (takeoff).
 
 4. **The switch happens** inside `transitionTo()` in [`PhaseMachine.hpp`](src/flight/phases/PhaseMachine.hpp). This is the *only* place phases change. It builds a little "entry context" (current height, heading, position) and calls the new phase's `onEnter()`.
 
@@ -180,14 +182,13 @@ If you read those ten files in that order, you'll have seen ~80% of the system w
 
 ```
 data/
-└── flightsettings.json             ← every tunable setting (put on the drone with: pio run -e fly -t uploadfs)
+├── flightsettings.json             ← every tunable setting (put on the drone with: pio run -e fly -t uploadfs)
+└── flightsettings/                 override files layered on top by some apps (first_mission, sim, sim.<scenario>)
 
 src/
 ├── flight/                         THE FLIGHT CONTROLLER (a library: no settings, no test modes)
 │   ├── FlightController.hpp        ← START HERE: the public API (fc::begin, fc::start, fc::land, ...)
-│   ├── FlightIo.hpp                the injection point: where readings come from, where motor commands go
-│   ├── io/
-│   │   └── HardwareIo.hpp          the real drone's FlightIo: MPU6050, BME280, GPS, compass, battery pin, ESCs, radio
+│   ├── FlightIo.hpp                the plugs: one small interface per sensor, + motors + radio
 │   │
 │   ├── state/          the drone's memory & settings
 │   │   ├── FlightSettings.hpp      the settings struct + the flightsettings.json loader
@@ -217,7 +218,7 @@ src/
 │   │   ├── CalibratePhase.hpp      ground maintenance: compass calibration
 │   │   └── ManualPhase.hpp         fly by RC sticks (+ GPS position hold)
 │   │
-│   ├── services/       the "how": sensors, motors, math, safety, radio, logging
+│   ├── services/       the "how": motors, math, safety, radio switches, logging
 │   │   ├── PID.hpp                 the P-I-D control formula
 │   │   ├── MotorController.hpp     PIDs + motor mixing (targets → 4 motor numbers)
 │   │   ├── Motors.hpp              the only thing phases use to drive the motors (→ the FlightIo)
@@ -225,18 +226,21 @@ src/
 │   │   ├── NavMath.hpp             GPS geometry (distance, bearing, N/E split, forward/right)
 │   │   ├── Failsafes.hpp           the safety net (timeout / geofence / GPS loss / radio loss / battery)
 │   │   ├── Battery.hpp             fuel gauge: pack voltage + estimated mAh used → OK / WARNING / CRITICAL
-│   │   ├── RcInput.hpp             the radio (CRSF/ELRS): sticks + switches
-│   │   ├── Log.hpp                 thread-safe serial printing + PANIC()
-│   │   ├── Imu.hpp                 accel/gyro → attitude (MPU6050 + Madgwick)
-│   │   ├── Gps.hpp                 GPS receiver (BN-880 via TinyGPSPlus)
-│   │   ├── Compass.hpp             magnetometer + calibration (QMC5883L)
-│   │   └── Altimeter.hpp           barometer → height above ground (BME280)
+│   │   ├── RcInput.hpp             what the radio's switches MEAN (START / STOP / MANUAL / LAND)
+│   │   └── Log.hpp                 thread-safe serial printing + PANIC()
 │   │
-│   └── hardware/       the lowest level: individual chips & pins
-│       ├── IESC.hpp                interface: "an ESC" (see note in §11) + the motor layout
-│       ├── EspPwmESC.hpp           PWM motor driver (ESP32 LEDC)
-│       ├── IBarometer.hpp          interface: "a barometer"
-│       └── EspBarometer.hpp        BME280 barometer driver
+│   └── hardware/       the real drone: one driver per plug, plus the chip-level helpers
+│       ├── HardwareIo.hpp          all seven real drivers together: fc::begin(hardware.io())
+│       ├── Mpu6050Imu.hpp          IImu: accel/gyro → attitude (MPU6050 + Madgwick)
+│       ├── Bme280Altimeter.hpp     IAltimeter: barometer → height above ground (BME280)
+│       ├── Bn880Gps.hpp            IGps: GPS receiver (BN-880 via TinyGPSPlus)
+│       ├── Qmc5883Compass.hpp      ICompass: magnetometer + calibration (QMC5883L)
+│       ├── AdcBatterySensor.hpp    IBatterySensor: pack voltage through a resistor divider
+│       ├── PwmMotors.hpp           IMotors: the 4 ESCs
+│       ├── CrsfRadio.hpp           IRadio: the ELRS receiver (CRSF frames → sticks + switches)
+│       ├── EspPwmESC.hpp           one ESC's PWM signal (ESP32 LEDC)
+│       ├── EspBarometer.hpp        the BME280 chip
+│       └── I2cBus.hpp              starts the I2C wires the IMU, compass and barometer share
 │
 └── apps/                           THE PROGRAMS (flash one: pio run -e <app> -t upload)
     ├── fly/main.cpp                the real flight program
@@ -244,9 +248,13 @@ src/
     ├── bench_test/main.cpp         props OFF: spin one motor at a time, stream every sensor
     ├── esc_calibration/main.cpp    props OFF: teach the ESCs the throttle range (once)
     ├── compass_calibration/main.cpp  outdoors: calibrate the compass (once)
-    ├── sim/                        the on-chip simulator
-    │   ├── main.cpp                picks the scenario, adjusts its settings, answers DUMPLOG
-    │   └── SimIo.hpp               the sim's FlightIo: QuadSim physics + scenarios + flight log
+    ├── sim/                        the on-chip simulator (see §8)
+    │   ├── main.cpp                picks the scenario, plugs the fakes in, answers DUMPLOG
+    │   ├── SimWorld.hpp            what's TRUE: QuadSim physics + the pack's charge, on its own 200 Hz clock
+    │   ├── SimSensors.hpp          fake sensors (look at the world) + fake motors (push it)
+    │   ├── SimRadio.hpp            the fake transmitter the scenario's pilot holds
+    │   ├── FlightLog.hpp           the flight recorder (/flight.csv)
+    │   └── scenarios/              one file per test (+ Scenario.hpp: the rig and the pilot)
     └── common/                     shared by apps: SerialInput.hpp (reads what you type)
 ```
 
@@ -263,28 +271,41 @@ Every file below has: a one-line **ELI5**, what it does, and how it connects to 
 #### [`FlightController.hpp`](src/flight/FlightController.hpp)
 **ELI5:** the front door of the flight controller: the buttons an app is allowed to press.
 
-The **public API**, and the "composition root": the one place that owns the real instance of every service (`motors`, `battery`, `motorController`, `compass`, `gps`, `imu`, `altimeter`) and the shared notebook (`shared`) and its two mutexes. Every other file refers to these as `extern`. An app includes this file **exactly once**, from its `main.cpp`.
+The **public API**, and the "composition root": the one place that owns the real instance of every service (`motors`, `battery`, `motorController`) and the shared notebook (`shared`) and its two mutexes. Every other file refers to these as `extern`. An app includes this file **exactly once**, from its `main.cpp`.
 
 What an app can call:
-- **Setup:** `fc::loadSettings(errors, {overrides...})` (reads [`flightsettings.json`](#flightsettingsjson), then any override files on top), `fc::hasSettingsOverride(name)`, `fc::begin(io)` (bring up the IO, start both loops), `fc::halt(why)`. (`fc::settingsForEdit()` also exists, for values only known at run time; prefer an override file.)
-- **Commands** (the same ones the radio switches send): `fc::start()`, `fc::stop()`, `fc::land()`, `fc::manualOn()` / `manualOff()`, `fc::setSticks(...)`, `fc::setMission(route)`, `fc::calibrateCompass()`, `fc::radioHeartbeat()`.
+- **Setup:** `fc::loadSettings(errors, {overrides...})` (reads [`flightsettings.json`](#flightsettingsjson), then any override files on top), `fc::hasSettingsOverride(name)`, `fc::begin(io)` (plug in the sensors, motors and radio, bring each up, start the loops), `fc::halt(why)`. Settings are only ever changed through files, never from code.
+- **Commands** (the same ones the radio switches send): `fc::start()`, `fc::stop()`, `fc::land()`, `fc::manualOn()` / `manualOff()`, `fc::setMission(route)`, `fc::calibrateCompass()`. (Stick positions only ever come from the radio plug.)
 - **Read-only state:** `fc::phase()`, `fc::sensors()`, `fc::batteryState()`, `fc::lastMotorMix()`, `fc::missionWaypointIndex()`, `fc::launchPoint(...)`.
 
-Inside, it runs the two loops pinned to different cores (`xTaskCreatePinnedToCore`):
-- **navigation task** (10 Hz): ask the IO for GPS + compass, write them into `shared`, run the current phase's `navTick()`.
-- **physics task** (200 Hz): ask the IO for attitude, altitude and battery voltage, run the current phase's `physicsTick()`, then update the battery fuel gauge.
+Inside, it runs three loops pinned to the two cores (`xTaskCreatePinnedToCore`):
+- **navigation task** (10 Hz): read the GPS and compass plugs, write them into `shared`, run the current phase's `navTick()`.
+- **physics task** (200 Hz): read the IMU, altimeter and battery-sensor plugs, run the current phase's `physicsTick()`, then update the battery fuel gauge.
+- **radio task** (every 2 ms): ask the radio plug for a new frame; if there is one, hand it to [`RcInput`](#rcinputhpp) (sticks, switch flips, "the radio is alive").
 
 #### [`FlightIo.hpp`](src/flight/FlightIo.hpp)
-**ELI5:** the plug the flight controller's senses and hands connect through.
+**ELI5:** the sockets the flight controller's senses, hands and ears plug into: one socket per sensor.
 
-An interface (like a C# `interface`): `begin()`, `readFast()` (200 Hz), `readSlow()` (10 Hz), and the motor outputs. The flight controller never knows what's behind it. **[`HardwareIo`](src/flight/io/HardwareIo.hpp)** is the real drone: it reads the MPU6050, BME280, GPS, compass and battery divider, drives the ESCs, and starts the radio task, all using the pins in the settings. It comes up in three parts (`beginMotors()`, `beginSensors()`, `beginRadio()`), so small apps can use only what they need. **`SimIo`** ([`apps/sim`](src/apps/sim/SimIo.hpp)) is the simulator (see §8).
+Seven small interfaces (like C# `interface`s), each with an optional `begin()`:
+
+| Plug | Gives the flight controller | Real drone ([`hardware/`](src/flight/hardware/)) |
+|---|---|---|
+| `IImu` | roll / pitch / yaw + yaw rate | `Mpu6050Imu` |
+| `IAltimeter` | height above launch, ft | `Bme280Altimeter` |
+| `IGps` | lat / lon / fix | `Bn880Gps` |
+| `ICompass` | heading (+ calibration) | `Qmc5883Compass` |
+| `IBatterySensor` | pack volts | `AdcBatterySensor` |
+| `IMotors` | ← takes the 4 motor commands | `PwmMotors` |
+| `IRadio` | radio frames: sticks + switch positions | `CrsfRadio` |
+
+`FlightIo` is just the bundle of those seven pointers, handed to `fc::begin()`. The radio is the only optional one: with no radio there's no pilot, so nothing ever tells the drone to take off (that's how `compass_calibration` stays safely on the ground). **[`HardwareIo`](src/flight/hardware/HardwareIo.hpp)** holds all seven real drivers: `fc::begin(hardware.io())`. Small apps can use a single driver directly (`hardware.motors.writeOne(...)`). The sim app plugs in fakes instead (see §8). The motor layout diagram (which corner is M1, which way each prop spins) lives on `IMotors`.
 
 #### The apps ([`src/apps/`](src/apps/))
 Each is a small `main.cpp` with its own `setup()`/`loop()`, flashed with `pio run -e <app> -t upload`:
 
 | App | What it does |
 |---|---|
-| [`fly`](src/apps/fly/main.cpp) | the real flight program: settings → `HardwareIo` → `fc::begin` → the radio drives it |
+| [`fly`](src/apps/fly/main.cpp) | the real flight program: settings → `fc::begin(hardware.io())` → the radio drives it |
 | [`first_mission`](src/apps/first_mission/main.cpp) | the same, but it loads [`flightsettings/first_mission.json`](data/flightsettings/first_mission.json) on top: the mission becomes a 30 m out-and-back along the first leg of the route |
 | [`bench_test`](src/apps/bench_test/main.cpp) | props off: `1`–`4` spins one motor, `s` streams every sensor. Never starts the flight loops or radio. |
 | [`esc_calibration`](src/apps/esc_calibration/main.cpp) | props off: the one-time GO / MIN throttle-range routine, using only the ESCs |
@@ -434,7 +455,7 @@ Owns six PIDs (altitude, roll, pitch, yaw, and two for GPS navigation). Its main
 #### [`Motors.hpp`](src/flight/services/Motors.hpp)
 **ELI5:** the hands — the only code allowed to touch the 4 motors.
 
-Forwards to the [`FlightIo`](#flightiohpp) (real ESCs via `HardwareIo`, or the sim's physics). `writeMix()` sends the four throttles and remembers them as `lastMix` (the battery estimate and the sim use it); `disarmAll()` cuts them. `runEscCalibration()` is the one-time, props-off ESC range calibration (turned on with `CALIBRATE_ESCS_ON_BOOT` in [`FlightConfig.hpp`](#flightconfighpp); it walks you through the steps over the serial monitor, then halts). In sim, every method is a no-op (no motor hardware). Nothing else in the codebase talks to motor pins — that's what keeps motor control in one auditable place.
+Forwards to the `IMotors` plug ([`FlightIo.hpp`](#flightiohpp): the real ESCs, or the sim's physics). `writeMix()` sends the four throttles and remembers them as `lastMix` (the battery estimate uses it); `disarmAll()` cuts them. No phase touches the motors plug directly — that's what keeps motor control in one auditable place. (The one-time ESC range calibration is its own app, [`esc_calibration`](src/apps/esc_calibration/main.cpp).)
 
 #### [`NavMath.hpp`](src/flight/services/NavMath.hpp)
 **ELI5:** the map math — "how far, which way, and how does that split into north/east?"
@@ -446,62 +467,60 @@ Pure geometry, no state: `gpsDistanceMeters` (haversine distance), `gpsBearing` 
 
 `checkCoreFailsafes(...)`, three checks in priority order: **max flight time** → **land where it is** (on a big field, flying home could cost more battery than is left); **geofence breach** (flew too far from launch) → force RTL; **GPS lost too long** → abort straight to LANDING (can't fly home blind). Called from HOLD and MISSION. (Note: MANUAL deliberately does *not* run these — manual is manual, STOP is the safety.)
 
-Plus `checkRadioFailsafe()`: if no radio frame arrives for `RC_LOSS_TIMEOUT_MS` (1 s), the pilot's STOP/MANUAL switches can't reach the drone, so it comes home by itself: RTL, or LANDING if it's below `RC_LOSS_LAND_BELOW_FT` or has no GPS. Called from RAISE, HOLD, MISSION **and** MANUAL (with no radio there is no pilot, even in manual). It only arms once a radio has actually been heard, so it's inert in the sim unless the `rcloss` scenario fakes one.
+Plus `checkRadioFailsafe()`: if no radio frame arrives for `RC_LOSS_TIMEOUT_MS` (1 s), the pilot's STOP/MANUAL switches can't reach the drone, so it comes home by itself: RTL, or LANDING if it's below `RC_LOSS_LAND_BELOW_FT` or has no GPS. Called from RAISE, HOLD, MISSION **and** MANUAL (with no radio there is no pilot, even in manual). It only arms once a radio has actually been heard (so the radio-less `compass_calibration` app never trips it). The sim always has a fake radio, so it's armed in every sim scenario, and `rcloss` cuts it.
 
 Plus `checkBatteryFailsafe()`: as soon as the [`Battery`](#batteryhpp) service reports **WARNING or CRITICAL**, the drone **lands where it is**, never flying home first. Called from every airborne phase (RAISE, HOLD, MISSION, MANUAL, HOVER_SETTLE, and the three RTL phases), so it also cuts a return-home short if the battery runs low on the way.
 
 #### [`Battery.hpp`](src/flight/services/Battery.hpp)
 **ELI5:** the fuel gauge, modeled on INAV's battery code.
-Three independent gauges, because none is trustworthy alone: (1) **pack voltage**, read on GPIO 1 through a two-resistor divider and smoothed with a 1 Hz filter so throttle punches don't trip it; (2) **estimated mAh used**, from INAV's "virtual current sensor" idea: `amps ≈ CURRENT_IDLE_A + CURRENT_MOTOR_FULL_A × (m1³ + m2³ + m3³ + m4³)` (prop power grows with speed cubed), added up over time; and (3) the **flight-time limit** in `Failsafes.hpp`. The voltage and mAh gauges each give OK / WARNING / CRITICAL (with a small buffer so it doesn't flicker), and the worse one wins. For LiFePO4, whose voltage is flat until the end, the mAh estimate is the main gauge and voltage is the backup. The START switch also refuses to take off on a low pack. All thresholds live in [`FlightConfig.hpp`](#flightconfighpp). If the divider isn't wired, the voltage gauge is skipped and the other two still work. In SIM, [`OnboardSim`](#onboardsimhpp) supplies a fake LiFe pack that drains, sags, and has the voltage "cliff".
+Three independent gauges, because none is trustworthy alone: (1) **pack voltage**, read on GPIO 1 through a two-resistor divider and smoothed with a 1 Hz filter so throttle punches don't trip it; (2) **estimated mAh used**, from INAV's "virtual current sensor" idea: `amps ≈ CURRENT_IDLE_A + CURRENT_MOTOR_FULL_A × (m1³ + m2³ + m3³ + m4³)` (prop power grows with speed cubed), added up over time; and (3) the **flight-time limit** in `Failsafes.hpp`. The voltage and mAh gauges each give OK / WARNING / CRITICAL (with a small buffer so it doesn't flicker), and the worse one wins. For LiFePO4, whose voltage is flat until the end, the mAh estimate is the main gauge and voltage is the backup. The START switch also refuses to take off on a low pack. All thresholds live in the `battery` section of [`flightsettings.json`](#flightsettingsjson). The voltage comes from the `IBatterySensor` plug; if the divider isn't wired, the voltage gauge is skipped and the other two still work. In the sim, [`SimWorld`](src/apps/sim/SimWorld.hpp) has a fake LiFe pack that drains, sags, and has the voltage "cliff".
 
 #### [`RcInput.hpp`](src/flight/services/RcInput.hpp)
-**ELI5:** the radio receiver — reads your transmitter's sticks and switches.
+**ELI5:** what your transmitter's switches *mean*.
 
-Two layers: the **intent handlers** (`crsfHandleStart`, `crsfHandleStop`, `crsfHandleManualOn/Off`, `crsfHandleLand`) that decide what a switch flip *means* given the current phase; and (real hardware only) `crsfTask`, which parses the raw CRSF protocol frames off the wire, latches the four sticks into `shared.sticks`, and edge-detects the switches. The handlers are shared between real radio and the simulator, so the sim tests the exact same intent logic. Also has `crsfNorm` to turn raw radio numbers into clean −1…1 values.
+The radio itself is a plug (`IRadio`): [`CrsfRadio`](src/flight/hardware/CrsfRadio.hpp) on the real drone decodes the CRSF bytes off the wire, the sim's `SimRadio` is a fake transmitter. Either way, each frame says where the sticks and switches are, and `handleRadioFrame()` here does the rest, identically for both: latch the sticks into `shared.sticks`, mark the radio link alive (for the radio-loss failsafe), and turn switch *flips* into intent (STOP is acted on every frame it's on; START, LAND and MANUAL on the flip). The **intent handlers** (`crsfHandleStart`, `crsfHandleStop`, `crsfHandleManualOn/Off`, `crsfHandleLand`) decide what a flip means given the current phase; they're also the public API's `fc::start()`, `fc::land()`, ….
 
 #### [`Log.hpp`](src/flight/services/Log.hpp)
 **ELI5:** safe printing (so two cores don't scramble each other's messages) + a "halt on fatal bug" macro.
 
 `logLine()` holds a mutex while printing so log lines never interleave. `PANIC(msg)` prints once and freezes the chip forever — used for unrecoverable setup bugs so a broken drone never flies. **Note:** in sim, these exact log strings *are* the test protocol, so their wording matters.
 
-#### [`Imu.hpp`](src/flight/services/Imu.hpp)
-**ELI5:** the inner-ear — turns raw accel/gyro into "how am I tilted?"
-
-Owns the MPU6050 chip and a **Madgwick filter** that fuses accelerometer + gyroscope into stable roll/pitch/yaw angles. Read every physics tick by `HardwareIo`. In the sim app, `SimIo` supplies the attitude instead. *Quirk:* the fused angles are stored in fields named `gyroX/Y/Z` — they're actually roll/pitch/yaw, not raw gyro.
-
-#### [`Gps.hpp`](src/flight/services/Gps.hpp)
-**ELI5:** the "where am I on Earth" receiver.
-Owns a TinyGPSPlus parser on a serial port; `read()` returns a fresh fix (lat/lon/sats/speed) when one is valid and recent, else reports no fix. Used by `HardwareIo`; in the sim app, `SimIo` supplies the position instead.
-
-#### [`Compass.hpp`](src/flight/services/Compass.hpp)
-**ELI5:** the "which way am I facing" sensor, plus its calibration ritual.
-Owns the QMC5883L magnetometer. `readHeadingDeg()` gives the live heading. The calibration methods (start/sample/finish, driven by [`CalibratePhase`](#calibratephasehpp)) work out the hard-iron/soft-iron corrections and save them to flash so you only calibrate once per environment.
-
-#### [`Altimeter.hpp`](src/flight/services/Altimeter.hpp)
-**ELI5:** the "how high above where I took off" sensor.
-Wraps the barometer ([`EspBarometer`](#espbarometerhpp)). On `begin()` it averages ~2 seconds of readings to lock in the ground level, so `readAltitudeFt()` reports height *above that spot* (not sea level). Converts meters → feet.
-
 ---
 
-### 7.6 `hardware/` — the lowest level
+### 7.6 `hardware/` — the real drone's parts
 
-The bottom of the stack: code that talks to specific chips and pins.
+One driver per plug (see [`FlightIo.hpp`](#flightiohpp)), plus the chip-level helpers they use. Nothing outside this folder knows which chips the drone has.
 
-#### [`IESC.hpp`](src/flight/hardware/IESC.hpp)
-**ELI5:** the idea of "an ESC" as an interface, with the motor layout diagram.
-Defines what any ESC driver *should* offer (initialize/write/disarm/getMotor) and documents the physical motor numbering and spin directions: M1 front-left and M4 rear-right spin **clockwise**, M2 front-right and M3 rear-left **counter-clockwise** (seen from above). Those directions must match the mixer's yaw signs: a prop twists the body the opposite way, so speeding up the CCW pair (M2 + M3) turns the drone clockwise. **See the note in [section 11](#11-honest-notes--rough-edges):** the real driver doesn't currently inherit from this interface.
+#### [`HardwareIo.hpp`](src/flight/hardware/HardwareIo.hpp)
+**ELI5:** the box of real parts. Holds one of each driver below; `hardware.io()` hands all seven to `fc::begin()`.
 
-#### [`EspPwmESC.hpp`](src/flight/hardware/EspPwmESC.hpp)
-**ELI5:** the actual motor driver — sends each ESC a stream of pulses whose *width* is the throttle.
-One instance per motor. Standard PWM, which every ESC understands: 1000 µs = stopped, 2000 µs = full, repeated `ESC_PWM_HZ` (400) times a second. The ESP32's **LEDC** peripheral generates the pulses in hardware. PWM ESCs need a one-time range calibration (see [`Motors`](#motorshpp)). (An older DShot600 driver was removed: budget ESCs usually don't support DShot, and PWM works with every ESC.)
+#### [`Mpu6050Imu.hpp`](src/flight/hardware/Mpu6050Imu.hpp) — `IImu`
+**ELI5:** the inner ear — turns raw accel/gyro into "how am I tilted?"
+Owns the MPU6050 chip and a **Madgwick filter** that fuses accelerometer + gyroscope into stable roll/pitch/yaw angles. *Quirk:* the fused angles are stored in fields named `gyroX/Y/Z` — they're actually roll/pitch/yaw, not raw gyro.
 
-#### [`IBarometer.hpp`](src/flight/hardware/IBarometer.hpp)
-**ELI5:** the idea of "a barometer" as an interface.
-Says any barometer must offer `initialize()` and `readAltitudeMeters()`. (The header text mentions BMP280, but the real driver is a BME280 — see below.)
+#### [`Bme280Altimeter.hpp`](src/flight/hardware/Bme280Altimeter.hpp) — `IAltimeter`
+**ELI5:** the "how high above where I took off" sensor.
+Wraps the barometer chip ([`EspBarometer`](src/flight/hardware/EspBarometer.hpp)). On `begin()` it averages ~2 seconds of readings to lock in the ground level, so `readFt()` reports height *above that spot* (not sea level).
 
-#### [`EspBarometer.hpp`](src/flight/hardware/EspBarometer.hpp)
-**ELI5:** the actual barometer driver — reads the BME280 pressure chip and turns pressure into altitude.
-Implements `IBarometer`. On init it finds the chip on I2C and averages 20 readings to set a ground-pressure reference. Used by the [`Altimeter`](#altimeterhpp) service.
+#### [`Bn880Gps.hpp`](src/flight/hardware/Bn880Gps.hpp) — `IGps`
+**ELI5:** the "where am I on Earth" receiver.
+A TinyGPSPlus parser on a serial port; `read()` returns a fresh fix (lat/lon/sats/speed) when one is valid and recent, else `fix = false`.
+
+#### [`Qmc5883Compass.hpp`](src/flight/hardware/Qmc5883Compass.hpp) — `ICompass`
+**ELI5:** the "which way am I facing" sensor, plus its calibration ritual.
+`readHeadingDeg()` gives the live heading. The calibration methods (start/sample/finish, driven by [`CalibratePhase`](#calibratephasehpp)) work out the hard-iron/soft-iron corrections and save them to flash so you only calibrate once per environment.
+
+#### [`AdcBatterySensor.hpp`](src/flight/hardware/AdcBatterySensor.hpp) — `IBatterySensor`
+**ELI5:** the fuel-gauge needle. Reads the pack voltage on an ESP32 pin through a two-resistor divider.
+
+#### [`PwmMotors.hpp`](src/flight/hardware/PwmMotors.hpp) — `IMotors`
+**ELI5:** the four ESCs. One [`EspPwmESC`](src/flight/hardware/EspPwmESC.hpp) per motor, which sends standard PWM: 1000 µs = stopped, 2000 µs = full, 400 times a second, generated in hardware by the ESP32's **LEDC** peripheral. PWM ESCs need a one-time range calibration (the `esc_calibration` app). (An older DShot600 driver was removed: budget ESCs usually don't support DShot, and PWM works with every ESC.)
+
+#### [`CrsfRadio.hpp`](src/flight/hardware/CrsfRadio.hpp) — `IRadio`
+**ELI5:** the radio receiver. Decodes CRSF frames from the ELRS receiver into "where are the sticks and switches"; which channel is which switch comes from `radio` in the settings. What a flip *means* is decided in [`RcInput`](#rcinputhpp).
+
+#### [`I2cBus.hpp`](src/flight/hardware/I2cBus.hpp)
+The IMU, compass and barometer share two I2C wires; each driver calls `startI2c()` and only the first call does anything.
 
 ---
 
@@ -509,42 +528,54 @@ Implements `IBarometer`. On init it finds the chip on I2C and averages 20 readin
 
 You do **not** need a real drone to run and test this. The whole simulation runs **on the ESP itself**.
 
-**How it works.** The simulator is just another app: [`sim`](src/apps/sim/main.cpp). It hands the flight controller a [`SimIo`](src/apps/sim/SimIo.hpp) instead of the real `HardwareIo`. Every physics tick, the flight controller asks `SimIo` for sensor readings; `SimIo` feeds the last motor command into the **QuadSim** physics library ([`lib/QuadSim/`](lib/QuadSim/)) and answers with the simulated drone's attitude, altitude, GPS and battery voltage. The flight controller can't tell the difference. So the **real controller flies against real physics, at the real 200 Hz, with one clock and no laptop in the loop.** It flies the field autonomously (fakes the START switch), and logs the whole flight to LittleFS.
+**How it works.** The simulator is just another app: [`sim`](src/apps/sim/main.cpp). It plugs **fakes** into the same seven sockets the real chips use ([`FlightIo.hpp`](#flightiohpp)), so the flight controller can't tell the difference. So the **real controller flies against real physics, at the real 200 Hz, with no laptop in the loop.** The pieces, each in its own file in [`src/apps/sim/`](src/apps/sim/):
 
-There are only ever **two voices**, both on the chip:
-- 🧠 **The brain** (the flight controller) — decides how hard to spin the motors. It can only see through its **sensors**.
-- ⚙️ **The physics** (QuadSim) — decides what actually happens to the drone. It never makes a flight decision.
+- 🌍 **[`SimWorld`](src/apps/sim/SimWorld.hpp)** — what's **true**: where the drone really is, how it's really tilted, how much charge the pack really has. The **QuadSim** physics library ([`lib/QuadSim/`](lib/QuadSim/)) does the work: motor thrust → force → acceleration → velocity → position. It runs on **its own 200 Hz clock**, like the real world: the drone's motors push it and its sensors look at it, but it carries on regardless.
+- 👀 **[`SimSensors`](src/apps/sim/SimSensors.hpp)** — the fake sensors. Each just looks at the world: `SimGps` turns the true position (meters from home) into lat/lon, `SimAltimeter` reports the true height, and so on. `SimMotors` hands the motor commands to the world.
+- 🎮 **[`SimRadio`](src/apps/sim/SimRadio.hpp)** — a fake transmitter. The scenario's pilot flips its switches and moves its sticks; the flight controller gets frames exactly like the real receiver's, through the same switch logic.
+- 🧪 **[`scenarios/`](src/apps/sim/scenarios/)** — one file per test.
+- 📼 **[`FlightLog`](src/apps/sim/FlightLog.hpp)** — writes the true position, tilt and phase to `/flight.csv` 10× a second; `DUMPLOG` streams it back.
 
 ```
-   phase logic  ──►  MotorMix  ──►  QuadSim.step()  ──►  new attitude/pos  ──►  shared.raw (fake sensors)
-   "fly to the waypoint"          "given those motors,        "the sensors now
-                                   here's the new state"        read like this"   ──► back to the brain
+   flight controller ──► SimMotors ──► SimWorld (QuadSim: position, tilt, pack charge)   ◄── scenario: gust, weak pack
+          ▲                                  │  its own 200 Hz clock
+          │                                  ▼
+          └──── SimImu / SimGps / SimCompass / SimAltimeter / SimBatterySensor         ◄── scenario: wrap one to break it
+          └──── SimRadio (sticks + switches)                                            ◄── scenario: the pilot
 ```
 
-**Running it.** [`simulate/run_hil.sh`](simulate/run_hil.sh) uploads the settings file, flashes the `sim` app, and runs the on-ESP scenarios in [`simulate/scenarios_esp/`](simulate/scenarios_esp/) — each flies a mission autonomously on the chip, pulls the flight log back over USB (the `DUMPLOG` command), checks it, and saves a JSON the map replay reads:
+**What a scenario can do** — only three things (see [`Scenario.hpp`](src/apps/sim/scenarios/Scenario.hpp)):
+
+| Kind | How | Examples |
+|---|---|---|
+| change the **world** (something really happens) | `rig.world.gust(...)`, `rig.world.setCharge(...)` | `stab` (a gust), `lowbatt` (a weak pack) |
+| break a **sensor** (the drone perceives it wrong) | wrap one plug in `setup()`: `rig.io.gps = new LosableGps(rig.io.gps)` | `gpsloss` (`LosableGps`), `rcloss` (`CuttableRadio`) |
+| be the **pilot** | `rig.radio.pressStart()`, `pressLand()`, `setManual()`, `setSticks()`, `setStop()` | every scenario takes off this way; `land`, `manual` |
+
+And **rule changes are settings**, not code: a scenario's own override file `flightsettings/sim.<name>.json` is picked up automatically (`sim.geofence.json` shrinks the fence, `sim.timeout.json` shortens the timer), a scenario can ask for another file (`testroute` loads the real `first_mission.json`), and every sim run loads `sim.json` (a 10-minute limit, so the full fence line isn't cut short).
+
+**Running it.** [`simulate/run_hil.sh`](simulate/run_hil.sh) uploads the settings, flashes the `sim` app, and runs the checks in [`simulate/scenarios_esp/`](simulate/scenarios_esp/). Each check resets the ESP, sends `SCENARIO:<name>` (the sim hears it before loading the settings), waits for the flight to finish, pulls the log (`DUMPLOG`), checks it, and saves a JSON the map replay reads:
 
 ```
 ESP_PORT=/dev/cu.usbmodem14101 ./simulate/run_hil.sh
 ```
 
-The scenario list is a simple array at the top of that script. Each one picks its behaviour at boot with a single `SCENARIO:` command (no extra builds). The sim app hears it *before* loading the settings, so a scenario can bring its own override file (`flightsettings/sim.geofence.json` shrinks the fence, `flightsettings/sim.timeout.json` shortens the timer), and `testroute` loads the real `flightsettings/first_mission.json`. Every sim run also loads `flightsettings/sim.json`, which raises the flight-time limit to 10 minutes so the full fence line isn't cut short; and the shared fly-and-pull helper [`simulate/scenarios_esp/esp_sim.py`](simulate/scenarios_esp/esp_sim.py) resets the ESP, selects the scenario, waits for it to finish, and pulls the log. The suite (the on-chip replacements for the old HIL scenarios):
+| Check | Scenario file | What it exercises |
+|---|---|---|
+| `field_patrol.py` | `FlyMission` (`full`) | full flight: takeoff → whole fence line → land (also drives the Clover map) |
+| `geofence_breach.py` | `FlyMission` (`geofence`) + `sim.geofence.json` | fly past a 40 m fence → geofence failsafe forces RTL |
+| `gps_loss.py` | `GpsLoss` | the GPS loses its fix while hovering → lands where it is (can't RTL blind) |
+| `max_timeout.py` | `FlyMission` (`timeout`) + `sim.timeout.json` | flight-time limit hit → lands where it is (no RTL) |
+| `low_battery.py` | `LowBattery` | pack only 25% charged → voltage gauge → lands where it is |
+| `rc_loss.py` | `RadioLoss` | radio link cut mid-mission → radio failsafe → RTL → land |
+| `land_switch.py` | `LandSwitch` | LAND switch flipped while hovering → lands where it is |
+| `test_route.py` | `FlyMission` (`testroute`) + `first_mission.json` | the short first-flight route: 30 m out and back, lands at home |
+| `manual_flight.py` | `ManualFlight` | MANUAL mode flies the drone on the sticks against the physics |
+| `stabilization.py` | `Stabilization` | a gust rolls it ~22° → the controller recovers to level |
 
-| Scenario | What it exercises |
-|---|---|
-| `field_patrol.py` | full flight: takeoff → whole fence line → land (also drives the Clover map) |
-| `geofence_breach.py` | fly past a shrunk fence → geofence failsafe forces RTL |
-| `gps_loss.py` | GPS fix drops → abort straight to LANDING (can't RTL blind) |
-| `max_timeout.py` | flight-time limit hit → lands where it is (no RTL) |
-| `low_battery.py` | pack only 25% charged → voltage gauge → lands where it is |
-| `rc_loss.py` | radio link cut mid-mission → radio failsafe → RTL → land |
-| `land_switch.py` | LAND switch flipped while hovering → lands where it is |
-| `test_route.py` | the short first-flight route (`TEST_ROUTE`): 30 m out and back, lands at home |
-| `manual_flight.py` | MANUAL mode flies the drone on the sticks against the physics |
-| `stabilization.py` | a gust rolls it ~22° → the controller recovers to level |
+**Adding a scenario:** a new file in `scenarios/` (copy the closest one), one line in the list at the top of the sim's [`main.cpp`](src/apps/sim/main.cpp), an optional `sim.<name>.json`, and a check script in `simulate/scenarios_esp/`. You never touch the world, the fake sensors, or the flight controller.
 
-Each injects its fault by nudging the on-chip state (dropping the GPS fix, shrinking the geofence, holding a tilt, etc.) — the physics still runs entirely on the ESP.
-
-**The frame mapping (why it flies straight).** The sign conventions between QuadSim's world and the firmware's were **locked on the laptop first**, in [`lib/QuadSim/examples/nav_check.cpp`](lib/QuadSim/examples/nav_check.cpp), which runs the firmware's exact nav+mix math against QuadSim and sweeps the signs until it converges on a waypoint. The result (roll `+`, pitch `−`, north `−x`, east `−y`) went into `OnboardSim.hpp` and flew correctly on the first hardware run. If you ever change the mixing or QuadSim's frames, re-run `nav_check` before flashing.
+**The frame mapping (why it flies straight).** The sign conventions between QuadSim's world and the firmware's were **locked on the laptop first**, in [`lib/QuadSim/examples/nav_check.cpp`](lib/QuadSim/examples/nav_check.cpp), which runs the firmware's exact nav+mix math against QuadSim and sweeps the signs until it converges on a waypoint. The result (roll `+`, pitch `−`, north `−x`, east `−y`) went into the sim (now [`SimWorld.hpp`](src/apps/sim/SimWorld.hpp)) and flew correctly on the first hardware run. If you ever change the mixing or QuadSim's frames, re-run `nav_check` before flashing.
 
 **What this covers — and doesn't.** Because the physics reacts to the motors (a true **closed loop**), this exercises the **whole** system: the navigation/phase brain *and* the stabilization brain (roll/pitch/yaw PIDs + motor mixing), including altitude hold, position hold, cornering and landing. It catches wrong-sign/instability bugs and lets you tune gains against realistic dynamics. **Honest limits:** QuadSim is still a *model*, not your exact airframe (its mass/inertia/thrust are generic), and it doesn't simulate the vibration that shakes a real IMU or GPS noise. It does **not** replace a real, tethered bench test — but it's a far truer test than the old open-loop harness, and it runs at the real rate on the real chip.
 
@@ -572,7 +603,13 @@ Each injects its fault by nudging the on-chip state (dropping the GPS fix, shrin
 → [`RcInput.hpp`](src/flight/services/RcInput.hpp) (the `crsfHandle...` functions) and the channel map (`radio.channels`) in [`flightsettings.json`](data/flightsettings.json).
 
 **I want a new test run or tool (like a bench check or a calibration).**
-→ Make it a new app: a folder in [`src/apps/`](src/apps/) with a `main.cpp`, plus an `[env:your_app]` in [`platformio.ini`](platformio.ini). Use the `fc::` API and/or `HardwareIo`; never add a test mode inside the flight controller.
+→ Make it a new app: a folder in [`src/apps/`](src/apps/) with a `main.cpp`, plus an `[env:your_app]` in [`platformio.ini`](platformio.ini). Use the `fc::` API and/or `HardwareIo`'s drivers; never add a test mode inside the flight controller.
+
+**I want a new sim test (a new failure to try).**
+→ A new file in [`src/apps/sim/scenarios/`](src/apps/sim/scenarios/): change the world, wrap one plug, or be the pilot (see [section 8](#8-simulation--testing)).
+
+**I want to support a different sensor chip (say, another GPS).**
+→ Write one driver in [`src/flight/hardware/`](src/flight/hardware/) that implements that plug (`IGps`), and swap it into [`HardwareIo`](src/flight/hardware/HardwareIo.hpp). Nothing else changes.
 
 **I want to understand a specific log message.**
 → Search the string; every log line is a `logLine("...")`. Remember these strings double as the sim test protocol, so don't reword them casually.
@@ -593,11 +630,12 @@ Each injects its fault by nudging the on-chip state (dropping the GPS fix, shrin
 - **RTL** — Return To Launch. The come-home autopilot.
 - **CRSF / ELRS** — the radio protocol / radio system your transmitter uses.
 - **Geofence** — an invisible max-distance circle around the launch point.
-- **SITL** — Software-In-The-Loop: the physics simulation runs on the same chip as the firmware (here, QuadSim inside the flight loop). See the [`sim` app](src/apps/sim/SimIo.hpp).
+- **SITL** — Software-In-The-Loop: the physics simulation runs on the same chip as the firmware (here, QuadSim inside the flight loop). See the [`sim` app](src/apps/sim/main.cpp).
 - **QuadSim** — the standalone C++ quad-physics library in [`lib/QuadSim/`](lib/QuadSim/) that powers the on-chip sim.
 - **Waypoint** — a GPS point (lat/lon/altitude) the mission flies to.
 - **App** — a small flashable program (`src/apps/*`) that uses the flight controller: `fly`, `first_mission`, `bench_test`, `esc_calibration`, `compass_calibration`, `sim`.
-- **FlightIo** — the interface the flight controller reads sensors and drives motors through: `HardwareIo` on the real drone, `SimIo` in the simulator.
+- **FlightIo / plug** — one small interface per sensor, plus motors and radio, that the flight controller reads and drives through: `HardwareIo`'s drivers on the real drone, fakes in the simulator.
+- **Scenario** — one sim test: it changes the world, breaks one plug, and/or plays the pilot.
 - **flightsettings.json** — every tunable setting, loaded from the drone's flash at power-up (like `appsettings.json` in C#).
 
 ---
@@ -607,10 +645,10 @@ Each injects its fault by nudging the on-chip state (dropping the GPS fix, shrin
 Because this code was largely AI-written, here are a few things a newcomer should know so they aren't confused:
 
 - **`data/` also holds old web files.** `index.html`, `script.js` and `style.css` are leftovers from an early web-server version. Nothing uses them; they just ride along when the settings are uploaded.
-- **`IESC.hpp` is not actually used as an interface.** [`EspPwmESC`](src/flight/hardware/EspPwmESC.hpp) doesn't inherit from [`IESC`](src/flight/hardware/IESC.hpp), and [`HardwareIo`](src/flight/io/HardwareIo.hpp) uses `EspPwmESC` directly. The interface documents intent (and the useful motor-layout diagram) but isn't wired in polymorphically. [`IBarometer`](src/flight/hardware/IBarometer.hpp) *is* implemented by [`EspBarometer`](src/flight/hardware/EspBarometer.hpp), but it too is used concretely, not through the interface.
-- **IMU field names are a little wrong.** In [`Imu.hpp`](src/flight/services/Imu.hpp), the fused roll/pitch/yaw angles are stored in fields named `gyroX/gyroY/gyroZ`. They're angles, not raw gyro rates. This naming flows through the whole codebase. The one true rate is `yawRateDps` (deg/s, + = clockwise), which the yaw damping uses. Its sign assumes the MPU6050 is mounted flat and right side up; check it on the bench (turn the drone clockwise by hand → it should read positive).
+- **IMU field names are a little wrong.** In [`Mpu6050Imu.hpp`](src/flight/hardware/Mpu6050Imu.hpp), the fused roll/pitch/yaw angles are stored in fields named `gyroX/gyroY/gyroZ`. They're angles, not raw gyro rates. This naming flows through the whole codebase. The one true rate is `yawRateDps` (deg/s, + = clockwise), which the yaw damping uses. Its sign assumes the MPU6050 is mounted flat and right side up; check it on the bench (turn the drone clockwise by hand → it should read positive).
 - **The altitude controller uses a hover feed-forward.** A baseline throttle (`airframe.hoverThrottle` in [`flightsettings.json`](data/flightsettings.json)) holds the drone up and the altitude PID only trims around it — this replaced the old integral-windup-from-zero approach that made the height hunt up and down. Tune it per airframe.
 - **Phases intentionally duplicate code.** The near-identical `physicsTick()` in each phase is a deliberate choice (full isolation, so one phase can't break another), not an oversight. Resist the urge to "DRY" them into a base class unless you really mean to change that design decision.
-- **The flight controller includes the real sensor services even in the sim app.** `imu`, `gps`, `compass` and `altimeter` always exist, but only `HardwareIo` ever starts them, so in the sim app they simply sit unused.
+- **The altitude is ground-referenced twice.** [`EspBarometer`](src/flight/hardware/EspBarometer.hpp) sets a ground-pressure reference, then [`Bme280Altimeter`](src/flight/hardware/Bme280Altimeter.hpp) averages ~2 s more readings and subtracts that too. Harmless (the second offset is ~0), just redundant.
+- **The sim turns the nose for the drone.** QuadSim's yaw isn't flown by the flight controller's yaw loop; [`SimWorld`](src/apps/sim/SimWorld.hpp) points the nose at the current target itself (up to 90°/s). So the sim doesn't test yaw control, only everything that depends on the heading.
 
 Welcome aboard — start with the [`fly` app](src/apps/fly/main.cpp) and [`FlightController.hpp`](src/flight/FlightController.hpp), then follow the [guided tour](#5-a-guided-tour-one-whole-flight). 🚁

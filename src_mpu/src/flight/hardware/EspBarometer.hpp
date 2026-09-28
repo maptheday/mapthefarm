@@ -1,6 +1,4 @@
 #pragma once
-#include "./IBarometer.hpp"
-
 #include <Arduino.h>
 #include <Wire.h>
 #include <Adafruit_BME280.h>
@@ -22,9 +20,9 @@
 //  Altitude is relative to ground level at startup (ground = 0.0m)
 // ============================================================
 
-class EspBarometer : public IBarometer {
+class EspBarometer {
 public:
-    void initialize() override {
+    void initialize() {
         // Try 0x77 first (some boards), fall back to 0x76
         bool found = bme_.begin(0x77, &Wire);
         if (!found) found = bme_.begin(0x76, &Wire);
@@ -65,7 +63,7 @@ public:
     }
 
     // Returns altitude in metres above the startup point (ground = 0.0)
-    double readAltitudeMeters() override {
+    double readAltitudeMeters() {
         // Adafruit handles the pressure → altitude formula internally
         // We pass our ground-level pressure as the reference
         return bme_.readAltitude(groundLevelHpa_);

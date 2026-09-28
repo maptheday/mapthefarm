@@ -1,8 +1,8 @@
 #pragma once
 
 // ============================================================================
-// COMPASS service -- owns the magnetometer hardware and its calibration.
-// Two jobs:
+// QMC5883L COMPASS -- the real drone's ICompass. Owns the magnetometer and
+// its calibration. Two jobs:
 //   1. readHeadingDeg()  -- the live heading the nav loop steers by.
 //   2. calibration       -- start/sample/finish, driven by CalibratePhase.
 // Calibration offsets/scales are stored in flash (Preferences) and reloaded on
@@ -12,18 +12,23 @@
 #include <Arduino.h>
 #include <QMC5883LCompass.h>
 #include <Preferences.h>
+#include "../FlightIo.hpp"      // ICompass
+#include "../services/Log.hpp"  // logLine
+#include "I2cBus.hpp"           // startI2c
 
-class Compass {
+class Qmc5883Compass : public ICompass {
 public:
   // Bring up the sensor and apply any stored calibration.
-  void begin() {
+  void begin() override {
+    startI2c();
     hw_.init();
     hw_.setMode(0x01, 0x0C, 0x10, 0xC0);
     loadCalibration();
+    logLine("[COMPASS] QMC5883L ready.");
   }
 
   // Live heading in degrees (0-360). Called by the nav loop each tick.
-  float readHeadingDeg() {
+  float readHeadingDeg() override {
     hw_.read();
     return hw_.getAzimuth();
   }
@@ -31,14 +36,14 @@ public:
   // --- Calibration, driven by CalibratePhase over ~30s ---
 
   // Reset the running min/max before collecting samples.
-  void startCalibration() {
+  void startCalibration() override {
     minX_ = minY_ = minZ_ = 32767;
     maxX_ = maxY_ = maxZ_ = -32768;
   }
 
   // Take one reading and widen the min/max envelope. Call repeatedly while the
   // operator rotates the drone through all orientations.
-  void sampleCalibration() {
+  void sampleCalibration() override {
     hw_.read();
     int16_t x = hw_.getX();
     int16_t y = hw_.getY();
@@ -50,7 +55,7 @@ public:
 
   // Turn the collected envelope into offsets (hard-iron) + scales (soft-iron),
   // apply them to the sensor, and save to flash so they survive a reboot.
-  void finishCalibration() {
+  void finishCalibration() override {
     float offX = (minX_ + maxX_) / 2.0f;
     float offY = (minY_ + maxY_) / 2.0f;
     float offZ = (minZ_ + maxZ_) / 2.0f;
@@ -90,6 +95,3 @@ private:
   int16_t minY_ = 32767, maxY_ = -32768;
   int16_t minZ_ = 32767, maxZ_ = -32768;
 };
-
-// The one Compass instance (defined in FlightController.hpp).
-extern Compass compass;

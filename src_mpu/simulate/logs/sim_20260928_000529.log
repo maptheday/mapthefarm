@@ -1,0 +1,161 @@
+Run log: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/sim_20260928_000529.log
+== On-ESP sim scenarios ==
+  field_patrol.py
+  geofence_breach.py
+  gps_loss.py
+  max_timeout.py
+  low_battery.py
+  rc_loss.py
+  land_switch.py
+  test_route.py
+  manual_flight.py
+  stabilization.py
+== Running on-ESP sim: field_patrol.py ==
+[esp-sim] connected /dev/cu.usbmodem14101 (reset -> fresh flight)
+[esp-sim] scenario 'full'; waiting up to 320s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: full
+   [NAV] Takeoff altitude reached, transitioning to HOLD.
+   [NAV] Reached waypoint 1 cing.
+   [NAV] Reached waypoint 3 — advancing.
+   [NAV] Reached waypoint 5 — advancing.
+   [NAV] Reached waypoin
+   V] Mission complete — hovering before landing.
+   [NAV] Hover complete
+   [NAV] Landed — motors disarmed.
+[esp-sim] finished -- requesting log
+[field_patrol] closest approach to each corner:
+   wp0 corner2: 0.2 m
+   wp1 corner3: 1.4 m
+   wp2 corner4: 3.2 m
+   wp3 corner5: 0.6 m
+   wp4 corner6: 1.0 m
+   wp5 corner7: 1.0 m
+   wp6 corner8: 3.3 m
+   wp7 corner1: 0.0 m
+[field_patrol] phases: PARKED -> RAISE -> HOLD -> MISSION -> HOVER_SETTLE -> LANDING -> LANDED
+[field_patrol] max dist out: 302 m   lands 1.8 m from home   worst corner 3.3 m
+[esp-sim] wrote 2638 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/field_patrol.json
+[field_patrol] PASS
+PASS  field_patrol.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/field_patrol.json)
+== Running on-ESP sim: geofence_breach.py ==
+[esp-sim] connected /dev/cu.usbmodem14101 (reset -> fresh flight)
+[esp-sim] scenario 'geofence'; waiting up to 180s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: geofence
+   [NAV] Takeoff altitude reached, transitioning to HOLD.
+   [SAFETY] Geofence exceeded — forcing RTL.
+   [NAV] Landed — motors disarmed.
+[esp-sim] finished -- requesting log
+[geofence] phases: PARKED -> RAISE -> HOLD -> MISSION -> RTL_CLIMB -> RTL_RETURN -> RTL_SETTLE -> LANDING -> LANDED
+[esp-sim] wrote 853 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/geofence_breach.json
+[geofence] PASS (geofence -> RTL -> landed)
+PASS  geofence_breach.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/geofence_breach.json)
+== Running on-ESP sim: gps_loss.py ==
+[esp-sim] connected /dev/cu.usbmodem14101 (reset -> fresh flight)
+[esp-sim] scenario 'gpsloss'; waiting up to 120s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: gpsloss
+   [NAV] Takeoff altitude reached, transitioning to HOLD.
+   [SCENARIO] GPS fix dropped
+   [NAV] Landed — motors disarmed.
+[esp-sim] finished -- requesting log
+[gpsloss] phases: PARKED -> RAISE -> HOLD -> LANDING -> LANDED
+[esp-sim] wrote 224 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/gps_loss.json
+[gpsloss] PASS (GPS lost -> direct LANDING)
+PASS  gps_loss.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/gps_loss.json)
+== Running on-ESP sim: max_timeout.py ==
+[esp-sim] connected /dev/cu.usbmodem14101 (reset -> fresh flight)
+[esp-sim] scenario 'timeout'; waiting up to 180s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: timeout
+   [NAV] Landed — moto
+[esp-sim] finished -- requesting log
+[timeout] phases: PARKED -> RAISE -> HOLD -> MISSION -> LANDING -> LANDED   LANDING began at 21s
+[esp-sim] wrote 444 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/max_timeout.json
+[timeout] PASS (max flight time -> landed where it was)
+PASS  max_timeout.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/max_timeout.json)
+== Running on-ESP sim: low_battery.py ==
+[esp-sim] connected /dev/cu.usbmodem14101 (reset -> fresh flight)
+[esp-sim] scenario 'lowbatt'; waiting up to 240s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: lowbatt
+   [NAV] Takeoff altitud
+   [NAV] Reached waypoin
+   [NAV] Reached waypoint 1 — advancing.
+   [NAV] Reached waypoin
+   [SAFETY] Battery low — landing here.
+   [NAV] Landed — moto
+[esp-sim] finished -- requesting log
+[lowbatt] phases: PARKED -> RAISE -> HOLD -> MISSION -> LANDING -> LANDED
+[lowbatt] landing began at 97s, 2.96 V/cell, 226 mAh used (est.)
+[esp-sim] wrote 1180 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/low_battery.json
+[lowbatt] PASS (low battery -> landed where it was)
+PASS  low_battery.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/low_battery.json)
+== Running on-ESP sim: rc_loss.py ==
+[esp-sim] connected /dev/cu.usbmodem14101 (reset -> fresh flight)
+[esp-sim] scenario 'rcloss'; waiting up to 180s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: rcloss
+   [SCENARIO] radio link cut
+[esp-sim] wait elapsed -- requesting log
+[rcloss] phases: PARKED -> RAISE -> HOLD -> MISSION -> RTL_CLIMB -> RTL_RETURN -> RTL_SETTLE -> LANDING -> LANDED
+[esp-sim] wrote 1708 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/rc_loss.json
+[rcloss] PASS (radio lost -> RTL -> landed)
+PASS  rc_loss.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/rc_loss.json)
+== Running on-ESP sim: land_switch.py ==
+[esp-sim] connected /dev/cu.usbmodem14101 (reset -> fresh flight)
+[esp-sim] scenario 'land'; waiting up to 120s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: land
+   [NAV] Takeoff altitud
+   [SCENARIO] LAND switch flipped
+   [NAV] Landed — motors disarmed.
+[esp-sim] finished -- requesting log
+[land] phases: PARKED -> RAISE -> HOLD -> LANDING -> LANDED
+[esp-sim] wrote 198 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/land_switch.json
+[land] PASS (LAND switch -> landed where it was)
+PASS  land_switch.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/land_switch.json)
+== Running on-ESP sim: test_route.py ==
+[esp-sim] connected /dev/cu.usbmodem14101 (reset -> fresh flight)
+[esp-sim] scenario 'testroute'; waiting up to 180s to finish...
+   [FC] Flight controller running. Mission: First mission: 30 m out along the first leg and back (2 waypoints).
+   [SCENARIO] selected: testroute
+   [NAV] Takeoff altitude reached, transitioning to HOLD.
+   [NAV[NAV] Mission complet
+   [NAV] Hover complete — beginning automatic landing.
+[esp-sim] wait elapsed -- requesting log
+[testroute] phases: PARKED -> RAISE -> HOLD -> MISSION -> HOVER_SETTLE -> LANDING -> LANDED
+[testroute] farthest 28 m from home, landed 2.3 m from home
+[esp-sim] wrote 1685 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/test_route.json
+[testroute] PASS (short route flown, landed at home)
+PASS  test_route.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/test_route.json)
+== Running on-ESP sim: manual_flight.py ==
+[esp-sim] connected /dev/cu.usbmodem14101 (reset -> fresh flight)
+[esp-sim] scenario 'manual'; waiting up to 60s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: manual
+   [NAV] Takeoff altitude reached, transitio
+   [SCENARIO] manual control on
+   [SCENARIO] ===SCENARIO_DONE===
+[esp-sim] finished -- requesting log
+[manual] phases: PARKED -> RAISE -> HOLD -> MANUAL   moved 9.1 m under manual control
+[esp-sim] wrote 136 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/manual_flight.json
+[manual] PASS (MANUAL mode flew the drone)
+PASS  manual_flight.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/manual_flight.json)
+== Running on-ESP sim: stabilization.py ==
+[esp-sim] connected /dev/cu.usbmodem14101 (reset -> fresh flight)
+[esp-sim] scenario 'stab'; waiting up to 60s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: stab
+   [SCENARIO] attitude kick applied
+   [SCENARIO] ===SCENARIO_DONE===
+[esp-sim] finished -- requesting log
+[stab] peak roll after kick: 22.0 deg;  settled to 1.5 deg
+[esp-sim] wrote 146 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/stabilization.json
+[stab] PASS (kicked ~22 deg, recovered to level)
+PASS  stabilization.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/stabilization.json)
+
+================================
+Results: 10 passed, 0 failed
+================================

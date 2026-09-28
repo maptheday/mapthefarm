@@ -11,7 +11,7 @@
 // ============================================================================
 
 #include "flight/FlightController.hpp"
-#include "flight/io/HardwareIo.hpp"
+#include "flight/hardware/HardwareIo.hpp"
 
 HardwareIo hardware;
 
@@ -22,7 +22,7 @@ void setup() {
   String errors;
   if (!fc::loadSettings(errors)) fc::halt("Can't load flight settings:\n" + errors);
 
-  fc::begin(hardware);   // sensors, ESCs, radio, then the flight loops
+  fc::begin(hardware.io());   // every real sensor, the ESCs, the radio, then the flight loops
 }
 
 void loop() {

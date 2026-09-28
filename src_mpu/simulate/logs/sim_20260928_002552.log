@@ -1,0 +1,19 @@
+Run log: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/sim_20260928_002552.log
+== On-ESP sim scenarios ==
+  rc_loss.py
+== Running on-ESP sim: rc_loss.py ==
+[esp-sim] connected /dev/cu.usbmodem14101 (reset -> fresh flight)
+[esp-sim] scenario 'rcloss'; waiting up to 180s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: rcloss
+   [NAV] Takeoff altitude reached, transitioning to HOLD.
+   [SCENARIO] radio link cut
+[esp-sim] wait elapsed -- requesting log
+[rcloss] phases: PARKED -> RAISE -> HOLD -> MISSION -> RTL_CLIMB -> RTL_RETURN -> RTL_SETTLE -> LANDING -> LANDED
+[esp-sim] wrote 1701 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/rc_loss.json
+[rcloss] PASS (radio lost -> RTL -> landed)
+PASS  rc_loss.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/rc_loss.json)
+
+================================
+Results: 1 passed, 0 failed
+================================

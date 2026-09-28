@@ -941,7 +941,7 @@ Math books write length as `|v|` or `‖v‖` and call it the **magnitude**. Sam
 float segLen = sqrt(segE * segE + segN * segN);
 ```
 
-That's `√(east² + north²)`: the length of the leg between two waypoints. And in the sim app's [`SimIo.hpp`](src/apps/sim/SimIo.hpp), the flight log computes distance from home the same way:
+That's `√(east² + north²)`: the length of the leg between two waypoints. And in the sim app's [`FlightLog.hpp`](src/apps/sim/FlightLog.hpp), the flight log computes distance from home the same way:
 
 ```cpp
 float dist = sqrtf(north * north + east * east);
@@ -1795,7 +1795,7 @@ float yawCorrection = baseYawCorrection - (gyroZ * 0.02f);
 
 The idea is extra damping: "if the drone is *spinning*, push against the spin." That needs a **rate**, something in **degrees per second**. For example, spinning at 20 °/s would give `20 × 0.02 = 0.4` of counter-push.
 
-Now check what `gyroZ` actually holds. In [`Imu.hpp`](src/flight/services/Imu.hpp):
+Now check what `gyroZ` actually holds. In [`Mpu6050Imu.hpp`](src/flight/hardware/Mpu6050Imu.hpp):
 
 ```cpp
 out.gyroZ = filter_.getYaw();     // the fused yaw ANGLE, in degrees, not a rate
@@ -1812,7 +1812,7 @@ Put in numbers. If the drone happens to be facing 90°, then `90 × 0.02 = 1.8`.
 
 ### The fix
 
-Give the line the rate it asked for. [`Imu.hpp`](src/flight/services/Imu.hpp) already had the raw gyro rate, `gz`, *before* it went into the filter. Now it's saved in its own, clearly named field:
+Give the line the rate it asked for. [`Mpu6050Imu.hpp`](src/flight/hardware/Mpu6050Imu.hpp) already had the raw gyro rate, `gz`, *before* it went into the filter. Now it's saved in its own, clearly named field:
 
 ```cpp
 out.yawRateDps = -gz;    // deg/s; minus because the chip's "+" is counter-clockwise,
@@ -1899,7 +1899,7 @@ A quadcopter has no rudder, no flaps, nothing that moves except four propellers.
 
 ### 🖼️ Picture
 
-From [`IESC.hpp`](src/flight/hardware/IESC.hpp), looking down at the drone:
+From the `IMotors` plug in [`FlightIo.hpp`](src/flight/FlightIo.hpp), looking down at the drone:
 
 ```text
               FRONT
@@ -2370,7 +2370,7 @@ throttle   thrust (as a fraction of max)
 
 Half throttle gives only a quarter of the max thrust.
 
-The on-chip sim's airframe ([`SimIo.hpp`](src/apps/sim/SimIo.hpp)) is set up so that full throttle gives **4× the drone's weight** (a "4:1 thrust-to-weight ratio"):
+The on-chip sim's airframe ([`SimWorld.hpp`](src/apps/sim/SimWorld.hpp)) is set up so that full throttle gives **4× the drone's weight** (a "4:1 thrust-to-weight ratio"):
 
 ```text
 max thrust  = 4 × 11.77 = 47.09 N
@@ -2746,7 +2746,7 @@ yaw   = std::atan2(2.0f * (w * z + x * y), 1.0f - 2.0f * (y * y + z * z));
 
 ### On the real drone: Madgwick
 
-On real hardware, [`Imu.hpp`](src/flight/services/Imu.hpp) uses a **Madgwick filter**, which keeps its own quaternion internally. 🧸 It combines two imperfect senses:
+On real hardware, [`Mpu6050Imu.hpp`](src/flight/hardware/Mpu6050Imu.hpp) uses a **Madgwick filter**, which keeps its own quaternion internally. 🧸 It combines two imperfect senses:
 
 - the **gyro** (how fast am I spinning?) is smooth and fast, but integrating it slowly **drifts**, like walking with your eyes closed;
 - the **accelerometer** (which way is gravity?) never drifts, but it's **noisy** and gets fooled by vibration.

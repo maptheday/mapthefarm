@@ -532,7 +532,7 @@ struct SharedState {
   Cruise_Manual         cruise_manual;
   Trip_Manual           trip_manual;
 
-  RawSticks             sticks;   // latest RC stick input (the radio, or an app via fc::setSticks)
+  RawSticks             sticks;   // latest RC stick input (from the radio plug: real or the sim's)
   unsigned long         rcLastFrameMs = 0;   // when the last radio frame arrived (0 = never heard a radio)
 };
 

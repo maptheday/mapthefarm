@@ -12,18 +12,9 @@
 // ============================================================================
 
 #include "flight/FlightController.hpp"
-#include "flight/io/HardwareIo.hpp"
+#include "flight/hardware/HardwareIo.hpp"
 
-// The real sensors and ESCs, but no radio: this app must never take off.
-class NoRadioHardwareIo : public HardwareIo {
-public:
-  void begin() override {
-    beginMotors();
-    beginSensors();
-  }
-};
-
-NoRadioHardwareIo hardware;
+HardwareIo hardware;
 bool calibrating = false;
 
 void setup() {
@@ -32,7 +23,11 @@ void setup() {
 
   String errors;
   if (!fc::loadSettings(errors)) fc::halt("Can't load flight settings:\n" + errors);
-  fc::begin(hardware);
+  // The real sensors and ESCs, but no radio plugged in: this app must never
+  // take off.
+  FlightIo io = hardware.io();
+  io.radio = nullptr;
+  fc::begin(io);
 
   Serial.println("=== COMPASS CALIBRATION ===");
   Serial.println("Starting in 3 seconds: pick the drone up (motors stay off).");

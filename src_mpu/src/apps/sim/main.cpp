@@ -1,10 +1,18 @@
 // ============================================================================
 // APP: sim -- the on-chip simulator. The REAL flight controller flies against
-// simulated physics (SimIo), all on the ESP, at the real 200 Hz rate.
+// a simulated world, all on the ESP, at the real 200 Hz rate.
 //
 //   flash:     pio run -e sim -t upload
-//   settings:  pio run -e sim -t uploadfs        (the same data/flightsettings.json)
+//   settings:  pio run -e sim -t uploadfs        (the same data/ folder)
 //   run:       ./simulate/run_hil.sh             (flashes, runs every scenario, checks them)
+//
+// The pieces (each in its own file here):
+//   SimWorld     what's TRUE: the QuadSim physics, the pack's charge
+//   SimSensors   the fake sensors (they look at the world) and motors (they push it)
+//   SimRadio     the fake transmitter the scenario's pilot holds
+//   scenarios/   one file per test: what it does to the world, which plug it
+//                breaks, and what the pilot does
+//   FlightLog    the flight recorder (/flight.csv, streamed back by DUMPLOG)
 //
 // Talks to the laptop over USB:
 //   SCENARIO:<name>  pick the scenario (sent right after reset, before takeoff):
@@ -15,13 +23,44 @@
 // ============================================================================
 
 #include "flight/FlightController.hpp"
-#include "SimIo.hpp"
+#include "SimWorld.hpp"
+#include "SimSensors.hpp"
+#include "SimRadio.hpp"
+#include "FlightLog.hpp"
+#include "scenarios/FlyMission.hpp"
+#include "scenarios/LowBattery.hpp"
+#include "scenarios/GpsLoss.hpp"
+#include "scenarios/RadioLoss.hpp"
+#include "scenarios/LandSwitch.hpp"
+#include "scenarios/ManualFlight.hpp"
+#include "scenarios/Stabilization.hpp"
 
-SimIo sim;
+// --- every scenario, by name --------------------------------------------------
+FlyMission    full("full");
+FlyMission    geofence("geofence");
+FlyMission    timeout("timeout");
+FlyMission    testroute("testroute", {"first_mission"});   // the real first-flight route
+LowBattery    lowbatt;
+GpsLoss       gpsloss;
+RadioLoss     rcloss;
+LandSwitch    land;
+ManualFlight  manual;
+Stabilization stab;
+
+Scenario* const SCENARIOS[] = { &full, &geofence, &timeout, &testroute, &lowbatt,
+                                &gpsloss, &rcloss, &land, &manual, &stab };
+
+// --- the simulated world, and the fake transmitter the pilot holds -----------
+SimWorld  world;
+SimRadio  radio;
+FlightLog flightLog(world);
+
+SimRig    rig{world, radio, {}};
+Scenario* scenario = nullptr;
 
 // Listen briefly for "SCENARIO:<name>" (the laptop sends it repeatedly right
 // after reset). The scenario has to be known before the settings load,
-// because a scenario can bring its own override file.
+// because a scenario can bring its own override files.
 String waitForScenario(unsigned long windowMs) {
   String line;
   unsigned long start = millis();
@@ -45,42 +84,62 @@ void setup() {
   Serial.begin(115200);
   delay(2000);   // native USB takes a moment to reconnect after a reset
 
-  String scenario = waitForScenario(1500);
+  String name = waitForScenario(1500);
+  for (Scenario* s : SCENARIOS) if (name == s->name()) scenario = s;
+  if (!scenario) fc::halt("Unknown scenario: " + name);
 
   // The settings, layered like appsettings files in .NET:
   //   flightsettings.json                  the drone
-  //   + flightsettings/first_mission.json  (testroute only: the exact file the
-  //                                          first_mission app flies)
+  //   + the scenario's own files           (testroute: the real first_mission.json)
   //   + flightsettings/sim.json            the sim's own changes (10-min limit)
   //   + flightsettings/sim.<scenario>.json if this scenario has one (e.g. geofence)
-  std::vector<String> overrides;
-  if (scenario == "testroute") overrides.push_back("first_mission");
+  std::vector<String> overrides = scenario->settingsFiles();
   overrides.push_back("sim");
-  if (fc::hasSettingsOverride("sim." + scenario)) overrides.push_back("sim." + scenario);
+  if (fc::hasSettingsOverride("sim." + name)) overrides.push_back("sim." + name);
 
   String errors;
   if (!fc::loadSettings(errors, overrides)) fc::halt("Can't load flight settings:\n" + errors);
 
-  // Not a flight setting: how charged the SIMULATED pack is (the drone itself
-  // always assumes a full pack).
-  if (scenario == "lowbatt") sim.startCharge = 0.25f;
-  sim.scenario = scenario;
+  // "Register" the fake parts where the real ones would go.
+  // (C#: services.AddSingleton<IGps, SimGps>() ... -- here just one line each.)
+  rig.io.imu       = new SimImu(world);
+  rig.io.altimeter = new SimAltimeter(world);
+  rig.io.gps       = new SimGps(world);
+  rig.io.compass   = new SimCompass(world);
+  rig.io.battery   = new SimBatterySensor(world);
+  rig.io.motors    = new SimMotors(world);
+  rig.io.radio     = &radio;   // not `new`: the pilot holds this same radio
 
-  fc::begin(sim);
-  logLine("[SCENARIO] selected: " + scenario);
+  // The scenario may swap one for a broken version (gpsloss, rcloss).
+  scenario->setup(rig);
+
+  // "Build": start the world, then hand the flight controller its parts.
+  world.begin();
+  flightLog.begin();
+  fc::begin(rig.io);
+  logLine("[SCENARIO] selected: " + name);
 }
 
 void loop() {
+  // 10 Hz: the scenario's pilot, then one row of the flight log.
+  static unsigned long lastTickMs = 0;
+  if (millis() - lastTickMs >= 100) {
+    lastTickMs = millis();
+    scenario->tick(rig);
+    flightLog.sample();
+  }
+
+  // Commands from the laptop.
   static String buf;
   while (Serial.available()) {
     char c = (char)Serial.read();
     if (c == '\n') {
-      if (buf.startsWith("DUMPLOG"))    sim.dumpLog();
+      if (buf.startsWith("DUMPLOG"))    flightLog.dump();
       else if (buf.startsWith("PING:")) logLine("[SIM] Ready.");
       buf = "";
     } else if (c != '\r') {
       buf += c;
     }
   }
-  delay(10);
+  delay(5);
 }

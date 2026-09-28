@@ -15,7 +15,7 @@ import json, math, time
 import serial   # pyserial (present in simulate/.venv-rotorpy)
 
 # The farmer's real field: 8 captured GPS corners, corner 1 = launch/home.
-# Must match WAYPOINTS in FlightConfig.hpp and OnboardSim's home.
+# Must match mission.route in data/flightsettings.json (the sim's home is its last point).
 CORNERS_LATLON = [
     (35.948305, -78.241377),  # 1 (launch/home)
     (35.947693, -78.240760),  # 2

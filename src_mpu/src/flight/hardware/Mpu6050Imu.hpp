@@ -1,22 +1,23 @@
 #pragma once
 
 // ============================================================================
-// IMU service -- the attitude estimator. Owns the MPU6050 (accelerometer +
-// gyro) and the Madgwick filter that fuses them into roll/pitch/yaw. Read every
-// physics tick on real hardware; in sim the IMU is left at zero (not exercised).
+// MPU6050 IMU -- the real drone's IImu. Owns the MPU6050 (accelerometer +
+// gyro) and the Madgwick filter that fuses them into roll/pitch/yaw.
 // ============================================================================
 
 #include <Arduino.h>
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
 #include <MadgwickAHRS.h>
-#include "../state/FlightSettings.hpp"   // PHYSICS_LOOP_HZ
-#include "../models/SensorTypes.hpp"   // RawImuReading
-#include "Log.hpp"                     // logLine
+#include "../FlightIo.hpp"              // IImu
+#include "../state/FlightConstants.hpp" // PHYSICS_LOOP_HZ
+#include "../services/Log.hpp"          // logLine
+#include "I2cBus.hpp"                   // startI2c
 
-class Imu {
+class Mpu6050Imu : public IImu {
 public:
-  void begin() {
+  void begin() override {
+    startI2c();
     logLine("[IMU] Initializing MPU6050...");
     if (!mpu_.begin()) {
       logLine("[IMU] ERROR: MPU6050 not found.");
@@ -26,9 +27,9 @@ public:
     filter_.begin(PHYSICS_LOOP_HZ);
   }
 
-  // Read the sensor, advance the fusion filter over `dt` seconds, and fill the
-  // fused roll/pitch/yaw (stored in gyroX/Y/Z) plus raw accel + temperature.
-  void read(RawImuReading& out, float dt) {
+  // Read the sensor, advance the fusion filter over `dt` seconds, and return
+  // the fused roll/pitch/yaw (stored in gyroX/Y/Z) plus raw accel + temperature.
+  RawImuReading read(float dt) override {
     sensors_event_t a;
     sensors_event_t g;
     sensors_event_t temp;
@@ -42,6 +43,7 @@ public:
       filter_.updateIMU(gx, gy, gz, a.acceleration.x, a.acceleration.y, a.acceleration.z);
     }
 
+    RawImuReading out;
     out.gyroX = filter_.getRoll();
     out.gyroY = filter_.getPitch();
     out.gyroZ = filter_.getYaw();
@@ -55,12 +57,10 @@ public:
     out.accY  = a.acceleration.y;
     out.accZ  = a.acceleration.z;
     out.temp  = temp.temperature;
+    return out;
   }
 
 private:
   Adafruit_MPU6050 mpu_;
   Madgwick         filter_;
 };
-
-// The one Imu instance (defined in FlightController.hpp).
-extern Imu imu;

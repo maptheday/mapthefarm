@@ -12,7 +12,7 @@
 // ============================================================================
 
 #include "flight/FlightController.hpp"
-#include "flight/io/HardwareIo.hpp"
+#include "flight/hardware/HardwareIo.hpp"
 #include "../common/SerialInput.hpp"
 
 HardwareIo hardware;
@@ -23,7 +23,7 @@ void setup() {
 
   String errors;
   if (!fc::loadSettings(errors)) fc::halt("Can't load flight settings:\n" + errors);
-  hardware.beginMotors();   // only the ESCs: nothing else is needed
+  hardware.motors.begin();   // only the ESCs: nothing else is needed
 
   Serial.println();
   Serial.println("=== ESC CALIBRATION ===");
@@ -32,7 +32,7 @@ void setup() {
   Serial.println("Type GO and press Enter when both are done.");
   waitForWord("GO");
 
-  hardware.writeAllMicroseconds(EspPwmESC::MAX_US);
+  hardware.motors.writeAllMicroseconds(EspPwmESC::MAX_US);
   Serial.println("Sending FULL throttle signal (no power reaches the motors yet).");
   Serial.println("3. Plug in the flight battery now.");
   Serial.println("   The ESCs play a startup tune, then a short 'beep-beep'.");
@@ -40,7 +40,7 @@ void setup() {
   Serial.println("   (If the motors SPIN instead of beeping, unplug the battery at once.)");
   waitForWord("MIN");
 
-  hardware.writeAllMicroseconds(EspPwmESC::MIN_US);
+  hardware.motors.writeAllMicroseconds(EspPwmESC::MIN_US);
   Serial.println("Sending STOPPED signal.");
   Serial.println("4. The ESCs beep once per battery cell (3 for 3S), then a long beep:");
   Serial.println("   the range is saved.");

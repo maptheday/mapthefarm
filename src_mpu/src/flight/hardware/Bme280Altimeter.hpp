@@ -1,20 +1,22 @@
 #pragma once
 
 // ============================================================================
-// ALTIMETER service -- height above the launch point, in feet. Owns the
-// barometer driver and the ground reference: begin() samples the ground
-// pressure for ~2s and locks it in, so readAltitudeFt() reports height ABOVE
-// that spot rather than absolute altitude. Read every physics tick on real
-// hardware (by HardwareIo); the sim app supplies its own altitude instead.
+// BME280 ALTIMETER -- the real drone's IAltimeter: height above the launch
+// point, in feet. Owns the barometer driver and the ground reference: begin()
+// samples the ground pressure for ~2s and locks it in, so readFt() reports
+// height ABOVE that spot rather than absolute altitude.
 // ============================================================================
 
 #include <Arduino.h>
-#include "../hardware/EspBarometer.hpp"
-#include "Log.hpp"   // logLine
+#include "../FlightIo.hpp"      // IAltimeter
+#include "../services/Log.hpp"  // logLine
+#include "EspBarometer.hpp"
+#include "I2cBus.hpp"           // startI2c
 
-class Altimeter {
+class Bme280Altimeter : public IAltimeter {
 public:
-  void begin() {
+  void begin() override {
+    startI2c();
     baro_.initialize();
     // Average 20 readings over ~2s so the sensor settles and temperature
     // effects smooth out before we lock in the ground reference.
@@ -31,7 +33,7 @@ public:
   }
 
   // Feet above the locked-in ground reference.
-  float readAltitudeFt() {
+  float readFt() override {
     return (float)baro_.readAltitudeMeters() * 3.28084f - groundFt_;
   }
 
@@ -39,6 +41,3 @@ private:
   EspBarometer baro_;
   float        groundFt_ = 0.0f;
 };
-
-// The one Altimeter instance (defined in FlightController.hpp).
-extern Altimeter altimeter;

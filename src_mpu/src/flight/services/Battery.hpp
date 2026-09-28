@@ -4,8 +4,8 @@
 // BATTERY service -- "how much fuel is left?" Modeled on INAV's battery.c.
 //
 // Three independent gauges, because no single one is trustworthy on its own:
-//   1. VOLTAGE   the pack voltage (the FlightIo reads it: on the real drone
-//                through a two-resistor divider), smoothed with a 1 Hz filter so a throttle
+//   1. VOLTAGE   the pack voltage (the IBatterySensor plug reads it: on the
+//                real drone through a two-resistor divider), smoothed with a 1 Hz filter so a throttle
 //                punch (voltage sag) doesn't trip an alarm. LiFe voltage is
 //                flat until the very end, so this is the BACKUP gauge.
 //   2. mAh USED  estimated from the motor commands (INAV's "virtual current

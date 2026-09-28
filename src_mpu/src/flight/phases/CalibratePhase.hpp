@@ -6,13 +6,13 @@
 // we compute + save the calibration and drop back to PARKED.
 //
 // This is the template for future calibrations (accelerometer, gyro, ESC): a
-// self-contained ground phase that drives one service and returns to PARKED.
+// self-contained ground phase that drives one plug and returns to PARKED.
 // ============================================================================
 
 #include "IFlightPhase.hpp"
 #include "../state/PhaseState.hpp"
 #include "../state/FlightSettings.hpp"        // settings().calibration.compassDurationMs
-#include "../services/Compass.hpp"          // compass
+#include "../FlightIo.hpp"                   // flightIo().compass
 #include "../services/Motors.hpp"           // motors
 #include "../services/Log.hpp"              // logLine
 #include "PhaseSwitch.hpp"                  // transitionTo
@@ -24,12 +24,12 @@ public:
   void onEnter(const EnterContext& ctx) override {
     shared.trip_calibrate.enteredAtMs   = ctx.now;
     shared.dashboard_calibrate.progressPct = 0.0f;
-    compass.startCalibration();
+    flightIo().compass->startCalibration();
     logLine("[COMPASS] Calibration starting — rotate drone slowly through all axes now...");
   }
 
   void navTick(float /*navDt*/) override {
-    compass.sampleCalibration();
+    flightIo().compass->sampleCalibration();
 
     unsigned long enteredAt;
     withMutex([&]() { enteredAt = shared.trip_calibrate.enteredAtMs; });
@@ -41,7 +41,7 @@ public:
     });
 
     if (elapsed >= settings().calibration.compassDurationMs) {
-      compass.finishCalibration();
+      flightIo().compass->finishCalibration();
       logLine("[COMPASS] Calibration saved.");
       transitionTo(PHASE_PARKED, REASON_CALIBRATION_COMPLETE);
     }

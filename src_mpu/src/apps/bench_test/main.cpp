@@ -4,18 +4,18 @@
 //   flash:  pio run -e bench_test -t upload
 //   then:   open the serial monitor (115200) and type commands:
 //             1..4  spin ONE motor slowly for 2 seconds -- check it's the right
-//                   corner and spinning the right direction (see IESC.hpp)
+//                   corner and spinning the right direction (see IMotors in FlightIo.hpp)
 //             s     stream every sensor for 20 seconds -- tilt the drone by hand
 //                   and check the numbers move the right way; also read the
 //                   battery voltage, to compare against a multimeter
 //   after:  flash the fly app again (pio run -e fly -t upload)
 //
-// Uses the real sensors and ESCs (HardwareIo) but never starts the flight
-// loops or the radio, so the drone can't fly while this app is on it.
+// Uses the real sensor and ESC drivers (HardwareIo) directly, but never starts
+// the flight controller or the radio, so the drone can't fly while this app is on it.
 // ============================================================================
 
 #include "flight/FlightController.hpp"
-#include "flight/io/HardwareIo.hpp"
+#include "flight/hardware/HardwareIo.hpp"
 #include "../common/SerialInput.hpp"
 
 HardwareIo hardware;
@@ -37,9 +37,9 @@ void spinMotor(int motor) {
   const char* dirs[4]  = { "CLOCKWISE", "COUNTER-CLOCKWISE", "COUNTER-CLOCKWISE", "CLOCKWISE" };
   Serial.println(String("Spinning M") + motor + " (" + names[motor - 1] + ") for 2 s. "
                  "Seen from ABOVE it should spin " + dirs[motor - 1] + ".");
-  hardware.writeMotor(motor, BENCH_MOTOR_THROTTLE);
+  hardware.motors.writeOne(motor, BENCH_MOTOR_THROTTLE);
   delay(2000);
-  hardware.stopMotor(motor);
+  hardware.motors.stopOne(motor);
   Serial.println("Stopped. Wrong corner? Move that ESC's signal wire. "
                  "Wrong direction? Swap any two of that motor's three wires.");
 }
@@ -53,23 +53,21 @@ void streamSensors() {
     float dt = (now - lastMicros) / 1000000.0f;
     lastMicros = now;
 
-    FastInputs fast;
-    hardware.readFast(dt, fast);                      // keeps the attitude filter fed
-    battery.update(fast.packVolts, MotorMix{}, dt);   // motors off: idle current only
+    RawImuReading imu = hardware.imu.read(dt);                        // keeps the attitude filter fed
+    battery.update(hardware.battery.readPackVolts(), MotorMix{}, dt);   // motors off: idle current only
 
     if (millis() - lastPrint >= 500) {
       lastPrint = millis();
-      SlowInputs slow;
-      hardware.readSlow(slow);
+      RawGpsReading gps = hardware.gps.read();
       const RawBattery& b = battery.reading();
-      Serial.println("roll " + String(fast.imu.gyroX, 1) +
-                     "  pitch " + String(fast.imu.gyroY, 1) +
-                     "  yawRate " + String(fast.imu.yawRateDps, 0) + "/s" +
-                     "  | heading " + String(slow.compassHeadingDeg, 0) +
-                     "  | height " + String(fast.baroAltitudeFt, 1) + " ft" +
-                     "  | GPS " + (slow.gps.fix ? String(slow.gps.lat, 6) + ", " + String(slow.gps.lon, 6)
-                                                : String("no fix")) +
-                     " (" + slow.gps.sats + " sats)" +
+      Serial.println("roll " + String(imu.gyroX, 1) +
+                     "  pitch " + String(imu.gyroY, 1) +
+                     "  yawRate " + String(imu.yawRateDps, 0) + "/s" +
+                     "  | heading " + String(hardware.compass.readHeadingDeg(), 0) +
+                     "  | height " + String(hardware.altimeter.readFt(), 1) + " ft" +
+                     "  | GPS " + (gps.fix ? String(gps.lat, 6) + ", " + String(gps.lon, 6)
+                                           : String("no fix")) +
+                     " (" + gps.sats + " sats)" +
                      "  | battery " + (b.present ? String(b.packVolts, 2) + " V (" +
                                                    String(b.cellVolts, 2) + " V/cell)"
                                                  : String("not detected")));
@@ -85,8 +83,12 @@ void setup() {
 
   String errors;
   if (!fc::loadSettings(errors)) fc::halt("Can't load flight settings:\n" + errors);
-  hardware.beginMotors();    // the ESCs (stopped)
-  hardware.beginSensors();   // IMU, compass, GPS, barometer, battery pin -- no radio
+  hardware.motors.begin();      // the ESCs (stopped)
+  hardware.imu.begin();         // then each sensor -- no radio
+  hardware.compass.begin();
+  hardware.gps.begin();
+  hardware.battery.begin();
+  hardware.altimeter.begin();
 }
 
 void loop() {
