@@ -1,0 +1,5 @@
+{
+  "safety": {
+    "maxFlightTimeMs": 18000
+  }
+}

@@ -16,13 +16,12 @@
 
 #include "flight/FlightController.hpp"
 #include "SimIo.hpp"
-#include "../common/TestRoute.hpp"
 
 SimIo sim;
 
 // Listen briefly for "SCENARIO:<name>" (the laptop sends it repeatedly right
-// after reset). The scenario has to be known before the flight controller
-// starts, because some scenarios change settings.
+// after reset). The scenario has to be known before the settings load,
+// because a scenario can bring its own override file.
 String waitForScenario(unsigned long windowMs) {
   String line;
   unsigned long start = millis();
@@ -48,20 +47,26 @@ void setup() {
 
   String scenario = waitForScenario(1500);
 
-  String errors;
-  if (!fc::loadSettings(errors)) fc::halt("Can't load flight settings:\n" + errors);
+  // The settings, layered like appsettings files in .NET:
+  //   flightsettings.json                  the drone
+  //   + flightsettings/first_mission.json  (testroute only: the exact file the
+  //                                          first_mission app flies)
+  //   + flightsettings/sim.json            the sim's own changes (10-min limit)
+  //   + flightsettings/sim.<scenario>.json if this scenario has one (e.g. geofence)
+  std::vector<String> overrides;
+  if (scenario == "testroute") overrides.push_back("first_mission");
+  overrides.push_back("sim");
+  if (fc::hasSettingsOverride("sim." + scenario)) overrides.push_back("sim." + scenario);
 
-  // The scenario's own settings: the sim's choices, made here in the app.
-  FlightSettings& s = fc::settingsForEdit();
-  s.safety.maxFlightTimeMs = 10UL * 60UL * 1000UL;   // room to fly the whole field in the sim
-  if (scenario == "geofence") s.safety.geofenceRadiusM = 40.0f;      // trips soon after takeoff
-  if (scenario == "timeout")  s.safety.maxFlightTimeMs = 18000UL;    // ~18 s -> time's-up landing
-  if (scenario == "lowbatt")  sim.startCharge = 0.25f;               // pack only 25% charged
+  String errors;
+  if (!fc::loadSettings(errors, overrides)) fc::halt("Can't load flight settings:\n" + errors);
+
+  // Not a flight setting: how charged the SIMULATED pack is (the drone itself
+  // always assumes a full pack).
+  if (scenario == "lowbatt") sim.startCharge = 0.25f;
   sim.scenario = scenario;
 
   fc::begin(sim);
-
-  if (scenario == "testroute") fc::setMission(makeTestRoute(settings().mission.route));
   logLine("[SCENARIO] selected: " + scenario);
 }
 

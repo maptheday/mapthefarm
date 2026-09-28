@@ -1,0 +1,57 @@
+Run log: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/sim_20260927_225928.log
+== On-ESP sim scenarios ==
+  field_patrol.py
+  geofence_breach.py
+  gps_loss.py
+  max_timeout.py
+  low_battery.py
+  rc_loss.py
+  land_switch.py
+  test_route.py
+  manual_flight.py
+  stabilization.py
+== Uploading flight settings (data/) to /dev/cu.usbmodem14101 ==
+Processing sim (platform: espressif32; board: esp32-s3-devkitc-1-n16r8; framework: arduino)
+--------------------------------------------------------------------------------
+Verbose mode can be enabled via `-v, --verbose` option
+CONFIGURATION: https://docs.platformio.org/page/boards/espressif32/esp32-s3-devkitc-1-n16r8.html
+PLATFORM: Espressif 32 (7.0.1) > Espressif ESP32-S3-DevKitC-1-N16R8 (16 MB, 8 MB PSRAM)
+HARDWARE: ESP32S3 240MHz, 320KB RAM, 16MB Flash
+DEBUG: Current (esp-builtin) On-board (esp-builtin) External (cmsis-dap, esp-bridge, esp-prog, iot-bus-jtag, jlink, minimodule, olimex-arm-usb-ocd, olimex-arm-usb-ocd-h, olimex-arm-usb-tiny-h, olimex-jtag-tiny, tumpa)
+PACKAGES: 
+ - framework-arduinoespressif32 @ 3.20017.241212+sha.dcc1105b 
+ - tool-esptoolpy @ 2.41100.0 (4.11.0) 
+ - tool-mkfatfs @ 2.0.1 
+ - tool-mklittlefs @ 1.203.210628 (2.3) 
+ - tool-mkspiffs @ 2.230.0 (2.30) 
+ - tool-openocd-esp32 @ 2.1100.20220706 (11.0) 
+ - toolchain-riscv32-esp @ 8.4.0+2021r2-patch5 
+ - toolchain-xtensa-esp32s3 @ 8.4.0+2021r2-patch5
+LDF: Library Dependency Finder -> https://bit.ly/configure-pio-ldf
+LDF Modes: Finder ~ chain, Compatibility ~ soft
+Found 44 compatible libraries
+Scanning dependencies...
+Dependency Graph
+|-- Adafruit MPU6050 @ 2.2.9
+|-- Adafruit Unified Sensor @ 1.1.15
+|-- ArduinoJson @ 7.4.3
+|-- Madgwick @ 1.2.0
+|-- Adafruit BME280 Library @ 2.3.0
+|-- TinyGPSPlus @ 1.1.0
+|-- QMC5883LCompass @ 1.2.3
+|-- LittleFS @ 2.0.0
+|-- QuadSim @ 0.1.0
+|-- Preferences @ 2.0.0
+|-- Wire @ 2.0.0
+Building in release mode
+Building FS image from 'data' directory to .pio/build/sim/littlefs.bin
+/flightsettings.first_mission.json
+unable to open '/flightsettings.first_mission.json.
+error adding file!
+*** [.pio/build/sim/littlefs.bin] Error 1
+========================== [FAILED] Took 1.49 seconds ==========================
+
+Environment    Status    Duration
+-------------  --------  ------------
+sim            FAILED    00:00:01.488
+==================== 1 failed, 0 succeeded in 00:00:01.488 ====================

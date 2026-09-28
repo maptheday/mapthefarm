@@ -12,6 +12,15 @@
 // The file lives in the project's data/ folder. Put it on the drone with:
 //     pio run -e fly -t uploadfs
 //
+// OVERRIDE FILES (like appsettings.Development.json): an app can ask for extra
+// files layered on top, e.g. the first_mission app loads
+//     /flightsettings.json  then  /flightsettings/first_mission.json
+// Each override file holds ONLY what it changes. Sections merge key by key;
+// a list (like mission.route) is replaced whole. Unlike .NET, an override an
+// app asks for is REQUIRED: if it's missing, the app refuses to run, rather
+// than quietly flying the base settings (e.g. the full route instead of the
+// short test route).
+//
 // What is NOT here: true internals that nobody should tune in the field (loop
 // rates, radio protocol constants, filter internals). Those stay in code, in
 // FlightConstants.hpp and next to the code that uses them.
@@ -156,10 +165,55 @@ inline void needPid(JsonVariantConst v, const char* path, PidGains& out, String&
 
 }  // namespace settings_json
 
-// Read /flightsettings.json from the drone's flash into `out`. Returns false
-// (with every problem listed in `errors`) if anything is missing or wrong.
+namespace settings_json {
+
+// Read one JSON file from the drone's flash into `doc`.
+inline bool readJsonFile(const String& path, JsonDocument& doc, String& errors) {
+  File f = LittleFS.open(path.c_str(), "r");
+  if (!f) {
+    errors += "  - " + path + " not found. Upload the data/ folder with:\n"
+              "      pio run -e fly -t uploadfs\n";
+    return false;
+  }
+  DeserializationError err = deserializeJson(doc, f);
+  f.close();
+  if (err) {
+    errors += "  - " + path + " isn't valid JSON: " + err.c_str() + "\n";
+    return false;
+  }
+  return true;
+}
+
+// Lay `over` on top of `base`: objects merge key by key (recursively);
+// anything else -- a number, a string, a whole list -- replaces what was there.
+inline void mergeJson(JsonVariant base, JsonVariantConst over) {
+  if (!over.is<JsonObjectConst>() || !base.is<JsonObject>()) {
+    base.set(over);
+    return;
+  }
+  for (JsonPairConst kv : over.as<JsonObjectConst>()) {
+    JsonVariant slot = base[kv.key()];
+    if (kv.value().is<JsonObjectConst>() && slot.is<JsonObject>()) mergeJson(slot, kv.value());
+    else base[kv.key()] = kv.value();
+  }
+}
+
+}  // namespace settings_json
+
+// The flash path of a named override file: "first_mission" ->
+// "/flightsettings/first_mission.json". (A folder, not "flightsettings.
+// first_mission.json": the flash file system allows only ~32 characters per
+// file name.)
+inline String settingsOverridePath(const String& name) {
+  return "/flightsettings/" + name + ".json";
+}
+
+// Load /flightsettings.json, then each override file in `overrides` (in order),
+// into `out`. Returns false (with every problem listed in `errors`) if a file
+// is missing or broken, or if any setting is missing or the wrong type once
+// everything is merged.
 inline bool loadFlightSettings(FlightSettings& out, String& errors,
-                               const char* path = "/flightsettings.json") {
+                               const std::vector<String>& overrides = {}) {
   using namespace settings_json;
   errors = "";
 
@@ -168,17 +222,12 @@ inline bool loadFlightSettings(FlightSettings& out, String& errors,
              "      pio run -e fly -t uploadfs\n";
     return false;
   }
-  File f = LittleFS.open(path, "r");
-  if (!f) {
-    errors = String("  - ") + path + " not found. Upload it with:\n      pio run -e fly -t uploadfs\n";
-    return false;
-  }
   JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, f);
-  f.close();
-  if (err) {
-    errors = String("  - ") + path + " isn't valid JSON: " + err.c_str() + "\n";
-    return false;
+  if (!readJsonFile("/flightsettings.json", doc, errors)) return false;
+  for (const String& name : overrides) {
+    JsonDocument over;
+    if (!readJsonFile(settingsOverridePath(name), over, errors)) return false;
+    mergeJson(doc.as<JsonVariant>(), over.as<JsonVariantConst>());
   }
 
   JsonVariantConst a = doc["airframe"];

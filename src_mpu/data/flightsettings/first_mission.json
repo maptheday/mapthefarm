@@ -1,0 +1,9 @@
+{
+  "mission": {
+    "name": "First mission: 30 m out along the first leg and back",
+    "route": [
+      { "lat": 35.948096, "lon": -78.241167, "altFt": 20.0 },
+      { "lat": 35.948305, "lon": -78.241377, "altFt": 20.0 }
+    ]
+  }
+}

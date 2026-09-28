@@ -154,14 +154,31 @@ inline void physicsTask(void*) {
 // 1. Settings
 // ===========================================================================
 
-// Load /flightsettings.json into the flight controller. Returns false, with
-// every problem listed in `errors`, if the file is missing or incomplete.
-inline bool loadSettings(String& errors) {
+// Load /flightsettings.json into the flight controller, then any override
+// files on top, in order (like appsettings.Development.json in .NET):
+//     fc::loadSettings(errors)                       base file only
+//     fc::loadSettings(errors, {"first_mission"})    + /flightsettings/first_mission.json
+// Returns false, with every problem listed in `errors`, if a file is missing
+// or anything is incomplete. Every override asked for is required.
+inline bool loadSettings(String& errors, const std::vector<String>& overrides = {}) {
   detail::ensureMutexes();
-  return loadFlightSettings(flightSettingsStorage(), errors);
+  bool ok = loadFlightSettings(flightSettingsStorage(), errors, overrides);
+  if (ok) {
+    String files = "flightsettings.json";
+    for (const String& name : overrides) files += " + flightsettings/" + name + ".json";
+    logLine("[FC] Settings loaded: " + files);
+  }
+  return ok;
 }
 
-// Change a setting from code (e.g. a sim scenario shrinking the geofence).
+// Is there an override file with this name on the drone? (For apps that pick
+// up an override only when one exists, like the sim's per-scenario files.)
+inline bool hasSettingsOverride(const String& name) {
+  return LittleFS.begin(false) && LittleFS.exists(settingsOverridePath(name).c_str());
+}
+
+// Change a setting from code. Prefer an override file (it's visible and
+// reviewable); this is for values that can only be worked out at run time.
 // Only before fc::begin(): once flying, the settings are fixed.
 inline FlightSettings& settingsForEdit() { return flightSettingsStorage(); }
 

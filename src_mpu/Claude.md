@@ -247,7 +247,7 @@ src/
     ├── sim/                        the on-chip simulator
     │   ├── main.cpp                picks the scenario, adjusts its settings, answers DUMPLOG
     │   └── SimIo.hpp               the sim's FlightIo: QuadSim physics + scenarios + flight log
-    └── common/                     shared by apps: SerialInput.hpp, TestRoute.hpp
+    └── common/                     shared by apps: SerialInput.hpp (reads what you type)
 ```
 
 > **Reading order for a newcomer:** the [`fly` app](src/apps/fly/main.cpp) → [`FlightController.hpp`](#flightcontrollerhpp) → [`flightsettings.json`](#flightsettingsjson) → [`PhaseState.hpp`](#phasestatehpp) → [`IFlightPhase.hpp`](#iflightphasehpp) → [`ParkedPhase.hpp`](#parkedphasehpp) → [`RaisePhase.hpp`](#raisephasehpp) → [`MotorController.hpp`](#motorcontrollerhpp) → [`PID.hpp`](#pidhpp). After that, the rest falls into place.
@@ -266,7 +266,7 @@ Every file below has: a one-line **ELI5**, what it does, and how it connects to 
 The **public API**, and the "composition root": the one place that owns the real instance of every service (`motors`, `battery`, `motorController`, `compass`, `gps`, `imu`, `altimeter`) and the shared notebook (`shared`) and its two mutexes. Every other file refers to these as `extern`. An app includes this file **exactly once**, from its `main.cpp`.
 
 What an app can call:
-- **Setup:** `fc::loadSettings(errors)` (reads [`flightsettings.json`](#flightsettingsjson)), `fc::settingsForEdit()` (change a setting before starting, e.g. a sim scenario), `fc::begin(io)` (bring up the IO, start both loops), `fc::halt(why)`.
+- **Setup:** `fc::loadSettings(errors, {overrides...})` (reads [`flightsettings.json`](#flightsettingsjson), then any override files on top), `fc::hasSettingsOverride(name)`, `fc::begin(io)` (bring up the IO, start both loops), `fc::halt(why)`. (`fc::settingsForEdit()` also exists, for values only known at run time; prefer an override file.)
 - **Commands** (the same ones the radio switches send): `fc::start()`, `fc::stop()`, `fc::land()`, `fc::manualOn()` / `manualOff()`, `fc::setSticks(...)`, `fc::setMission(route)`, `fc::calibrateCompass()`, `fc::radioHeartbeat()`.
 - **Read-only state:** `fc::phase()`, `fc::sensors()`, `fc::batteryState()`, `fc::lastMotorMix()`, `fc::missionWaypointIndex()`, `fc::launchPoint(...)`.
 
@@ -285,7 +285,7 @@ Each is a small `main.cpp` with its own `setup()`/`loop()`, flashed with `pio ru
 | App | What it does |
 |---|---|
 | [`fly`](src/apps/fly/main.cpp) | the real flight program: settings → `HardwareIo` → `fc::begin` → the radio drives it |
-| [`first_mission`](src/apps/first_mission/main.cpp) | the same, but `fc::setMission()` swaps in a 30 m out-and-back along the first leg of the route ([`TestRoute.hpp`](src/apps/common/TestRoute.hpp)) |
+| [`first_mission`](src/apps/first_mission/main.cpp) | the same, but it loads [`flightsettings/first_mission.json`](data/flightsettings/first_mission.json) on top: the mission becomes a 30 m out-and-back along the first leg of the route |
 | [`bench_test`](src/apps/bench_test/main.cpp) | props off: `1`–`4` spins one motor, `s` streams every sensor. Never starts the flight loops or radio. |
 | [`esc_calibration`](src/apps/esc_calibration/main.cpp) | props off: the one-time GO / MIN throttle-range routine, using only the ESCs |
 | [`compass_calibration`](src/apps/compass_calibration/main.cpp) | the one-time compass calibration (the `CALIBRATE` phase), with no radio so it can't take off |
@@ -299,6 +299,14 @@ Each is a small `main.cpp` with its own `setup()`/`loop()`, flashed with `pio ru
 **ELI5:** the settings menu: every number you might want to tweak, in one file, like `appsettings.json` in C#.
 
 Sections: `airframe` (hover throttle and all the PID gains), `flight` (takeoff height, climb/descent speeds, waypoint radius, line-following lookahead), `safety` (max flight time, geofence, GPS/radio-loss timings, RTL height), `battery` (pack size and the fuel-gauge thresholds), `manual` (stick feel), `radio` (which channel is which switch), `wiring` (every pin, the ESC pulse rate), `calibration`, and `mission` (the route). If you want to change *how the drone behaves* without changing *how it works*, you come here. After editing, put it on the drone with `pio run -e fly -t uploadfs`.
+
+**Override files** work like `appsettings.Development.json` in .NET: an app can layer extra files on top, each holding only what it changes. Sections merge key by key; a list (like the route) is replaced whole. Unlike .NET, an override an app asks for is **required**, so a missing one stops the app instead of quietly flying the base settings.
+
+| File | Loaded by | What it changes |
+|---|---|---|
+| `flightsettings/first_mission.json` | `first_mission` app (and the sim's `testroute` scenario) | the mission: a 30 m out-and-back at 20 ft |
+| `flightsettings/sim.json` | `sim` app | the flight-time limit (10 min, so the full field fits) |
+| `flightsettings/sim.<scenario>.json` | `sim` app, when that scenario has one | e.g. `sim.geofence`: a 40 m fence; `sim.timeout`: an 18 s limit |
 
 #### [`FlightSettings.hpp`](src/flight/state/FlightSettings.hpp)
 **ELI5:** the reader for that file, and the strict inspector.
@@ -519,7 +527,7 @@ There are only ever **two voices**, both on the chip:
 ESP_PORT=/dev/cu.usbmodem14101 ./simulate/run_hil.sh
 ```
 
-The scenario list is a simple array at the top of that script. Each one picks its behaviour at boot with a single `SCENARIO:` command (no extra builds). The sim app hears it *before* starting the flight controller, so a scenario can adjust settings (shrink the geofence, shorten the timer) or swap the route, just like any app can. The sim app also raises the flight-time limit to 10 minutes, so the full fence line isn't cut short; and the shared fly-and-pull helper [`simulate/scenarios_esp/esp_sim.py`](simulate/scenarios_esp/esp_sim.py) resets the ESP, selects the scenario, waits for it to finish, and pulls the log. The suite (the on-chip replacements for the old HIL scenarios):
+The scenario list is a simple array at the top of that script. Each one picks its behaviour at boot with a single `SCENARIO:` command (no extra builds). The sim app hears it *before* loading the settings, so a scenario can bring its own override file (`flightsettings/sim.geofence.json` shrinks the fence, `flightsettings/sim.timeout.json` shortens the timer), and `testroute` loads the real `flightsettings/first_mission.json`. Every sim run also loads `flightsettings/sim.json`, which raises the flight-time limit to 10 minutes so the full fence line isn't cut short; and the shared fly-and-pull helper [`simulate/scenarios_esp/esp_sim.py`](simulate/scenarios_esp/esp_sim.py) resets the ESP, selects the scenario, waits for it to finish, and pulls the log. The suite (the on-chip replacements for the old HIL scenarios):
 
 | Scenario | What it exercises |
 |---|---|
