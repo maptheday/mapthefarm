@@ -8,11 +8,13 @@
 #include "IFlightPhase.hpp"
 #include "../state/PhaseState.hpp"
 #include "../state/FlightSettings.hpp"        // settings().safety.maxFlightTimeMs
-#include "../services/Motors.hpp"           // motors
-#include "../services/MotorController.hpp"  // motorController
+#include "../services/Motors.hpp"           // Motors
+#include "../services/MotorController.hpp"  // MotorController
 
 class ParkedPhase : public IFlightPhase {
 public:
+  ParkedPhase(Motors* motors, MotorController* motorController) : motors_(motors), motorController_(motorController) {}
+
   FlightPhase id() const override { return PHASE_PARKED; }
 
   // Nothing to set up: parking just means "sit still with motors off".
@@ -28,9 +30,13 @@ public:
   }
 
   void physicsTick(float /*dt*/) override {
-    motorController.reset();
+    motorController_->reset();
     // Disarm every tick so an e-stop never relies on an ESC-side timeout.
     // disarm() sends the 1000 us "stopped" pulse to every ESC.
-    motors.disarmAll();
+    motors_->disarmAll();
   }
+
+private:
+  Motors*           motors_;
+  MotorController*  motorController_;
 };

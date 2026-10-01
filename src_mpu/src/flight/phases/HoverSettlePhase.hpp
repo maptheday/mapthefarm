@@ -8,15 +8,18 @@
 #include "IFlightPhase.hpp"
 #include "../state/PhaseState.hpp"
 #include "../state/FlightSettings.hpp"        // settings().flight.missionCompleteHoverMs
-#include "../services/Motors.hpp"           // motors
-#include "../services/MotorController.hpp"  // motorController
+#include "../services/Motors.hpp"           // Motors
+#include "../services/MotorController.hpp"  // MotorController
 #include "../services/NavMath.hpp"          // gpsDistanceMeters, gpsBearing, bearingToNorthEast
 #include "../services/Log.hpp"              // logLine
-#include "../services/Failsafes.hpp"        // checkBatteryFailsafe
+#include "../services/Failsafes.hpp"        // Failsafes
 #include "PhaseSwitch.hpp"                  // transitionTo
 
 class HoverSettlePhase : public IFlightPhase {
 public:
+  HoverSettlePhase(Motors* motors, MotorController* motorController, Failsafes* failsafes)
+    : motors_(motors), motorController_(motorController), failsafes_(failsafes) {}
+
   FlightPhase id() const override { return PHASE_HOVER_SETTLE; }
 
   void onEnter(const EnterContext& ctx) override {
@@ -46,7 +49,7 @@ public:
       shared.dashboard_hoverSettle.yaw            = shared.raw.imu.gyroZ;
     });
     // Battery low on the way home (or while settling)? Land right here.
-    if (checkBatteryFailsafe()) return;
+    if (failsafes_->checkBattery()) return;
 
     // Actively hold over the spot where the mission ended (lean back to brake
     // off leftover momentum) instead of coasting away while we settle.
@@ -58,8 +61,8 @@ public:
     withMutex([&]() {
       float forwardM, rightM;   // world north/east -> the drone's own forward/right
       northEastToForwardRight(northM, eastM, shared.raw.compassHeadingDeg, forwardM, rightM);
-      shared.cruise_hoverSettle.targetRollDeg  = motorController.rightNavigationCorrection(rightM, navDt);
-      shared.cruise_hoverSettle.targetPitchDeg = motorController.forwardNavigationCorrection(forwardM, navDt);
+      shared.cruise_hoverSettle.targetRollDeg  = motorController_->rightNavigationCorrection(rightM, navDt);
+      shared.cruise_hoverSettle.targetPitchDeg = motorController_->forwardNavigationCorrection(forwardM, navDt);
     });
 
     if (millis() - trip.enteredAtMs >= settings().flight.missionCompleteHoverMs) {
@@ -76,11 +79,11 @@ public:
       r = shared.raw;
     });
 
-    MotorMix mix = motorController.computeMotorMix(
+    MotorMix mix = motorController_->computeMotorMix(
       c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
       r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, r.imu.yawRateDps, dt);
 
-    motors.writeMix(mix);
+    motors_->writeMix(mix);
 
     withMutex([&]() {
       shared.dashboard_hoverSettle.m1              = mix.m1;
@@ -92,4 +95,9 @@ public:
       shared.dashboard_hoverSettle.pitchCorrection = mix.pitchCorrection;
     });
   }
+
+private:
+  Motors*           motors_;
+  MotorController*  motorController_;
+  Failsafes*        failsafes_;
 };

@@ -12,24 +12,26 @@
 #include "IFlightPhase.hpp"
 #include "../state/PhaseState.hpp"
 #include "../state/FlightSettings.hpp"        // settings().calibration.compassDurationMs
-#include "../FlightIo.hpp"                   // flightIo().compass
-#include "../services/Motors.hpp"           // motors
+#include "../FlightIo.hpp"                   // ICompass
+#include "../services/Motors.hpp"           // Motors
 #include "../services/Log.hpp"              // logLine
 #include "PhaseSwitch.hpp"                  // transitionTo
 
 class CalibratePhase : public IFlightPhase {
 public:
+  CalibratePhase(Motors* motors, ICompass* compass) : motors_(motors), compass_(compass) {}
+
   FlightPhase id() const override { return PHASE_CALIBRATE; }
 
   void onEnter(const EnterContext& ctx) override {
     shared.trip_calibrate.enteredAtMs   = ctx.now;
     shared.dashboard_calibrate.progressPct = 0.0f;
-    flightIo().compass->startCalibration();
+    compass_->startCalibration();
     logLine("[COMPASS] Calibration starting — rotate drone slowly through all axes now...");
   }
 
   void navTick(float /*navDt*/) override {
-    flightIo().compass->sampleCalibration();
+    compass_->sampleCalibration();
 
     unsigned long enteredAt;
     withMutex([&]() { enteredAt = shared.trip_calibrate.enteredAtMs; });
@@ -41,7 +43,7 @@ public:
     });
 
     if (elapsed >= settings().calibration.compassDurationMs) {
-      flightIo().compass->finishCalibration();
+      compass_->finishCalibration();
       logLine("[COMPASS] Calibration saved.");
       transitionTo(PHASE_PARKED, REASON_CALIBRATION_COMPLETE);
     }
@@ -49,6 +51,10 @@ public:
 
   void physicsTick(float /*dt*/) override {
     // Motors must stay off -- the operator is handling the drone.
-    motors.disarmAll();
+    motors_->disarmAll();
   }
+
+private:
+  Motors*           motors_;
+  ICompass*         compass_;
 };

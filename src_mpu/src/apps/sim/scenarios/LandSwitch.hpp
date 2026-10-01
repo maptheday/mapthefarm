@@ -14,7 +14,7 @@ public:
   void tick(SimRig& rig) override {
     pilot_.fly(rig.radio, /*mission=*/false);
     if (!flipped_ && pilot_.hoveringMs() > 2000) {
-      rig.radio.pressLand();
+      rig.radio->pressLand();
       flipped_ = true;
       logLine("[SCENARIO] LAND switch flipped");
     }

@@ -9,12 +9,15 @@
 #include "IFlightPhase.hpp"
 #include "../state/PhaseState.hpp"
 #include "../state/FlightSettings.hpp"        // settings().flight.takeoffAltitudeFt, settings().safety.maxFlightTimeMs
-#include "../services/Motors.hpp"           // motors
-#include "../services/MotorController.hpp"  // motorController
-#include "../services/Failsafes.hpp"        // checkCoreFailsafes, checkRadioFailsafe, checkBatteryFailsafe
+#include "../services/Motors.hpp"           // Motors
+#include "../services/MotorController.hpp"  // MotorController
+#include "../services/Failsafes.hpp"        // Failsafes
 
 class HoldPhase : public IFlightPhase {
 public:
+  HoldPhase(Motors* motors, MotorController* motorController, Failsafes* failsafes)
+    : motors_(motors), motorController_(motorController), failsafes_(failsafes) {}
+
   FlightPhase id() const override { return PHASE_HOLD; }
 
   void onEnter(const EnterContext& ctx) override {
@@ -49,9 +52,9 @@ public:
       launchLon                            = shared.trip_hold.launchLon;
     });
 
-    checkCoreFailsafes(armedAt, launchLat, launchLon);
-    if (checkRadioFailsafe()) return;
-    checkBatteryFailsafe();
+    failsafes_->checkCore(armedAt, launchLat, launchLon);
+    if (failsafes_->checkRadio()) return;
+    failsafes_->checkBattery();
   }
 
   void physicsTick(float dt) override {
@@ -62,11 +65,11 @@ public:
       r = shared.raw;
     });
 
-    MotorMix mix = motorController.computeMotorMix(
+    MotorMix mix = motorController_->computeMotorMix(
       c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
       r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, r.imu.yawRateDps, dt);
 
-    motors.writeMix(mix);
+    motors_->writeMix(mix);
 
     withMutex([&]() {
       shared.dashboard_hold.m1              = mix.m1;
@@ -78,4 +81,9 @@ public:
       shared.dashboard_hold.pitchCorrection = mix.pitchCorrection;
     });
   }
+
+private:
+  Motors*           motors_;
+  MotorController*  motorController_;
+  Failsafes*        failsafes_;
 };

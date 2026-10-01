@@ -40,21 +40,54 @@
 #include "services/RcInput.hpp"
 
 // ---------------------------------------------------------------------------
-// The one instance of each service and of the shared notebook. Every service
-// header declares these `extern`; they're born here, once. (That's why an app
-// includes this file exactly once.)
+// The shared notebook and its two locks. PhaseState.hpp and Log.hpp declare
+// these `extern`; they're born here, once. (That's why an app includes this
+// file exactly once.) The services are NOT globals: fc::begin() makes them
+// with `new` and hands them to the phases that need them.
 // ---------------------------------------------------------------------------
 SemaphoreHandle_t    sharedDataMutex;
 SemaphoreHandle_t    serialMutex;
 volatile SharedState shared;
 
-Motors          motors;           // the 4 motors (through the motors plug)
-Battery         battery;          // fuel gauge: voltage + estimated mAh
-MotorController motorController;  // PID + motor mixing
-
 namespace fc {
 
+// ===========================================================================
+// 1. Commands -- the buttons. The radio presses these when you flip a switch
+//    (see radioTask below); an app can press them too.
+// ===========================================================================
+
+inline void start()     { crsfHandleStart(); }     // take off / start the mission
+inline void stop()      { crsfHandleStop(); }      // EMERGENCY: motors off now
+inline void land()      { crsfHandleLand(); }      // land gently where it is
+inline void manualOn()  { crsfHandleManualOn(); }  // hand control to the sticks
+inline void manualOff() { crsfHandleManualOff(); } // back to auto-hover
+
+// Replace the route MISSION flies. Only on the ground (PARKED or LANDED).
+inline bool setMission(const std::vector<Waypoint>& route) {
+  FlightPhase phase;
+  withMutex([&]() { phase = shared.phase; });
+  if (route.empty() || (phase != PHASE_PARKED && phase != PHASE_LANDED)) {
+    logLine("[FC] setMission refused (empty route, or not on the ground).");
+    return false;
+  }
+  missionRoute() = route;
+  logLine("[FC] Mission set: " + String((int)route.size()) + " waypoints.");
+  return true;
+}
+
+// Ground maintenance: calibrate the compass (motors stay off). Only when parked.
+inline void calibrateCompass() {
+  FlightPhase phase;
+  withMutex([&]() { phase = shared.phase; });
+  if (phase == PHASE_PARKED) transitionTo(PHASE_CALIBRATE);
+  else logLine("[FC] calibrateCompass refused (not parked).");
+}
+
 namespace detail {
+// What fc::begin() made. (Only the flight loops below use these directly.)
+inline FlightIo& io()        { static FlightIo io; return io; }
+inline Motors*&  motors()    { static Motors* m = nullptr; return m; }
+inline Battery*& battery()   { static Battery* b = nullptr; return b; }
 // The two locks ("pens"), created on first use so an app can log before begin().
 inline void ensureMutexes() {
   if (!sharedDataMutex) sharedDataMutex = xSemaphoreCreateMutex();
@@ -68,8 +101,8 @@ inline void navigationTask(void*) {
   const float navDt       = NAV_LOOP_MS / 1000.0f;
 
   for (;;) {
-    RawGpsReading gps     = flightIo().gps->read();
-    float         heading = flightIo().compass->readHeadingDeg();
+    RawGpsReading gps     = io().gps->read();
+    float         heading = io().compass->readHeadingDeg();
     withMutex([&]() {
       if (gps.fix) {
         shared.raw.gps.lat       = gps.lat;
@@ -105,9 +138,9 @@ inline void physicsTask(void*) {
     float dt          = (now - lastMicros) / 1000000.0f;
     lastMicros        = now;
 
-    RawImuReading imu       = flightIo().imu->read(dt);
-    float         altFt     = flightIo().altimeter->readFt();
-    float         packVolts = flightIo().battery->readPackVolts();
+    RawImuReading imu       = io().imu->read(dt);
+    float         altFt     = io().altimeter->readFt();
+    float         packVolts = io().battery->readPackVolts();
     withMutex([&]() {
       shared.raw.imu.gyroX      = imu.gyroX;   // fused roll  (naming quirk)
       shared.raw.imu.gyroY      = imu.gyroY;   // fused pitch
@@ -126,8 +159,8 @@ inline void physicsTask(void*) {
 
     // Fuel gauge: filtered voltage, estimated current and mAh used, and the
     // OK / WARNING / CRITICAL state the battery failsafe acts on.
-    battery.update(packVolts, motors.lastMix, dt);
-    RawBattery b = battery.reading();
+    battery()->update(packVolts, motors()->lastMix, dt);
+    RawBattery b = battery()->reading();
     withMutex([&]() {
       shared.raw.battery.present   = b.present;
       shared.raw.battery.packVolts = b.packVolts;
@@ -140,19 +173,48 @@ inline void physicsTask(void*) {
   }
 }
 
+// One frame from the radio (real or fake): latch the sticks, mark the link
+// alive, and press the buttons (section 1) for any switch that just flipped.
+inline void handleRadioFrame(const RadioFrame& f) {
+  static bool prevStart = false, prevManual = false, prevLand = false;
+
+  withMutex([&]() {
+    shared.sticks.roll     = f.sticks.roll;
+    shared.sticks.pitch    = f.sticks.pitch;
+    shared.sticks.yaw      = f.sticks.yaw;
+    shared.sticks.throttle = f.sticks.throttle;
+    shared.rcLastFrameMs   = millis();   // the radio link is alive (Failsafes.hpp)
+  });
+
+  // STOP: level-triggered, highest priority.
+  if (f.stop) stop();
+
+  // START and LAND fire only on the LOW->HIGH flip.
+  if (f.start && !prevStart) start();
+  prevStart = f.start;
+
+  // MANUAL: ON grabs the sticks, OFF hands back to auto-hover.
+  if (f.manual && !prevManual)      manualOn();
+  else if (!f.manual && prevManual) manualOff();
+  prevManual = f.manual;
+
+  if (f.land && !prevLand) land();
+  prevLand = f.land;
+}
+
 // Every 2 ms: any new radio frame -> sticks, switch flips, "radio is alive".
 // (A CRSF frame arrives every ~4 ms, so this never falls behind.)
 inline void radioTask(void*) {
   for (;;) {
     RadioFrame frame;
-    if (flightIo().radio->read(frame)) handleRadioFrame(frame);
+    if (io().radio->read(frame)) handleRadioFrame(frame);
     vTaskDelay(pdMS_TO_TICKS(2));
   }
 }
 }  // namespace detail
 
 // ===========================================================================
-// 1. Settings
+// 2. Settings
 // ===========================================================================
 
 // Load /flightsettings.json into the flight controller, then any override
@@ -186,7 +248,7 @@ inline void halt(const String& why) {
 }
 
 // ===========================================================================
-// 2. Start
+// 3. Start
 // ===========================================================================
 
 // Plug in the sensors, motors and radio, bring each one up, and start the
@@ -199,12 +261,22 @@ inline void begin(const FlightIo& io) {
   if (!io.imu || !io.altimeter || !io.gps || !io.compass || !io.battery || !io.motors)
     halt("fc::begin: a sensor or the motors aren't plugged in (see FlightIo.hpp).");
 
-  motorController.configure(settings());
   missionRoute() = settings().mission.route;
 
-  flightIo() = io;
+  // The composition root (like Program.cs): make each service, then each
+  // phase with exactly the services it needs.
+  Motors*          motors          = new Motors(io.motors);
+  MotorController* motorController = new MotorController(settings());
+  Failsafes*       failsafes       = new Failsafes();
+  Battery*         battery         = new Battery();
+  buildPhases(motors, motorController, failsafes, io.compass);
+
+  detail::io()      = io;
+  detail::motors()  = motors;
+  detail::battery() = battery;
+
   io.motors->begin();   // first, so the ESCs get "stopped" right away
-  motors.disarmAll();
+  motors->disarmAll();
   io.imu->begin();
   io.compass->begin();
   io.gps->begin();
@@ -220,42 +292,11 @@ inline void begin(const FlightIo& io) {
 }
 
 // ===========================================================================
-// 3. Commands -- the same things the radio switches do.
-// ===========================================================================
-
-inline void start()     { crsfHandleStart(); }     // take off / start the mission
-inline void stop()      { crsfHandleStop(); }      // EMERGENCY: motors off now
-inline void land()      { crsfHandleLand(); }      // land gently where it is
-inline void manualOn()  { crsfHandleManualOn(); }  // hand control to the sticks
-inline void manualOff() { crsfHandleManualOff(); } // back to auto-hover
-
-// Replace the route MISSION flies. Only on the ground (PARKED or LANDED).
-inline bool setMission(const std::vector<Waypoint>& route) {
-  FlightPhase phase;
-  withMutex([&]() { phase = shared.phase; });
-  if (route.empty() || (phase != PHASE_PARKED && phase != PHASE_LANDED)) {
-    logLine("[FC] setMission refused (empty route, or not on the ground).");
-    return false;
-  }
-  missionRoute() = route;
-  logLine("[FC] Mission set: " + String((int)route.size()) + " waypoints.");
-  return true;
-}
-
-// Ground maintenance: calibrate the compass (motors stay off). Only when parked.
-inline void calibrateCompass() {
-  FlightPhase phase;
-  withMutex([&]() { phase = shared.phase; });
-  if (phase == PHASE_PARKED) transitionTo(PHASE_CALIBRATE);
-  else logLine("[FC] calibrateCompass refused (not parked).");
-}
-
-// ===========================================================================
 // 4. Read-only state -- for apps that watch the flight (logging, the sim).
 // ===========================================================================
 
 inline FlightPhase phase()        { FlightPhase p; withMutex([&]() { p = shared.phase; }); return p; }
-inline MotorMix    lastMotorMix() { return motors.lastMix; }
+inline MotorMix    lastMotorMix() { return detail::motors() ? detail::motors()->lastMix : MotorMix{}; }
 inline RawBattery  batteryState() { RawBattery b; withMutex([&]() { b = shared.raw.battery; }); return b; }
 inline RawSensors  sensors()      { RawSensors r; withMutex([&]() { r = shared.raw; }); return r; }
 inline int         missionWaypointIndex() { int i; withMutex([&]() { i = shared.trip_mission.currentWP; }); return i; }

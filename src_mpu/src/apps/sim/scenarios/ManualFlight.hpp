@@ -17,17 +17,17 @@ public:
     if (!onSinceMs_) {
       pilot_.fly(rig.radio, /*mission=*/false);
       if (fc::phase() == PHASE_HOLD) {
-        rig.radio.setManual(true);
+        rig.radio->setManual(true);
         onSinceMs_ = millis();
         logLine("[SCENARIO] manual control on");
       }
       return;
     }
     if (millis() - onSinceMs_ < 5000) {
-      rig.radio.setSticks(0.5f, 0.0f, 0.5f, 0.0f);   // hold height, pitch forward
+      rig.radio->setSticks(0.5f, 0.0f, 0.5f, 0.0f);   // hold height, pitch forward
     } else {
-      rig.radio.setSticks(0.5f, 0.0f, 0.0f, 0.0f);   // center
-      rig.radio.setStop(true);
+      rig.radio->setSticks(0.5f, 0.0f, 0.0f, 0.0f);   // center
+      rig.radio->setStop(true);
       done_ = true;
       logLine("[SCENARIO] ===SCENARIO_DONE===");
     }

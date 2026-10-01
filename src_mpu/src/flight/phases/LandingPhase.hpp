@@ -9,14 +9,16 @@
 #include "IFlightPhase.hpp"
 #include "../state/PhaseState.hpp"
 #include "../state/FlightSettings.hpp"        // settings().flight.landDescentRateFps
-#include "../services/Motors.hpp"           // motors
-#include "../services/MotorController.hpp"  // motorController
+#include "../services/Motors.hpp"           // Motors
+#include "../services/MotorController.hpp"  // MotorController
 #include "../services/NavMath.hpp"          // gpsDistanceMeters, gpsBearing, bearingToNorthEast
 #include "../services/Log.hpp"              // logLine
 #include "PhaseSwitch.hpp"                  // transitionTo
 
 class LandingPhase : public IFlightPhase {
 public:
+  LandingPhase(Motors* motors, MotorController* motorController) : motors_(motors), motorController_(motorController) {}
+
   FlightPhase id() const override { return PHASE_LANDING; }
 
   void onEnter(const EnterContext& ctx) override {
@@ -57,8 +59,8 @@ public:
       withMutex([&]() {
         float forwardM, rightM;   // world north/east -> the drone's own forward/right
         northEastToForwardRight(northM, eastM, shared.raw.compassHeadingDeg, forwardM, rightM);
-        shared.cruise_landing.targetRollDeg  = motorController.rightNavigationCorrection(rightM, navDt);
-        shared.cruise_landing.targetPitchDeg = motorController.forwardNavigationCorrection(forwardM, navDt);
+        shared.cruise_landing.targetRollDeg  = motorController_->rightNavigationCorrection(rightM, navDt);
+        shared.cruise_landing.targetPitchDeg = motorController_->forwardNavigationCorrection(forwardM, navDt);
       });
     } else {
       withMutex([&]() {
@@ -92,11 +94,11 @@ public:
       r = shared.raw;
     });
 
-    MotorMix mix = motorController.computeMotorMix(
+    MotorMix mix = motorController_->computeMotorMix(
       c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
       r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, r.imu.yawRateDps, dt);
 
-    motors.writeMix(mix);
+    motors_->writeMix(mix);
 
     withMutex([&]() {
       shared.dashboard_landing.m1              = mix.m1;
@@ -108,4 +110,8 @@ public:
       shared.dashboard_landing.pitchCorrection = mix.pitchCorrection;
     });
   }
+
+private:
+  Motors*           motors_;
+  MotorController*  motorController_;
 };

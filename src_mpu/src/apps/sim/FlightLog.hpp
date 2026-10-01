@@ -14,13 +14,13 @@
 
 class FlightLog {
 public:
-  explicit FlightLog(SimWorld& w) : world_(w) {}
+  FlightLog(SimWorld* world) : world_(world) {}
 
   void begin() {
     t0Ms_ = millis();
     file_ = LittleFS.open(PATH, "w");
     if (!file_) return;
-    file_.printf("# home_lat=%.6f home_lon=%.6f\n", world_.homeLat(), world_.homeLon());
+    file_.printf("# home_lat=%.6f home_lon=%.6f\n", world_->homeLat(), world_->homeLon());
     file_.println("t_s,phase,north_m,east_m,up_ft,roll_deg,pitch_deg,dist_m,wp,cell_v,mah_est");
     file_.flush();
   }
@@ -28,7 +28,7 @@ public:
   // One row (call at 10 Hz).
   void sample() {
     if (!file_) return;
-    Truth       t     = world_.truth();
+    Truth       t     = world_->truth();
     FlightPhase phase = fc::phase();
     RawBattery  b     = fc::batteryState();
     float dist = sqrtf(t.northM * t.northM + t.eastM * t.eastM);
@@ -51,7 +51,7 @@ public:
 
 private:
   static constexpr const char* PATH = "/flight.csv";
-  SimWorld&     world_;
+  SimWorld*     world_;
   File          file_;
   unsigned long t0Ms_ = 0;
 };

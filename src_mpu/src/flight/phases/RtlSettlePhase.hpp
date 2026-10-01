@@ -9,15 +9,18 @@
 #include "IFlightPhase.hpp"
 #include "../state/PhaseState.hpp"
 #include "../state/FlightSettings.hpp"        // settings().safety.rtlAltitudeFt, settings().safety.rtlSettleMs
-#include "../services/Motors.hpp"           // motors
-#include "../services/MotorController.hpp"  // motorController
+#include "../services/Motors.hpp"           // Motors
+#include "../services/MotorController.hpp"  // MotorController
 #include "../services/NavMath.hpp"          // gpsDistanceMeters, gpsBearing, bearingToNorthEast
 #include "../services/Log.hpp"              // logLine
-#include "../services/Failsafes.hpp"        // checkBatteryFailsafe
+#include "../services/Failsafes.hpp"        // Failsafes
 #include "PhaseSwitch.hpp"                  // transitionTo
 
 class RtlSettlePhase : public IFlightPhase {
 public:
+  RtlSettlePhase(Motors* motors, MotorController* motorController, Failsafes* failsafes)
+    : motors_(motors), motorController_(motorController), failsafes_(failsafes) {}
+
   FlightPhase id() const override { return PHASE_RTL_SETTLE; }
 
   void onEnter(const EnterContext& ctx) override {
@@ -50,7 +53,7 @@ public:
       shared.dashboard_rtlSettle.yaw            = shared.raw.imu.gyroZ;
     });
     // Battery low on the way home (or while settling)? Land right here.
-    if (checkBatteryFailsafe()) return;
+    if (failsafes_->checkBattery()) return;
 
     // Actively hold over the launch pad while settling: lean back toward it to
     // brake off any leftover momentum, instead of going level and coasting away
@@ -63,8 +66,8 @@ public:
     withMutex([&]() {
       float forwardM, rightM;   // world north/east -> the drone's own forward/right
       northEastToForwardRight(northM, eastM, shared.raw.compassHeadingDeg, forwardM, rightM);
-      shared.cruise_rtlSettle.targetRollDeg  = motorController.rightNavigationCorrection(rightM, navDt);
-      shared.cruise_rtlSettle.targetPitchDeg = motorController.forwardNavigationCorrection(forwardM, navDt);
+      shared.cruise_rtlSettle.targetRollDeg  = motorController_->rightNavigationCorrection(rightM, navDt);
+      shared.cruise_rtlSettle.targetPitchDeg = motorController_->forwardNavigationCorrection(forwardM, navDt);
     });
 
     if (millis() - settleStart >= settings().safety.rtlSettleMs) {
@@ -81,11 +84,11 @@ public:
       r = shared.raw;
     });
 
-    MotorMix mix = motorController.computeMotorMix(
+    MotorMix mix = motorController_->computeMotorMix(
       c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
       r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, r.imu.yawRateDps, dt);
 
-    motors.writeMix(mix);
+    motors_->writeMix(mix);
 
     withMutex([&]() {
       shared.dashboard_rtlSettle.m1              = mix.m1;
@@ -97,4 +100,9 @@ public:
       shared.dashboard_rtlSettle.pitchCorrection = mix.pitchCorrection;
     });
   }
+
+private:
+  Motors*           motors_;
+  MotorController*  motorController_;
+  Failsafes*        failsafes_;
 };

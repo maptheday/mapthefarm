@@ -10,15 +10,18 @@
 #include "../state/PhaseState.hpp"
 #include "../state/FlightSettings.hpp"        // settings()
 #include "../services/Mission.hpp"           // missionRoute()
-#include "../services/Motors.hpp"           // motors
-#include "../services/MotorController.hpp"  // motorController
+#include "../services/Motors.hpp"           // Motors
+#include "../services/MotorController.hpp"  // MotorController
 #include "../services/NavMath.hpp"          // gpsDistanceMeters, gpsBearing, getMissionWaypoint
-#include "../services/Failsafes.hpp"        // checkCoreFailsafes
+#include "../services/Failsafes.hpp"        // Failsafes
 #include "../services/Log.hpp"              // logLine, PANIC
 #include "PhaseSwitch.hpp"                  // transitionTo
 
 class MissionPhase : public IFlightPhase {
 public:
+  MissionPhase(Motors* motors, MotorController* motorController, Failsafes* failsafes)
+    : motors_(motors), motorController_(motorController), failsafes_(failsafes) {}
+
   FlightPhase id() const override { return PHASE_MISSION; }
 
   void onEnter(const EnterContext& ctx) override {
@@ -59,9 +62,9 @@ public:
       shared.dashboard_mission.yaw            = shared.raw.imu.gyroZ;
     });
 
-    checkCoreFailsafes(trip.armedAtMs, trip.launchLat, trip.launchLon);
-    if (checkRadioFailsafe()) return;
-    if (checkBatteryFailsafe()) return;
+    failsafes_->checkCore(trip.armedAtMs, trip.launchLat, trip.launchLon);
+    if (failsafes_->checkRadio()) return;
+    if (failsafes_->checkBattery()) return;
     withMutex([&]() { trip = shared.trip_mission; }); // reload in case a failsafe changed phase
 
     if (!trip.active) return;
@@ -115,8 +118,8 @@ public:
     withMutex([&]() {
       float forwardM, rightM;   // world north/east -> the drone's own forward/right
       northEastToForwardRight(northM, eastM, shared.raw.compassHeadingDeg, forwardM, rightM);
-      shared.cruise_mission.targetRollDeg  = motorController.rightNavigationCorrection(rightM, navDt);
-      shared.cruise_mission.targetPitchDeg = motorController.forwardNavigationCorrection(forwardM, navDt);
+      shared.cruise_mission.targetRollDeg  = motorController_->rightNavigationCorrection(rightM, navDt);
+      shared.cruise_mission.targetPitchDeg = motorController_->forwardNavigationCorrection(forwardM, navDt);
     });
   }
 
@@ -128,11 +131,11 @@ public:
       r = shared.raw;
     });
 
-    MotorMix mix = motorController.computeMotorMix(
+    MotorMix mix = motorController_->computeMotorMix(
       c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
       r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, r.imu.yawRateDps, dt);
 
-    motors.writeMix(mix);
+    motors_->writeMix(mix);
 
     withMutex([&]() {
       shared.dashboard_mission.m1              = mix.m1;
@@ -144,4 +147,9 @@ public:
       shared.dashboard_mission.pitchCorrection = mix.pitchCorrection;
     });
   }
+
+private:
+  Motors*           motors_;
+  MotorController*  motorController_;
+  Failsafes*        failsafes_;
 };

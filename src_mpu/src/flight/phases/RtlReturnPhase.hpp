@@ -10,15 +10,18 @@
 #include "IFlightPhase.hpp"
 #include "../state/PhaseState.hpp"
 #include "../state/FlightSettings.hpp"        // settings().safety.rtlAltitudeFt, settings().flight.waypointAcceptRadiusM
-#include "../services/Motors.hpp"           // motors
-#include "../services/MotorController.hpp"  // motorController
+#include "../services/Motors.hpp"           // Motors
+#include "../services/MotorController.hpp"  // MotorController
 #include "../services/NavMath.hpp"          // gpsDistanceMeters, gpsBearing, bearingToNorthEast
 #include "../services/Log.hpp"              // logLine
-#include "../services/Failsafes.hpp"        // checkBatteryFailsafe
+#include "../services/Failsafes.hpp"        // Failsafes
 #include "PhaseSwitch.hpp"                  // transitionTo
 
 class RtlReturnPhase : public IFlightPhase {
 public:
+  RtlReturnPhase(Motors* motors, MotorController* motorController, Failsafes* failsafes)
+    : motors_(motors), motorController_(motorController), failsafes_(failsafes) {}
+
   FlightPhase id() const override { return PHASE_RTL_RETURN; }
 
   void onEnter(const EnterContext& ctx) override {
@@ -49,7 +52,7 @@ public:
       shared.dashboard_rtlReturn.yaw            = shared.raw.imu.gyroZ;
     });
     // Battery low on the way home (or while settling)? Land right here.
-    if (checkBatteryFailsafe()) return;
+    if (failsafes_->checkBattery()) return;
 
     float distM   = gpsDistanceMeters(gps.lat, gps.lon, trip.launchLat, trip.launchLon);
     float bearing = gpsBearing(gps.lat, gps.lon, trip.launchLat, trip.launchLon);
@@ -68,8 +71,8 @@ public:
       shared.cruise_rtlReturn.yawTargetHeading = bearing;
       float forwardM, rightM;   // world north/east -> the drone's own forward/right
       northEastToForwardRight(northM, eastM, shared.raw.compassHeadingDeg, forwardM, rightM);
-      shared.cruise_rtlReturn.targetRollDeg    = motorController.rightNavigationCorrection(rightM, navDt);
-      shared.cruise_rtlReturn.targetPitchDeg   = motorController.forwardNavigationCorrection(forwardM, navDt);
+      shared.cruise_rtlReturn.targetRollDeg    = motorController_->rightNavigationCorrection(rightM, navDt);
+      shared.cruise_rtlReturn.targetPitchDeg   = motorController_->forwardNavigationCorrection(forwardM, navDt);
     });
   }
 
@@ -81,11 +84,11 @@ public:
       r = shared.raw;
     });
 
-    MotorMix mix = motorController.computeMotorMix(
+    MotorMix mix = motorController_->computeMotorMix(
       c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
       r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, r.imu.yawRateDps, dt);
 
-    motors.writeMix(mix);
+    motors_->writeMix(mix);
 
     withMutex([&]() {
       shared.dashboard_rtlReturn.m1              = mix.m1;
@@ -97,4 +100,9 @@ public:
       shared.dashboard_rtlReturn.pitchCorrection = mix.pitchCorrection;
     });
   }
+
+private:
+  Motors*           motors_;
+  MotorController*  motorController_;
+  Failsafes*        failsafes_;
 };

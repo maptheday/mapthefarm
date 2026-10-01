@@ -8,11 +8,13 @@
 #include "IFlightPhase.hpp"
 #include "../state/PhaseState.hpp"
 #include "../state/FlightSettings.hpp"        // settings().safety.maxFlightTimeMs
-#include "../services/Motors.hpp"           // motors
-#include "../services/MotorController.hpp"  // motorController
+#include "../services/Motors.hpp"           // Motors
+#include "../services/MotorController.hpp"  // MotorController
 
 class LandedPhase : public IFlightPhase {
 public:
+  LandedPhase(Motors* motors, MotorController* motorController) : motors_(motors), motorController_(motorController) {}
+
   FlightPhase id() const override { return PHASE_LANDED; }
 
   void navTick(float /*dt*/) override {
@@ -20,8 +22,12 @@ public:
   }
 
   void physicsTick(float /*dt*/) override {
-    motorController.reset();
+    motorController_->reset();
     // Same reasoning as PARKED: disarm explicitly, don't trust last ESC state.
-    motors.disarmAll();
+    motors_->disarmAll();
   }
+
+private:
+  Motors*           motors_;
+  MotorController*  motorController_;
 };

@@ -1,0 +1,21 @@
+Run log: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/sim_20260930_232425.log
+== On-ESP sim scenarios ==
+  land_switch.py
+== Running on-ESP sim: land_switch.py ==
+[esp-sim] connected /dev/cu.usbmodem14201 (reset -> fresh flight)
+[esp-sim] scenario 'land'; waiting up to 120s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: land
+   [NAV] Takeoff altitude reached, transitioning to HOLD.
+   [SCENARIO] LAND switch flipped
+   [CRSF] LAND switch -- landing here.
+   [NAV] Landed — motors disarmed.
+[esp-sim] finished -- requesting log
+[land] phases: PARKED -> RAISE -> HOLD -> LANDING -> LANDED
+[esp-sim] wrote 199 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/land_switch.json
+[land] PASS (LAND switch -> landed where it was)
+PASS  land_switch.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/land_switch.json)
+
+================================
+Results: 1 passed, 0 failed
+================================

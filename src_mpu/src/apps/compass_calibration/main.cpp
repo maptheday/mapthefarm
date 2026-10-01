@@ -14,7 +14,6 @@
 #include "flight/FlightController.hpp"
 #include "flight/hardware/HardwareIo.hpp"
 
-HardwareIo hardware;
 bool calibrating = false;
 
 void setup() {
@@ -25,7 +24,7 @@ void setup() {
   if (!fc::loadSettings(errors)) fc::halt("Can't load flight settings:\n" + errors);
   // The real sensors and ESCs, but no radio plugged in: this app must never
   // take off.
-  FlightIo io = hardware.io();
+  FlightIo io = realHardware();
   io.radio = nullptr;
   fc::begin(io);
 

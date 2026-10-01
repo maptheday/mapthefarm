@@ -16,7 +16,7 @@
 //
 // Gauges 1 and 2 each give a state; the worse one wins:
 //   OK ──► WARNING ──► CRITICAL
-// Either one makes the drone LAND WHERE IT IS (see checkBatteryFailsafe in
+// Either one makes the drone LAND WHERE IT IS (see Failsafes::checkBattery in
 // Failsafes.hpp). On a big field, flying home could cost more than is left.
 // The voltage state uses a small buffer (hysteresis), like INAV, so it doesn't
 // flicker back and forth when the voltage sits right at a threshold.
@@ -121,5 +121,3 @@ private:
   }
 };
 
-// The one Battery instance (defined in FlightController.hpp).
-extern Battery battery;

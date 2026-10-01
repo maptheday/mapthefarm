@@ -60,6 +60,7 @@ A few ideas that the rest of the guide assumes. If you already know these, skip 
   - **Compass / magnetometer** (QMC5883L): measures **heading** — "which way am I facing?"
 - **The actuators**: four **ESCs** (Electronic Speed Controllers), one per motor. You send each a number from 0.0 (off) to 1.0 (full power), and it spins that motor.
 - **PID controller**: the single most important control-theory idea here. It's a formula that answers "I want to be at X, I'm actually at Y — how hard should I push to fix that?" without overshooting. Fully explained at [`PID.hpp`](#pidhpp).
+- **C++ for a C# developer**: parts are made with `new` and kept in a variable of their interface type (`IGps* gps = new SimGps(world);`), just like C#. The `*` in `IGps*` means "a variable holding an object" (every C# class variable already works that way), and `->` is C#'s `.` on such a variable (`gps->read()` = `gps.Read()`). `: public IGps` is C#'s `: IGps`, and `override` means the same thing.
 - **`.hpp` files**: this project is almost entirely **header files** (`.hpp`). For our purposes think of each as "one module, fully contained in one file." The `#pragma once` at the top just means "don't paste me in twice."
 
 ---
@@ -143,7 +144,7 @@ The flight controller ([`src/flight/`](src/flight/)) is a **library with a publi
 ```
 
 - **Settings** live in [`data/flightsettings.json`](#flightsettingsjson), like `appsettings.json` in C#. The drone reads it from its flash at power-up and **refuses to run if anything is missing**. There are no hidden defaults in the code.
-- **Inputs and outputs are injected** through [`FlightIo`](#flightiohpp): **one small interface per sensor**, one for the motors, one for the radio (like constructor injection in C#). The real drone plugs in `HardwareIo`'s drivers; the simulator plugs in fakes that read a simulated world, and a sim scenario can wrap any one plug to break it on purpose. The flight logic in between is identical, and there is **no `SIM` compile flag** anywhere.
+- **Inputs and outputs are injected** through [`FlightIo`](#flightiohpp): **one small interface per sensor**, one for the motors, one for the radio (like constructor injection in C#). The real drone plugs in the real chips' drivers (`realHardware()`); the simulator plugs in fakes that read a simulated world, and a sim scenario can wrap any one plug to break it on purpose. The flight logic in between is identical, and there is **no `SIM` compile flag** anywhere.
 - **Each job is its own flashable app** (`pio run -e <app> -t upload`): `fly`, `first_mission`, `bench_test`, `esc_calibration`, `compass_calibration`, `sim`.
 
 > **History:** this used to be one `.ino` program with a `SIM` compile flag and `*_ON_BOOT` switches for bench tests and calibrations. Before that, there was also a laptop "HIL" harness that injected sensors over USB. Both are gone: the settings file, the apps, and the `FlightIo` injection point replaced them.
@@ -230,7 +231,7 @@ src/
 │   │   └── Log.hpp                 thread-safe serial printing + PANIC()
 │   │
 │   └── hardware/       the real drone: one driver per plug, plus the chip-level helpers
-│       ├── HardwareIo.hpp          all seven real drivers together: fc::begin(hardware.io())
+│       ├── HardwareIo.hpp          realHardware(): `new`s one of each real driver → fc::begin(realHardware())
 │       ├── Mpu6050Imu.hpp          IImu: accel/gyro → attitude (MPU6050 + Madgwick)
 │       ├── Bme280Altimeter.hpp     IAltimeter: barometer → height above ground (BME280)
 │       ├── Bn880Gps.hpp            IGps: GPS receiver (BN-880 via TinyGPSPlus)
@@ -271,11 +272,11 @@ Every file below has: a one-line **ELI5**, what it does, and how it connects to 
 #### [`FlightController.hpp`](src/flight/FlightController.hpp)
 **ELI5:** the front door of the flight controller: the buttons an app is allowed to press.
 
-The **public API**, and the "composition root": the one place that owns the real instance of every service (`motors`, `battery`, `motorController`) and the shared notebook (`shared`) and its two mutexes. Every other file refers to these as `extern`. An app includes this file **exactly once**, from its `main.cpp`.
+The **public API**, and the "composition root" (like `Program.cs`): `fc::begin()` makes each service with `new` (`Motors`, `MotorController`, `Failsafes`, `Battery`), then makes each phase, handing it exactly the services it needs in its constructor. No service is a global. The only shared globals are the notebook (`shared`) and its two mutexes, born here and borrowed everywhere as `extern`, which is why an app includes this file **exactly once**, from its `main.cpp`.
 
 What an app can call:
 - **Setup:** `fc::loadSettings(errors, {overrides...})` (reads [`flightsettings.json`](#flightsettingsjson), then any override files on top), `fc::hasSettingsOverride(name)`, `fc::begin(io)` (plug in the sensors, motors and radio, bring each up, start the loops), `fc::halt(why)`. Settings are only ever changed through files, never from code.
-- **Commands** (the same ones the radio switches send): `fc::start()`, `fc::stop()`, `fc::land()`, `fc::manualOn()` / `manualOff()`, `fc::setMission(route)`, `fc::calibrateCompass()`. (Stick positions only ever come from the radio plug.)
+- **Commands** — the buttons; the radio presses these when you flip a switch, and an app can too: `fc::start()`, `fc::stop()`, `fc::land()`, `fc::manualOn()` / `manualOff()`, `fc::setMission(route)`, `fc::calibrateCompass()`. (Stick positions only ever come from the radio plug.)
 - **Read-only state:** `fc::phase()`, `fc::sensors()`, `fc::batteryState()`, `fc::lastMotorMix()`, `fc::missionWaypointIndex()`, `fc::launchPoint(...)`.
 
 Inside, it runs three loops pinned to the two cores (`xTaskCreatePinnedToCore`):
@@ -298,14 +299,14 @@ Seven small interfaces (like C# `interface`s), each with an optional `begin()`:
 | `IMotors` | ← takes the 4 motor commands | `PwmMotors` |
 | `IRadio` | radio frames: sticks + switch positions | `CrsfRadio` |
 
-`FlightIo` is just the bundle of those seven pointers, handed to `fc::begin()`. The radio is the only optional one: with no radio there's no pilot, so nothing ever tells the drone to take off (that's how `compass_calibration` stays safely on the ground). **[`HardwareIo`](src/flight/hardware/HardwareIo.hpp)** holds all seven real drivers: `fc::begin(hardware.io())`. Small apps can use a single driver directly (`hardware.motors.writeOne(...)`). The sim app plugs in fakes instead (see §8). The motor layout diagram (which corner is M1, which way each prop spins) lives on `IMotors`.
+`FlightIo` is just the bundle of those seven pointers, handed to `fc::begin()`. The radio is the only optional one: with no radio there's no pilot, so nothing ever tells the drone to take off (that's how `compass_calibration` stays safely on the ground). **[`realHardware()`](src/flight/hardware/HardwareIo.hpp)** makes one of each real driver with `new` and returns them bundled: `fc::begin(realHardware())`. Small apps can use a part directly (`hardware.motors->writeOne(...)`). The sim app plugs in fakes instead (see §8). The motor layout diagram (which corner is M1, which way each prop spins) lives on `IMotors`.
 
 #### The apps ([`src/apps/`](src/apps/))
 Each is a small `main.cpp` with its own `setup()`/`loop()`, flashed with `pio run -e <app> -t upload`:
 
 | App | What it does |
 |---|---|
-| [`fly`](src/apps/fly/main.cpp) | the real flight program: settings → `fc::begin(hardware.io())` → the radio drives it |
+| [`fly`](src/apps/fly/main.cpp) | the real flight program: settings → `fc::begin(realHardware())` → the radio drives it |
 | [`first_mission`](src/apps/first_mission/main.cpp) | the same, but it loads [`flightsettings/first_mission.json`](data/flightsettings/first_mission.json) on top: the mission becomes a 30 m out-and-back along the first leg of the route |
 | [`bench_test`](src/apps/bench_test/main.cpp) | props off: `1`–`4` spins one motor, `s` streams every sensor. Never starts the flight loops or radio. |
 | [`esc_calibration`](src/apps/esc_calibration/main.cpp) | props off: the one-time GO / MIN throttle-range routine, using only the ESCs |
@@ -353,7 +354,7 @@ These three files contain zero logic — just the "shapes" of data that flow aro
 #### [`FlightModel.hpp`](src/flight/models/FlightModel.hpp)
 **ELI5:** the master list of every flight mode and every reason it might switch.
 
-Defines the `FlightPhase` enum (PARKED, RAISE, HOLD, MISSION, RTL_CLIMB, RTL_RETURN, RTL_SETTLE, HOVER_SETTLE, LANDING, LANDED, CALIBRATE, MANUAL), the `TransitionReason` enum (why a switch happened, for logging), and helper functions that turn each into a readable string. **Important gotcha, stated in the file:** new phases must be added at the *end* of the enum, because the registry table ([`PhaseRegistry.hpp`](#phaseregistryhpp)) is indexed by this order.
+Defines the `FlightPhase` enum (PARKED, RAISE, HOLD, MISSION, RTL_CLIMB, RTL_RETURN, RTL_SETTLE, HOVER_SETTLE, LANDING, LANDED, CALIBRATE, MANUAL), the `TransitionReason` enum (why a switch happened, for logging), and helper functions that turn each into a readable string. Add new phases at the *end* of the enum (the registry's table is sized by the last one — see [`PhaseRegistry.hpp`](#phaseregistryhpp)).
 
 #### [`SensorTypes.hpp`](src/flight/models/SensorTypes.hpp)
 **ELI5:** the shapes for "a GPS reading," "an IMU reading," and "the RC sticks."
@@ -389,13 +390,13 @@ Contains the real `transitionTo(next, reason)`. It builds the `EnterContext`, ca
 #### [`PhaseRegistry.hpp`](src/flight/phases/PhaseRegistry.hpp)
 **ELI5:** the phone book — given a phase name, hand back the object that runs it.
 
-Holds one shared instance of each phase and a `table[]` that maps the `FlightPhase` enum to the right object via `phaseFor(phase)`. **The table order must exactly match the enum order** in `FlightModel.hpp` — this is the reason new phases go at the end.
+`buildPhases(...)` makes one of each phase with `new`, handing each its services (`table[PHASE_HOLD] = new HoldPhase(motors, motorController, failsafes);`), and `phaseFor(phase)` hands back the one for a given phase. Each phase has its own named slot, so the order of the lines doesn't matter.
 
-Now the ten behaviors. They share a **common rhythm** (learn it once, and every phase reads the same): `onEnter()` sets the initial targets; `navTick()` updates the dashboard and decides whether to switch phases; `physicsTick()` copies the targets + latest sensors, calls `motorController.computeMotorMix(...)`, sends the result to `motors.writeMix(...)`, and records the mix for display.
+Now the ten behaviors. They share a **common rhythm** (learn it once, and every phase reads the same): `onEnter()` sets the initial targets; `navTick()` updates the dashboard and decides whether to switch phases; `physicsTick()` copies the targets + latest sensors, calls `motorController_->computeMotorMix(...)`, sends the result to `motors_->writeMix(...)`, and records the mix for display. Each phase's **constructor** lists the services it uses (`HoldPhase(Motors* motors, MotorController* motorController, Failsafes* failsafes)`), so the top of the file tells you what it depends on.
 
 #### [`ParkedPhase.hpp`](src/flight/phases/ParkedPhase.hpp)
 **ELI5:** sitting on the ground, motors dead, waiting for START.
-The safe resting state and the emergency-stop destination. Its `physicsTick()` calls `motors.disarmAll()` *every tick* so a stop never relies on a stale command.
+The safe resting state and the emergency-stop destination. Its `physicsTick()` calls `motors_->disarmAll()` *every tick* so a stop never relies on a stale command.
 
 #### [`RaisePhase.hpp`](src/flight/phases/RaisePhase.hpp)
 **ELI5:** takeoff — smoothly raise the target height, then hand off to HOLD.
@@ -403,7 +404,7 @@ Ramps `targetAltFt` from 0 up to `TAKEOFF_ALTITUDE_FT` at a fixed climb rate, ke
 
 #### [`HoldPhase.hpp`](src/flight/phases/HoldPhase.hpp)
 **ELI5:** hover in place and wait for the next command.
-Holds altitude and heading. Crucially, this is where the core **failsafes** run each tick (`checkCoreFailsafes`). START from HOLD begins the mission.
+Holds altitude and heading. Crucially, this is where the core **failsafes** run each tick (`failsafes_->checkCore(...)`). START from HOLD begins the mission.
 
 #### [`MissionPhase.hpp`](src/flight/phases/MissionPhase.hpp)
 **ELI5:** fly the pre-set GPS route, point to point.
@@ -465,11 +466,11 @@ Pure geometry, no state: `gpsDistanceMeters` (haversine distance), `gpsBearing` 
 #### [`Failsafes.hpp`](src/flight/services/Failsafes.hpp)
 **ELI5:** the safety net that every flying phase checks constantly.
 
-`checkCoreFailsafes(...)`, three checks in priority order: **max flight time** → **land where it is** (on a big field, flying home could cost more battery than is left); **geofence breach** (flew too far from launch) → force RTL; **GPS lost too long** → abort straight to LANDING (can't fly home blind). Called from HOLD and MISSION. (Note: MANUAL deliberately does *not* run these — manual is manual, STOP is the safety.)
+A class a phase gets in its constructor. `checkCore(...)`, three checks in priority order: **max flight time** → **land where it is** (on a big field, flying home could cost more battery than is left); **geofence breach** (flew too far from launch) → force RTL; **GPS lost too long** → abort straight to LANDING (can't fly home blind). Called from HOLD and MISSION. (Note: MANUAL deliberately does *not* run these — manual is manual, STOP is the safety.)
 
-Plus `checkRadioFailsafe()`: if no radio frame arrives for `RC_LOSS_TIMEOUT_MS` (1 s), the pilot's STOP/MANUAL switches can't reach the drone, so it comes home by itself: RTL, or LANDING if it's below `RC_LOSS_LAND_BELOW_FT` or has no GPS. Called from RAISE, HOLD, MISSION **and** MANUAL (with no radio there is no pilot, even in manual). It only arms once a radio has actually been heard (so the radio-less `compass_calibration` app never trips it). The sim always has a fake radio, so it's armed in every sim scenario, and `rcloss` cuts it.
+Plus `checkRadio()`: if no radio frame arrives for `safety.radioLossTimeoutMs` (1 s), the pilot's STOP/MANUAL switches can't reach the drone, so it comes home by itself: RTL, or LANDING if it's below `safety.radioLossLandBelowFt` or has no GPS. Called from RAISE, HOLD, MISSION **and** MANUAL (with no radio there is no pilot, even in manual). It only arms once a radio has actually been heard (so the radio-less `compass_calibration` app never trips it). The sim always has a fake radio, so it's armed in every sim scenario, and `rcloss` cuts it.
 
-Plus `checkBatteryFailsafe()`: as soon as the [`Battery`](#batteryhpp) service reports **WARNING or CRITICAL**, the drone **lands where it is**, never flying home first. Called from every airborne phase (RAISE, HOLD, MISSION, MANUAL, HOVER_SETTLE, and the three RTL phases), so it also cuts a return-home short if the battery runs low on the way.
+Plus `checkBattery()`: as soon as the [`Battery`](#batteryhpp) service reports **WARNING or CRITICAL**, the drone **lands where it is**, never flying home first. Called from every airborne phase (RAISE, HOLD, MISSION, MANUAL, HOVER_SETTLE, and the three RTL phases), so it also cuts a return-home short if the battery runs low on the way.
 
 #### [`Battery.hpp`](src/flight/services/Battery.hpp)
 **ELI5:** the fuel gauge, modeled on INAV's battery code.
@@ -478,7 +479,7 @@ Three independent gauges, because none is trustworthy alone: (1) **pack voltage*
 #### [`RcInput.hpp`](src/flight/services/RcInput.hpp)
 **ELI5:** what your transmitter's switches *mean*.
 
-The radio itself is a plug (`IRadio`): [`CrsfRadio`](src/flight/hardware/CrsfRadio.hpp) on the real drone decodes the CRSF bytes off the wire, the sim's `SimRadio` is a fake transmitter. Either way, each frame says where the sticks and switches are, and `handleRadioFrame()` here does the rest, identically for both: latch the sticks into `shared.sticks`, mark the radio link alive (for the radio-loss failsafe), and turn switch *flips* into intent (STOP is acted on every frame it's on; START, LAND and MANUAL on the flip). The **intent handlers** (`crsfHandleStart`, `crsfHandleStop`, `crsfHandleManualOn/Off`, `crsfHandleLand`) decide what a flip means given the current phase; they're also the public API's `fc::start()`, `fc::land()`, ….
+The radio itself is a plug (`IRadio`): [`CrsfRadio`](src/flight/hardware/CrsfRadio.hpp) on the real drone decodes the CRSF bytes off the wire, the sim's `SimRadio` is a fake transmitter. Either way, each frame says where the sticks and switches are. The flight controller's radio loop ([`FlightController.hpp`](src/flight/FlightController.hpp)) latches the sticks, marks the link alive (for the radio-loss failsafe), and presses the matching **button** for any switch that just flipped: `fc::start()`, `fc::stop()`, `fc::land()`, `fc::manualOn()` / `manualOff()` (STOP is pressed every frame it's on; the others on the flip). This file holds the **rules** behind each button (`crsfHandleStart`, …): is it allowed right now, and which phase comes next.
 
 #### [`Log.hpp`](src/flight/services/Log.hpp)
 **ELI5:** safe printing (so two cores don't scramble each other's messages) + a "halt on fatal bug" macro.
@@ -492,7 +493,7 @@ The radio itself is a plug (`IRadio`): [`CrsfRadio`](src/flight/hardware/CrsfRad
 One driver per plug (see [`FlightIo.hpp`](#flightiohpp)), plus the chip-level helpers they use. Nothing outside this folder knows which chips the drone has.
 
 #### [`HardwareIo.hpp`](src/flight/hardware/HardwareIo.hpp)
-**ELI5:** the box of real parts. Holds one of each driver below; `hardware.io()` hands all seven to `fc::begin()`.
+**ELI5:** the box of real parts. `realHardware()` makes one of each driver below (`io.gps = new Bn880Gps();` …) and hands back all seven, ready for `fc::begin()`.
 
 #### [`Mpu6050Imu.hpp`](src/flight/hardware/Mpu6050Imu.hpp) — `IImu`
 **ELI5:** the inner ear — turns raw accel/gyro into "how am I tilted?"
@@ -548,9 +549,9 @@ You do **not** need a real drone to run and test this. The whole simulation runs
 
 | Kind | How | Examples |
 |---|---|---|
-| change the **world** (something really happens) | `rig.world.gust(...)`, `rig.world.setCharge(...)` | `stab` (a gust), `lowbatt` (a weak pack) |
+| change the **world** (something really happens) | `rig.world->gust(...)`, `rig.world->setCharge(...)` | `stab` (a gust), `lowbatt` (a weak pack) |
 | break a **sensor** (the drone perceives it wrong) | wrap one plug in `setup()`: `rig.io.gps = new LosableGps(rig.io.gps)` | `gpsloss` (`LosableGps`), `rcloss` (`CuttableRadio`) |
-| be the **pilot** | `rig.radio.pressStart()`, `pressLand()`, `setManual()`, `setSticks()`, `setStop()` | every scenario takes off this way; `land`, `manual` |
+| be the **pilot** | `rig.radio->pressStart()`, `pressLand()`, `setManual()`, `setSticks()`, `setStop()` | every scenario takes off this way; `land`, `manual` |
 
 And **rule changes are settings**, not code: a scenario's own override file `flightsettings/sim.<name>.json` is picked up automatically (`sim.geofence.json` shrinks the fence, `sim.timeout.json` shortens the timer), a scenario can ask for another file (`testroute` loads the real `first_mission.json`), and every sim run loads `sim.json` (a 10-minute limit, so the full fence line isn't cut short).
 
@@ -592,7 +593,7 @@ ESP_PORT=/dev/cu.usbmodem14101 ./simulate/run_hil.sh
 1. Add it to the *end* of the `FlightPhase` enum in [`FlightModel.hpp`](src/flight/models/FlightModel.hpp) (+ its name in `phaseName`).
 2. Add per-phase state structs in [`PhaseState.hpp`](src/flight/state/PhaseState.hpp) and to `SharedState`.
 3. Create `phases/YourPhase.hpp` implementing [`IFlightPhase`](src/flight/phases/IFlightPhase.hpp) (copy an existing phase as a template).
-4. Register it in [`PhaseRegistry.hpp`](src/flight/phases/PhaseRegistry.hpp) — include it, add an instance, and add it to `table[]` **in enum order**.
+4. Register it in [`PhaseRegistry.hpp`](src/flight/phases/PhaseRegistry.hpp) — include it, and add one line to `buildPhases()`: `table[PHASE_YOURS] = new YourPhase(motors, ...);` (and size the table by your phase, since it's now the last one).
 5. Add a `transitionTo(PHASE_YOURS, ...)` somewhere that should trigger it.
 ([`ManualPhase`](src/flight/phases/ManualPhase.hpp) is a recent, complete example of exactly these steps.)
 
@@ -603,13 +604,13 @@ ESP_PORT=/dev/cu.usbmodem14101 ./simulate/run_hil.sh
 → [`RcInput.hpp`](src/flight/services/RcInput.hpp) (the `crsfHandle...` functions) and the channel map (`radio.channels`) in [`flightsettings.json`](data/flightsettings.json).
 
 **I want a new test run or tool (like a bench check or a calibration).**
-→ Make it a new app: a folder in [`src/apps/`](src/apps/) with a `main.cpp`, plus an `[env:your_app]` in [`platformio.ini`](platformio.ini). Use the `fc::` API and/or `HardwareIo`'s drivers; never add a test mode inside the flight controller.
+→ Make it a new app: a folder in [`src/apps/`](src/apps/) with a `main.cpp`, plus an `[env:your_app]` in [`platformio.ini`](platformio.ini). Use the `fc::` API and/or the parts from `realHardware()`; never add a test mode inside the flight controller.
 
 **I want a new sim test (a new failure to try).**
 → A new file in [`src/apps/sim/scenarios/`](src/apps/sim/scenarios/): change the world, wrap one plug, or be the pilot (see [section 8](#8-simulation--testing)).
 
 **I want to support a different sensor chip (say, another GPS).**
-→ Write one driver in [`src/flight/hardware/`](src/flight/hardware/) that implements that plug (`IGps`), and swap it into [`HardwareIo`](src/flight/hardware/HardwareIo.hpp). Nothing else changes.
+→ Write one driver in [`src/flight/hardware/`](src/flight/hardware/) that implements that plug (`IGps`), and change one line in [`realHardware()`](src/flight/hardware/HardwareIo.hpp) (`io.gps = new YourGps();`). Nothing else changes.
 
 **I want to understand a specific log message.**
 → Search the string; every log line is a `logLine("...")`. Remember these strings double as the sim test protocol, so don't reword them casually.
@@ -634,7 +635,7 @@ ESP_PORT=/dev/cu.usbmodem14101 ./simulate/run_hil.sh
 - **QuadSim** — the standalone C++ quad-physics library in [`lib/QuadSim/`](lib/QuadSim/) that powers the on-chip sim.
 - **Waypoint** — a GPS point (lat/lon/altitude) the mission flies to.
 - **App** — a small flashable program (`src/apps/*`) that uses the flight controller: `fly`, `first_mission`, `bench_test`, `esc_calibration`, `compass_calibration`, `sim`.
-- **FlightIo / plug** — one small interface per sensor, plus motors and radio, that the flight controller reads and drives through: `HardwareIo`'s drivers on the real drone, fakes in the simulator.
+- **FlightIo / plug** — one small interface per sensor, plus motors and radio, that the flight controller reads and drives through: the real drivers from `realHardware()` on the real drone, fakes in the simulator.
 - **Scenario** — one sim test: it changes the world, breaks one plug, and/or plays the pilot.
 - **flightsettings.json** — every tunable setting, loaded from the drone's flash at power-up (like `appsettings.json` in C#).
 

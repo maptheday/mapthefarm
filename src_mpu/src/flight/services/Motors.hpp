@@ -9,24 +9,26 @@
 
 #include <Arduino.h>
 #include "../models/ControlTypes.hpp"  // MotorMix
-#include "../FlightIo.hpp"             // flightIo()
+#include "../FlightIo.hpp"             // IMotors
 
 class Motors {
 public:
+  Motors(IMotors* out) : out_(out) {}   // where the commands go
+
   // Push one computed mix to all 4 motors.
   void writeMix(const MotorMix& mix) {
     lastMix = mix;
-    if (IMotors* m = flightIo().motors) m->write(mix);
+    out_->write(mix);
   }
 
   // Cut all motors immediately (the "stopped" signal).
   void disarmAll() {
     lastMix = MotorMix{};
-    if (IMotors* m = flightIo().motors) m->stop();
+    out_->stop();
   }
 
   MotorMix lastMix{};   // the last mix commanded: the battery's current estimate uses it
-};
 
-// The one Motors instance (defined in FlightController.hpp).
-extern Motors motors;
+private:
+  IMotors* out_;
+};

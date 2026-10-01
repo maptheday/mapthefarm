@@ -1,0 +1,345 @@
+Run log: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/sim_20260930_230354.log
+== On-ESP sim scenarios ==
+  field_patrol.py
+  geofence_breach.py
+  gps_loss.py
+  max_timeout.py
+  low_battery.py
+  rc_loss.py
+  land_switch.py
+  test_route.py
+  manual_flight.py
+  stabilization.py
+== Uploading flight settings (data/) to /dev/cu.usbmodem14201 ==
+Processing sim (platform: espressif32; board: esp32-s3-devkitc-1-n16r8; framework: arduino)
+--------------------------------------------------------------------------------
+Verbose mode can be enabled via `-v, --verbose` option
+CONFIGURATION: https://docs.platformio.org/page/boards/espressif32/esp32-s3-devkitc-1-n16r8.html
+PLATFORM: Espressif 32 (7.0.1) > Espressif ESP32-S3-DevKitC-1-N16R8 (16 MB, 8 MB PSRAM)
+HARDWARE: ESP32S3 240MHz, 320KB RAM, 16MB Flash
+DEBUG: Current (esp-builtin) On-board (esp-builtin) External (cmsis-dap, esp-bridge, esp-prog, iot-bus-jtag, jlink, minimodule, olimex-arm-usb-ocd, olimex-arm-usb-ocd-h, olimex-arm-usb-tiny-h, olimex-jtag-tiny, tumpa)
+PACKAGES: 
+ - framework-arduinoespressif32 @ 3.20017.241212+sha.dcc1105b 
+ - tool-esptoolpy @ 2.41100.0 (4.11.0) 
+ - tool-mkfatfs @ 2.0.1 
+ - tool-mklittlefs @ 1.203.210628 (2.3) 
+ - tool-mkspiffs @ 2.230.0 (2.30) 
+ - tool-openocd-esp32 @ 2.1100.20220706 (11.0) 
+ - toolchain-riscv32-esp @ 8.4.0+2021r2-patch5 
+ - toolchain-xtensa-esp32s3 @ 8.4.0+2021r2-patch5
+LDF: Library Dependency Finder -> https://bit.ly/configure-pio-ldf
+LDF Modes: Finder ~ chain, Compatibility ~ soft
+Found 44 compatible libraries
+Scanning dependencies...
+Dependency Graph
+|-- Adafruit MPU6050 @ 2.2.9
+|-- Adafruit Unified Sensor @ 1.1.15
+|-- ArduinoJson @ 7.4.3
+|-- Madgwick @ 1.2.0
+|-- Adafruit BME280 Library @ 2.3.0
+|-- TinyGPSPlus @ 1.1.0
+|-- QMC5883LCompass @ 1.2.3
+|-- LittleFS @ 2.0.0
+|-- QuadSim @ 0.1.0
+Building in release mode
+Building FS image from 'data' directory to .pio/build/sim/littlefs.bin
+/index.html
+/flightsettings.json
+/script.js.gz
+/flightsettings/first_mission.json
+/flightsettings/sim.geofence.json
+/flightsettings/sim.timeout.json
+/flightsettings/sim.json
+/script.js
+/style.css
+/index.html.gz
+/style.css.gz
+Looking for upload port...
+Using manually specified: /dev/cu.usbmodem14201
+Uploading .pio/build/sim/littlefs.bin
+esptool.py v4.11.0
+Serial port /dev/cu.usbmodem14201
+Connecting...
+Chip is ESP32-S3 (QFN56) (revision v0.2)
+Features: WiFi, BLE, Embedded PSRAM 8MB (AP_3v3)
+Crystal is 40MHz
+USB mode: USB-Serial/JTAG
+MAC: e0:72:a1:db:c6:20
+Uploading stub...
+Running stub...
+Stub running...
+Changing baud rate to 460800
+Changed.
+Configuring flash size...
+Flash will be erased from 0x00c90000 to 0x00feffff...
+Compressed 3538944 bytes to 17693...
+Writing at 0x00c90000... (50 %)
+Writing at 0x00ea7a71... (100 %)
+Wrote 3538944 bytes (17693 compressed) at 0x00c90000 in 15.5 seconds (effective 1821.4 kbit/s)...
+Hash of data verified.
+
+Leaving...
+Hard resetting via RTS pin...
+========================= [SUCCESS] Took 24.94 seconds =========================
+
+Environment    Status    Duration
+-------------  --------  ------------
+sim            SUCCESS   00:00:24.938
+========================= 1 succeeded in 00:00:24.938 =========================
+== Flashing sim app to /dev/cu.usbmodem14201 ==
+Processing sim (platform: espressif32; board: esp32-s3-devkitc-1-n16r8; framework: arduino)
+--------------------------------------------------------------------------------
+Verbose mode can be enabled via `-v, --verbose` option
+CONFIGURATION: https://docs.platformio.org/page/boards/espressif32/esp32-s3-devkitc-1-n16r8.html
+PLATFORM: Espressif 32 (7.0.1) > Espressif ESP32-S3-DevKitC-1-N16R8 (16 MB, 8 MB PSRAM)
+HARDWARE: ESP32S3 240MHz, 320KB RAM, 16MB Flash
+DEBUG: Current (esp-builtin) On-board (esp-builtin) External (cmsis-dap, esp-bridge, esp-prog, iot-bus-jtag, jlink, minimodule, olimex-arm-usb-ocd, olimex-arm-usb-ocd-h, olimex-arm-usb-tiny-h, olimex-jtag-tiny, tumpa)
+PACKAGES: 
+ - framework-arduinoespressif32 @ 3.20017.241212+sha.dcc1105b 
+ - tool-esptoolpy @ 2.41100.0 (4.11.0) 
+ - tool-mkfatfs @ 2.0.1 
+ - tool-mklittlefs @ 1.203.210628 (2.3) 
+ - tool-mkspiffs @ 2.230.0 (2.30) 
+ - tool-openocd-esp32 @ 2.1100.20220706 (11.0) 
+ - toolchain-riscv32-esp @ 8.4.0+2021r2-patch5 
+ - toolchain-xtensa-esp32s3 @ 8.4.0+2021r2-patch5
+LDF: Library Dependency Finder -> https://bit.ly/configure-pio-ldf
+LDF Modes: Finder ~ chain, Compatibility ~ soft
+Found 44 compatible libraries
+Scanning dependencies...
+Dependency Graph
+|-- Adafruit MPU6050 @ 2.2.9
+|-- Adafruit Unified Sensor @ 1.1.15
+|-- ArduinoJson @ 7.4.3
+|-- Madgwick @ 1.2.0
+|-- Adafruit BME280 Library @ 2.3.0
+|-- TinyGPSPlus @ 1.1.0
+|-- QMC5883LCompass @ 1.2.3
+|-- LittleFS @ 2.0.0
+|-- QuadSim @ 0.1.0
+Building in release mode
+Compiling .pio/build/sim/src/apps/sim/main.cpp.o
+Retrieving maximum program size .pio/build/sim/firmware.elf
+Checking size .pio/build/sim/firmware.elf
+Advanced Memory Usage is available via "PlatformIO Home > Project Inspect"
+RAM:   [=         ]   6.3% (used 20556 bytes from 327680 bytes)
+Flash: [=         ]   5.9% (used 388601 bytes from 6553600 bytes)
+Configuring upload protocol...
+AVAILABLE: cmsis-dap, esp-bridge, esp-builtin, esp-prog, espota, esptool, iot-bus-jtag, jlink, minimodule, olimex-arm-usb-ocd, olimex-arm-usb-ocd-h, olimex-arm-usb-tiny-h, olimex-jtag-tiny, tumpa
+CURRENT: upload_protocol = esptool
+Looking for upload port...
+Using manually specified: /dev/cu.usbmodem14201
+Uploading .pio/build/sim/firmware.bin
+esptool.py v4.11.0
+Serial port /dev/cu.usbmodem14201
+Connecting....
+Chip is ESP32-S3 (QFN56) (revision v0.2)
+Features: WiFi, BLE, Embedded PSRAM 8MB (AP_3v3)
+Crystal is 40MHz
+USB mode: USB-Serial/JTAG
+MAC: e0:72:a1:db:c6:20
+Uploading stub...
+Running stub...
+Stub running...
+Changing baud rate to 460800
+Changed.
+Configuring flash size...
+Flash will be erased from 0x00000000 to 0x00003fff...
+Flash will be erased from 0x00008000 to 0x00008fff...
+Flash will be erased from 0x0000e000 to 0x0000ffff...
+Flash will be erased from 0x00010000 to 0x0006efff...
+SHA digest in image updated
+Compressed 15104 bytes to 10429...
+Writing at 0x00000000... (100 %)
+Wrote 15104 bytes (10429 compressed) at 0x00000000 in 0.2 seconds (effective 647.0 kbit/s)...
+Hash of data verified.
+Compressed 3072 bytes to 146...
+Writing at 0x00008000... (100 %)
+Wrote 3072 bytes (146 compressed) at 0x00008000 in 0.0 seconds (effective 644.0 kbit/s)...
+Hash of data verified.
+Compressed 8192 bytes to 47...
+Writing at 0x0000e000... (100 %)
+Wrote 8192 bytes (47 compressed) at 0x0000e000 in 0.1 seconds (effective 935.8 kbit/s)...
+Hash of data verified.
+Compressed 388960 bytes to 223438...
+Writing at 0x00010000... (7 %)
+Writing at 0x0001b395... (14 %)
+Writing at 0x00029122... (21 %)
+Writing at 0x0002e540... (28 %)
+Writing at 0x0003458e... (35 %)
+Writing at 0x0003a0e6... (42 %)
+Writing at 0x0004001c... (50 %)
+Writing at 0x00045609... (57 %)
+Writing at 0x0004ac34... (64 %)
+Writing at 0x0004f883... (71 %)
+Writing at 0x00054fff... (78 %)
+Writing at 0x0005a7ef... (85 %)
+Writing at 0x00063c66... (92 %)
+Writing at 0x0006b1e6... (100 %)
+Wrote 388960 bytes (223438 compressed) at 0x00010000 in 2.5 seconds (effective 1252.1 kbit/s)...
+Hash of data verified.
+
+Leaving...
+Hard resetting via RTS pin...
+========================= [SUCCESS] Took 12.53 seconds =========================
+
+Environment    Status    Duration
+-------------  --------  ------------
+sim            SUCCESS   00:00:12.535
+========================= 1 succeeded in 00:00:12.535 =========================
+== Running on-ESP sim: field_patrol.py ==
+[esp-sim] connected /dev/cu.usbmodem14201 (reset -> fresh flight)
+[esp-sim] scenario 'full'; waiting up to 320s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: full
+   [NAV] Takeoff altitude reached, transitioning to HOLD.
+   [NAV] Reached waypoint 0 — advanci
+   [NAV] Reaccing.
+   [NAV] Reached waypoint 2 — advanci
+   [NAV] Reached waypoint 3 — advancing.
+   [NAV] Reached waypoint 4 — advancing.
+   [NAV] Reached waypoint 6 — advanci
+   [NAV] Reached waypoint 7 — advanci
+   [NAV] Mission complete — hovering before landing.
+   [NAV] Hover complete — beginning automatic landing.
+   [NAV] Landed — motors disarmed.
+[esp-sim] finished -- requesting log
+[field_patrol] closest approach to each corner:
+   wp0 corner2: 0.2 m
+   wp1 corner3: 1.4 m
+   wp2 corner4: 3.1 m
+   wp3 corner5: 0.6 m
+   wp4 corner6: 1.0 m
+   wp5 corner7: 1.0 m
+   wp6 corner8: 3.3 m
+   wp7 corner1: 0.0 m
+[field_patrol] phases: PARKED -> RAISE -> HOLD -> MISSION -> HOVER_SETTLE -> LANDING -> LANDED
+[field_patrol] max dist out: 302 m   lands 1.8 m from home   worst corner 3.3 m
+[esp-sim] wrote 2641 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/field_patrol.json
+[field_patrol] PASS
+PASS  field_patrol.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/field_patrol.json)
+== Running on-ESP sim: geofence_breach.py ==
+[esp-sim] connected /dev/cu.usbmodem14201 (reset -> fresh flight)
+[esp-sim] scenario 'geofence'; waiting up to 180s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: geofence
+   [NAV] Takeoff altitude reached, transitioning to HOLD.
+   [SAFETY] Geofence exceeded — forcing RTL.
+[esp-sim] wait elapsed -- requesting log
+[geofence] phases: PARKED -> RAISE -> HOLD -> MISSION -> RTL_CLIMB -> RTL_RETURN -> RTL_SETTLE -> LANDING -> LANDED
+[esp-sim] wrote 1715 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/geofence_breach.json
+[geofence] PASS (geofence -> RTL -> landed)
+PASS  geofence_breach.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/geofence_breach.json)
+== Running on-ESP sim: gps_loss.py ==
+[esp-sim] connected /dev/cu.usbmodem14201 (reset -> fresh flight)
+[esp-sim] scenario 'gpsloss'; waiting up to 120s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: gpsloss
+   [NAV] Takeoff altitude reached, transitioning to HOLD.
+   [SCENARIO] GPS fix dropped
+   [SAFETY] GPS fix lost — aborting directly to LANDING.
+   [NAV] Landed — motors disarmed.
+[esp-sim] finished -- requesting log
+[gpsloss] phases: PARKED -> RAISE -> HOLD -> LANDING -> LANDED
+[esp-sim] wrote 225 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/gps_loss.json
+[gpsloss] PASS (GPS lost -> direct LANDING)
+PASS  gps_loss.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/gps_loss.json)
+== Running on-ESP sim: max_timeout.py ==
+[esp-sim] connected /dev/cu.usbmodem14201 (reset -> fresh flight)
+[esp-sim] scenario 'timeout'; waiting up to 180s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: timeout
+   [NAV][CRSF] START switch -- starting waypoint mission.
+   [SAFETY] Max fliganding here.
+[esp-sim] wait elapsed -- requesting log
+[timeout] phases: PARKED -> RAISE -> HOLD -> MISSION -> LANDING -> LANDED   LANDING began at 21s
+[esp-sim] wrote 1674 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/max_timeout.json
+[timeout] PASS (max flight time -> landed where it was)
+PASS  max_timeout.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/max_timeout.json)
+== Running on-ESP sim: low_battery.py ==
+[esp-sim] connected /dev/cu.usbmodem14201 (reset -> fresh flight)
+[esp-sim] scenario 'lowbatt'; waiting up to 240s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: lowbatt
+   [NAV] Takeoff altitude reached, transitioning to HOLD.
+   [NAV] Reached waypoint 0 — advancing.
+   [NAV] Reached waypoint 1 — advancing.
+   [SAFETY] Battery low — landing here.
+   [NAV] Landed — motors disarmed.
+[esp-sim] finished -- requesting log
+[lowbatt] phases: PARKED -> RAISE -> HOLD -> MISSION -> LANDING -> LANDED
+[lowbatt] landing began at 97s, 2.97 V/cell, 226 mAh used (est.)
+[esp-sim] wrote 1180 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/low_battery.json
+[lowbatt] PASS (low battery -> landed where it was)
+PASS  low_battery.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/low_battery.json)
+== Running on-ESP sim: rc_loss.py ==
+[esp-sim] connected /dev/cu.usbmodem14201 (reset -> fresh flight)
+[esp-sim] scenario 'rcloss'; waiting up to 180s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: rcloss
+   [SCENARIO] radio link cut
+   [SAFETY] Radio lch.
+[esp-sim] wait elapsed -- requesting log
+[rcloss] phases: PARKED -> RAISE -> HOLD -> MISSION -> RTL_CLIMB -> RTL_RETURN -> RTL_SETTLE -> LANDING -> LANDED
+[esp-sim] wrote 1702 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/rc_loss.json
+[rcloss] PASS (radio lost -> RTL -> landed)
+PASS  rc_loss.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/rc_loss.json)
+== Running on-ESP sim: land_switch.py ==
+[esp-sim] connected /dev/cu.usbmodem14201 (reset -> fresh flight)
+[esp-sim] scenario 'land'; waiting up to 120s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: land
+   [NAV] Takeoff altitude reached, transitioning to HOLD.
+   [SCENARIO] LAND switch flipped
+   [CRSF] LAND switch -- landing here.
+   [NAV] Landed — motors disarmed.
+[esp-sim] finished -- requesting log
+[land] phases: PARKED -> RAISE -> HOLD -> LANDING -> LANDED
+[esp-sim] wrote 200 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/land_switch.json
+[land] PASS (LAND switch -> landed where it was)
+PASS  land_switch.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/land_switch.json)
+== Running on-ESP sim: test_route.py ==
+[esp-sim] connected /dev/cu.usbmodem14201 (reset -> fresh flight)
+[esp-sim] scenario 'testroute'; waiting up to 180s to finish...
+   [FC] Flight controller running. Mission: First mission: 30 m out along the first leg and back (2 waypoints).
+   [SCENARIO] selected: testroute
+   [NAV] Takeoff altitude
+   [NAV] Reached waypoint 0 — advancing.
+   [NAV] Reached wa
+   [NAV] Hover complete — beginning a
+   [NAV] Landed — motors disarmed.
+[esp-sim] finished -- requesting log
+[testroute] phases: PARKED -> RAISE -> HOLD -> MISSION -> HOVER_SETTLE -> LANDING -> LANDED
+[testroute] farthest 28 m from home, landed 2.3 m from home
+[esp-sim] wrote 563 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/test_route.json
+[testroute] PASS (short route flown, landed at home)
+PASS  test_route.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/test_route.json)
+== Running on-ESP sim: manual_flight.py ==
+[esp-sim] connected /dev/cu.usbmodem14201 (reset -> fresh flight)
+[esp-sim] scenario 'manual'; waiting up to 60s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: manual
+   [NAV] Takeoff altitude
+   [SCENARIO] manual control on
+   [SCENARIO] ===SCENARIO_DONE===
+[esp-sim] finished -- requesting log
+[manual] phases: PARKED -> RAISE -> HOLD -> MANUAL   moved 8.9 m under manual control
+[esp-sim] wrote 136 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/manual_flight.json
+[manual] PASS (MANUAL mode flew the drone)
+PASS  manual_flight.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/manual_flight.json)
+== Running on-ESP sim: stabilization.py ==
+[esp-sim] connected /dev/cu.usbmodem14201 (reset -> fresh flight)
+[esp-sim] scenario 'stab'; waiting up to 60s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: stab
+   [NAV][SCENARIO] attitude kick applied
+   [SCENARIO] ===SCENARIO_DONE===
+[esp-sim] finished -- requesting log
+[stab] peak roll after kick: 22.0 deg;  settled to 1.4 deg
+[esp-sim] wrote 146 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/stabilization.json
+[stab] PASS (kicked ~22 deg, recovered to level)
+PASS  stabilization.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/stabilization.json)
+
+================================
+Results: 10 passed, 0 failed
+================================

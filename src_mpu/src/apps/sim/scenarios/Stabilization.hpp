@@ -17,14 +17,14 @@ public:
     if (!gustMs_) {
       pilot_.fly(rig.radio, /*mission=*/false);
       if (fc::phase() == PHASE_HOLD) {
-        rig.world.gust(22.0f, 500);
+        rig.world->gust(22.0f, 500);
         gustMs_ = millis();
         logLine("[SCENARIO] attitude kick applied");
       }
       return;
     }
     if (millis() - gustMs_ > 6000) {
-      rig.radio.setStop(true);
+      rig.radio->setStop(true);
       done_ = true;
       logLine("[SCENARIO] ===SCENARIO_DONE===");
     }

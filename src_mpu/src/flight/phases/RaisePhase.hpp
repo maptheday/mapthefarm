@@ -8,20 +8,23 @@
 #include "IFlightPhase.hpp"
 #include "../state/PhaseState.hpp"
 #include "../state/FlightSettings.hpp"        // settings().flight.takeoffAltitudeFt, settings().flight.climbRateFps
-#include "../services/Motors.hpp"           // motors
-#include "../services/MotorController.hpp"  // motorController
+#include "../services/Motors.hpp"           // Motors
+#include "../services/MotorController.hpp"  // MotorController
 #include "../services/Log.hpp"              // logLine
-#include "../services/Failsafes.hpp"        // checkRadioFailsafe
+#include "../services/Failsafes.hpp"        // Failsafes
 #include "PhaseSwitch.hpp"                  // transitionTo
 
 class RaisePhase : public IFlightPhase {
 public:
+  RaisePhase(Motors* motors, MotorController* motorController, Failsafes* failsafes)
+    : motors_(motors), motorController_(motorController), failsafes_(failsafes) {}
+
   FlightPhase id() const override { return PHASE_RAISE; }
 
   void onEnter(const EnterContext& ctx) override {
     // Reset all PID integrators so stale state from a previous flight cannot
     // corrupt the first takeoff ramp.
-    motorController.reset();
+    motorController_->reset();
     shared.trip_raise.armedAtMs          = ctx.now;
     shared.trip_raise.launchLat          = ctx.currentLat;
     shared.trip_raise.launchLon          = ctx.currentLon;
@@ -43,8 +46,8 @@ public:
       shared.dashboard_raise.pitch          = shared.raw.imu.gyroY;
       shared.dashboard_raise.yaw            = shared.raw.imu.gyroZ;
     });
-    if (checkRadioFailsafe()) return;
-    if (checkBatteryFailsafe()) return;
+    if (failsafes_->checkRadio()) return;
+    if (failsafes_->checkBattery()) return;
 
     bool ready = false;
     withMutex([&]() {
@@ -71,11 +74,11 @@ public:
       r = shared.raw;
     });
 
-    MotorMix mix = motorController.computeMotorMix(
+    MotorMix mix = motorController_->computeMotorMix(
       c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
       r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, r.imu.yawRateDps, dt);
 
-    motors.writeMix(mix);
+    motors_->writeMix(mix);
 
     withMutex([&]() {
       shared.dashboard_raise.m1              = mix.m1;
@@ -87,4 +90,9 @@ public:
       shared.dashboard_raise.pitchCorrection = mix.pitchCorrection;
     });
   }
+
+private:
+  Motors*           motors_;
+  MotorController*  motorController_;
+  Failsafes*        failsafes_;
 };

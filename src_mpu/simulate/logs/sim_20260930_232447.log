@@ -1,0 +1,20 @@
+Run log: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/sim_20260930_232447.log
+== On-ESP sim scenarios ==
+  manual_flight.py
+== Running on-ESP sim: manual_flight.py ==
+[esp-sim] connected /dev/cu.usbmodem14201 (reset -> fresh flight)
+[esp-sim] scenario 'manual'; waiting up to 60s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: manual
+   [NAV] Takeoff altitude reached, transitioning to HOLD.
+   [SCENARIO] manual control on
+   [SCENARIO] ===SCENARIO_DONE===
+[esp-sim] finished -- requesting log
+[manual] phases: PARKED -> RAISE -> HOLD -> MANUAL   moved 9.0 m under manual control
+[esp-sim] wrote 136 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/manual_flight.json
+[manual] PASS (MANUAL mode flew the drone)
+PASS  manual_flight.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/manual_flight.json)
+
+================================
+Results: 1 passed, 0 failed
+================================

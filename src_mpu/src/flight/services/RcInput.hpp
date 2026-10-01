@@ -5,22 +5,19 @@
 //
 // The radio itself is a plug (IRadio in FlightIo.hpp): the real CRSF receiver
 // on the drone, or the sim's fake radio. Either way it hands over RadioFrames,
-// and handleRadioFrame() below turns them into intent, the same for both:
+// and the flight controller's radio loop (FlightController.hpp) turns switch
+// flips into fc::start(), fc::stop(), ... which land here:
 //   STOP    level-triggered: any frame with STOP engaged -> emergency stop.
 //   START   edge-triggered:  arm + take off (PARKED/LANDED), or start the
 //                            mission (HOLD).
 //   MANUAL  edge-triggered both ways: sticks on / back to auto-hover.
 //   LAND    edge-triggered:  land where it is.
-// Every frame also latches the sticks and marks the radio link alive (the
-// radio-loss failsafe in Failsafes.hpp watches that).
-//
-// The crsfHandle...() functions are also the public API's commands
-// (fc::start(), fc::land(), ...), so an app can press a "switch" directly.
+// These are the RULES behind each button (is it allowed right now? which phase
+// next?). The buttons themselves are the public API: fc::start(), fc::land(), ...
 // ============================================================================
 
 #include <Arduino.h>
 #include "../state/FlightSettings.hpp"        // settings().battery
-#include "../FlightIo.hpp"                   // RadioFrame
 #include "../state/PhaseState.hpp"          // shared, withMutex
 #include "../services/Log.hpp"              // logLine
 #include "../phases/PhaseSwitch.hpp"        // transitionTo
@@ -108,34 +105,4 @@ inline void crsfHandleManualOff() {
     logLine("[CRSF] MANUAL switch off -- handing back to auto-hover.");
     transitionTo(PHASE_HOLD, REASON_MANUAL_OFF);
   }
-}
-
-// One frame from the radio (real or fake): latch the sticks, mark the link
-// alive, and act on the switches. Called by the flight controller's radio
-// loop for every new frame.
-inline void handleRadioFrame(const RadioFrame& f) {
-  static bool prevStart = false, prevManual = false, prevLand = false;
-
-  withMutex([&]() {
-    shared.sticks.roll     = f.sticks.roll;
-    shared.sticks.pitch    = f.sticks.pitch;
-    shared.sticks.yaw      = f.sticks.yaw;
-    shared.sticks.throttle = f.sticks.throttle;
-    shared.rcLastFrameMs   = millis();   // the radio link is alive (Failsafes.hpp)
-  });
-
-  // STOP: level-triggered, highest priority.
-  if (f.stop) crsfHandleStop();
-
-  // START and LAND fire only on the LOW->HIGH flip.
-  if (f.start && !prevStart) crsfHandleStart();
-  prevStart = f.start;
-
-  // MANUAL: ON grabs the sticks, OFF hands back to auto-hover.
-  if (f.manual && !prevManual)      crsfHandleManualOn();
-  else if (!f.manual && prevManual) crsfHandleManualOff();
-  prevManual = f.manual;
-
-  if (f.land && !prevLand) crsfHandleLand();
-  prevLand = f.land;
 }

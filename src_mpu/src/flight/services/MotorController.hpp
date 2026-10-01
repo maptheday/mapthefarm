@@ -10,9 +10,9 @@
 class MotorController {
 public:
   // Load the PID gains from the settings (airframe section of
-  // flightsettings.json). Called once by fc::begin(). The gains are the
+  // flightsettings.json). Made once by fc::begin(). The gains are the
   // tuning: "how hard to push per unit of error" (Lesson 4.9 of the course).
-  void configure(const FlightSettings& s) {
+  MotorController(const FlightSettings& s) {
     altitudePID = pidFrom(s.airframe.altitudePid);   // feet of error -> throttle trim
     rollPID     = pidFrom(s.airframe.rollPid);       // degrees -> motor difference
     pitchPID    = pidFrom(s.airframe.pitchPid);
@@ -94,7 +94,7 @@ public:
 private:
   static PID pidFrom(const PidGains& g) { return PID(g.kp, g.ki, g.kd, g.min, g.max); }
 
-  // Placeholders until configure() loads the real gains from the settings.
+  // Set from the settings in the constructor.
   PID altitudePID{0, 0, 0, 0, 0};
   PID rollPID{0, 0, 0, 0, 0};
   PID pitchPID{0, 0, 0, 0, 0};
@@ -104,6 +104,3 @@ private:
   float yawRateDamping_ = 0.0f;
   float yawLimit_       = 0.0f;
 };
-
-// The one MotorController instance (defined in FlightController.hpp).
-extern MotorController motorController;

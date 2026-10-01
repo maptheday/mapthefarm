@@ -10,15 +10,18 @@
 #include "IFlightPhase.hpp"
 #include "../state/PhaseState.hpp"
 #include "../state/FlightSettings.hpp"        // settings().safety.rtlAltitudeFt
-#include "../services/Motors.hpp"           // motors
-#include "../services/MotorController.hpp"  // motorController
+#include "../services/Motors.hpp"           // Motors
+#include "../services/MotorController.hpp"  // MotorController
 #include "../services/NavMath.hpp"          // gpsDistanceMeters, gpsBearing, bearingToNorthEast
 #include "../services/Log.hpp"              // logLine
-#include "../services/Failsafes.hpp"        // checkBatteryFailsafe
+#include "../services/Failsafes.hpp"        // Failsafes
 #include "PhaseSwitch.hpp"                  // transitionTo
 
 class RtlClimbPhase : public IFlightPhase {
 public:
+  RtlClimbPhase(Motors* motors, MotorController* motorController, Failsafes* failsafes)
+    : motors_(motors), motorController_(motorController), failsafes_(failsafes) {}
+
   FlightPhase id() const override { return PHASE_RTL_CLIMB; }
 
   void onEnter(const EnterContext& ctx) override {
@@ -53,7 +56,7 @@ public:
       shared.dashboard_rtlClimb.yaw            = shared.raw.imu.gyroZ;
     });
     // Battery low on the way home (or while settling)? Land right here.
-    if (checkBatteryFailsafe()) return;
+    if (failsafes_->checkBattery()) return;
 
     // Climb IN PLACE: lean back toward the spot where RTL triggered to brake off
     // the mission's momentum, so we rise straight up instead of coasting away.
@@ -65,8 +68,8 @@ public:
     withMutex([&]() {
       float forwardM, rightM;   // world north/east -> the drone's own forward/right
       northEastToForwardRight(northM, eastM, shared.raw.compassHeadingDeg, forwardM, rightM);
-      shared.cruise_rtlClimb.targetRollDeg  = motorController.rightNavigationCorrection(rightM, navDt);
-      shared.cruise_rtlClimb.targetPitchDeg = motorController.forwardNavigationCorrection(forwardM, navDt);
+      shared.cruise_rtlClimb.targetRollDeg  = motorController_->rightNavigationCorrection(rightM, navDt);
+      shared.cruise_rtlClimb.targetPitchDeg = motorController_->forwardNavigationCorrection(forwardM, navDt);
     });
 
     if (currentAlt >= settings().safety.rtlAltitudeFt - 2.0f) {
@@ -83,11 +86,11 @@ public:
       r = shared.raw;
     });
 
-    MotorMix mix = motorController.computeMotorMix(
+    MotorMix mix = motorController_->computeMotorMix(
       c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
       r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, r.imu.yawRateDps, dt);
 
-    motors.writeMix(mix);
+    motors_->writeMix(mix);
 
     withMutex([&]() {
       shared.dashboard_rtlClimb.m1              = mix.m1;
@@ -99,4 +102,9 @@ public:
       shared.dashboard_rtlClimb.pitchCorrection = mix.pitchCorrection;
     });
   }
+
+private:
+  Motors*           motors_;
+  MotorController*  motorController_;
+  Failsafes*        failsafes_;
 };

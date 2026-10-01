@@ -2250,8 +2250,8 @@ Back in [`MissionPhase.hpp`](src/flight/phases/MissionPhase.hpp):
 ```cpp
 float forwardM, rightM;   // world north/east -> the drone's own forward/right
 northEastToForwardRight(northM, eastM, shared.raw.compassHeadingDeg, forwardM, rightM);
-shared.cruise_mission.targetRollDeg  = motorController.rightNavigationCorrection(rightM, navDt);
-shared.cruise_mission.targetPitchDeg = motorController.forwardNavigationCorrection(forwardM, navDt);
+shared.cruise_mission.targetRollDeg  = motorController_->rightNavigationCorrection(rightM, navDt);
+shared.cruise_mission.targetPitchDeg = motorController_->forwardNavigationCorrection(forwardM, navDt);
 ```
 
 First, north/east is turned into the drone's own forward/right. That's Lesson 10.1; for now, picture the nose pointing north, so forward = north (26.4) and right = east (−5.2). Then the nav PIDs (`Kp = 0.35` degrees per meter, clamp ±6°) turn those meters into lean angles. Just the P part:

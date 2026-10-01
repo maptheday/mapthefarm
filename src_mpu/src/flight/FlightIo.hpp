@@ -133,7 +133,3 @@ struct FlightIo {
   IMotors*        motors    = nullptr;
   IRadio*         radio     = nullptr;
 };
-
-// The plugs the flight controller was started with (filled in by fc::begin()).
-// The Motors service and the CALIBRATE phase reach their plug through this.
-inline FlightIo& flightIo() { static FlightIo io; return io; }

@@ -12,7 +12,7 @@ class LowBattery : public Scenario {
 public:
   const char* name() const override { return "lowbatt"; }
 
-  void setup(SimRig& rig) override { rig.world.setCharge(0.25f); }
+  void setup(SimRig& rig) override { rig.world->setCharge(0.25f); }
 
   void tick(SimRig& rig) override { pilot_.fly(rig.radio, /*mission=*/true); }
 

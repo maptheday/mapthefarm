@@ -1,0 +1,20 @@
+Run log: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/sim_20260930_232503.log
+== On-ESP sim scenarios ==
+  stabilization.py
+== Running on-ESP sim: stabilization.py ==
+[esp-sim] connected /dev/cu.usbmodem14201 (reset -> fresh flight)
+[esp-sim] scenario 'stab'; waiting up to 60s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: stab
+   [NAV] Takeoff altitude reached, transitioning to HOLD.
+   [SCENARIO] attitude kick applied
+   [SCENARIO] ===SCENARIO_DONE===
+[esp-sim] finished -- requesting log
+[stab] peak roll after kick: 22.0 deg;  settled to 1.5 deg
+[esp-sim] wrote 146 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/stabilization.json
+[stab] PASS (kicked ~22 deg, recovered to level)
+PASS  stabilization.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/stabilization.json)
+
+================================
+Results: 1 passed, 0 failed
+================================

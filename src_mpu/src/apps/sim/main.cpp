@@ -24,7 +24,7 @@
 
 #include "flight/FlightController.hpp"
 #include "SimWorld.hpp"
-#include "SimSensors.hpp"
+#include "flight/hardware/HardwareIo.hpp"   // simHardware()
 #include "SimRadio.hpp"
 #include "FlightLog.hpp"
 #include "scenarios/FlyMission.hpp"
@@ -35,25 +35,24 @@
 #include "scenarios/ManualFlight.hpp"
 #include "scenarios/Stabilization.hpp"
 
-// --- every scenario, by name --------------------------------------------------
-FlyMission    full("full");
-FlyMission    geofence("geofence");
-FlyMission    timeout("timeout");
-FlyMission    testroute("testroute", {"first_mission"});   // the real first-flight route
-LowBattery    lowbatt;
-GpsLoss       gpsloss;
-RadioLoss     rcloss;
-LandSwitch    land;
-ManualFlight  manual;
-Stabilization stab;
-
-Scenario* const SCENARIOS[] = { &full, &geofence, &timeout, &testroute, &lowbatt,
-                                &gpsloss, &rcloss, &land, &manual, &stab };
+// --- every scenario ------------------------------------------------------------
+std::vector<Scenario*> scenarios = {
+  new FlyMission("full"),
+  new FlyMission("geofence"),
+  new FlyMission("timeout"),
+  new FlyMission("testroute", {"first_mission"}),   // the real first-flight route
+  new LowBattery(),
+  new GpsLoss(),
+  new RadioLoss(),
+  new LandSwitch(),
+  new ManualFlight(),
+  new Stabilization(),
+};
 
 // --- the simulated world, and the fake transmitter the pilot holds -----------
-SimWorld  world;
-SimRadio  radio;
-FlightLog flightLog(world);
+SimWorld*  world     = new SimWorld();
+SimRadio*  radio     = new SimRadio();
+FlightLog* flightLog = new FlightLog(world);
 
 SimRig    rig{world, radio, {}};
 Scenario* scenario = nullptr;
@@ -85,7 +84,7 @@ void setup() {
   delay(2000);   // native USB takes a moment to reconnect after a reset
 
   String name = waitForScenario(1500);
-  for (Scenario* s : SCENARIOS) if (name == s->name()) scenario = s;
+  for (Scenario* s : scenarios) if (name == s->name()) scenario = s;
   if (!scenario) fc::halt("Unknown scenario: " + name);
 
   // The settings, layered like appsettings files in .NET:
@@ -100,22 +99,15 @@ void setup() {
   String errors;
   if (!fc::loadSettings(errors, overrides)) fc::halt("Can't load flight settings:\n" + errors);
 
-  // "Register" the fake parts where the real ones would go.
-  // (C#: services.AddSingleton<IGps, SimGps>() ... -- here just one line each.)
-  rig.io.imu       = new SimImu(world);
-  rig.io.altimeter = new SimAltimeter(world);
-  rig.io.gps       = new SimGps(world);
-  rig.io.compass   = new SimCompass(world);
-  rig.io.battery   = new SimBatterySensor(world);
-  rig.io.motors    = new SimMotors(world);
-  rig.io.radio     = &radio;   // not `new`: the pilot holds this same radio
+  // The fake parts, where the real drone would use realHardware().
+  rig.io = simHardware(world, radio);
 
   // The scenario may swap one for a broken version (gpsloss, rcloss).
   scenario->setup(rig);
 
   // "Build": start the world, then hand the flight controller its parts.
-  world.begin();
-  flightLog.begin();
+  world->begin();
+  flightLog->begin();
   fc::begin(rig.io);
   logLine("[SCENARIO] selected: " + name);
 }
@@ -126,7 +118,7 @@ void loop() {
   if (millis() - lastTickMs >= 100) {
     lastTickMs = millis();
     scenario->tick(rig);
-    flightLog.sample();
+    flightLog->sample();
   }
 
   // Commands from the laptop.
@@ -134,7 +126,7 @@ void loop() {
   while (Serial.available()) {
     char c = (char)Serial.read();
     if (c == '\n') {
-      if (buf.startsWith("DUMPLOG"))    flightLog.dump();
+      if (buf.startsWith("DUMPLOG"))    flightLog->dump();
       else if (buf.startsWith("PING:")) logLine("[SIM] Ready.");
       buf = "";
     } else if (c != '\r') {

@@ -15,8 +15,6 @@
 #include "flight/FlightController.hpp"
 #include "flight/hardware/HardwareIo.hpp"
 
-HardwareIo hardware;
-
 void setup() {
   Serial.begin(115200);
   delay(500);
@@ -25,7 +23,7 @@ void setup() {
   if (!fc::loadSettings(errors, {"first_mission"}))
     fc::halt("Can't load flight settings:\n" + errors);
 
-  fc::begin(hardware.io());
+  fc::begin(realHardware());
 }
 
 void loop() {

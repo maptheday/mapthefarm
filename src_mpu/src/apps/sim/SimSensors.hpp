@@ -5,6 +5,8 @@
 // plugs (see flight/FlightIo.hpp). Each one just looks at the SimWorld and
 // reports what a perfect sensor would read; the motors push the world.
 //
+// simHardware() in flight/hardware/HardwareIo.hpp bundles one of each.
+//
 // None of these know about scenarios. A scenario that wants a sensor to
 // misbehave wraps it (see scenarios/GpsLoss.hpp).
 // ============================================================================
@@ -14,9 +16,9 @@
 
 class SimImu : public IImu {
 public:
-  explicit SimImu(SimWorld& w) : world_(w) {}
+  SimImu(SimWorld* world) : world_(world) {}
   RawImuReading read(float) override {
-    Truth t = world_.truth();
+    Truth t = world_->truth();
     RawImuReading r;
     r.gyroX      = t.rollDeg;      // fused roll  (the gyroX naming quirk)
     r.gyroY      = t.pitchDeg;     // fused pitch
@@ -25,22 +27,22 @@ public:
     return r;
   }
 private:
-  SimWorld& world_;
+  SimWorld* world_;
 };
 
 class SimAltimeter : public IAltimeter {
 public:
-  explicit SimAltimeter(SimWorld& w) : world_(w) {}
-  float readFt() override { return world_.truth().upFt; }
+  SimAltimeter(SimWorld* world) : world_(world) {}
+  float readFt() override { return world_->truth().upFt; }
 private:
-  SimWorld& world_;
+  SimWorld* world_;
 };
 
 class SimGps : public IGps {
 public:
-  explicit SimGps(SimWorld& w) : world_(w) {}
+  SimGps(SimWorld* world) : world_(world) {}
   RawGpsReading read() override {
-    Truth t = world_.truth();
+    Truth t = world_->truth();
     RawGpsReading r;
     r.lat       = t.lat;
     r.lon       = t.lon;
@@ -50,32 +52,32 @@ public:
     return r;
   }
 private:
-  SimWorld& world_;
+  SimWorld* world_;
 };
 
 class SimCompass : public ICompass {
 public:
-  explicit SimCompass(SimWorld& w) : world_(w) {}
-  float readHeadingDeg() override { return world_.truth().headingDeg; }
+  SimCompass(SimWorld* world) : world_(world) {}
+  float readHeadingDeg() override { return world_->truth().headingDeg; }
 private:
-  SimWorld& world_;
+  SimWorld* world_;
 };
 
 class SimBatterySensor : public IBatterySensor {
 public:
-  explicit SimBatterySensor(SimWorld& w) : world_(w) {}
-  float readPackVolts() override { return world_.truth().packVolts; }
+  SimBatterySensor(SimWorld* world) : world_(world) {}
+  float readPackVolts() override { return world_->truth().packVolts; }
 private:
-  SimWorld& world_;
+  SimWorld* world_;
 };
 
 class SimMotors : public IMotors {
 public:
-  explicit SimMotors(SimWorld& w) : world_(w) {}
-  void write(const MotorMix& mix) override { world_.setMotors(mix); }
-  void stop() override { world_.setMotors(MotorMix{}); }
+  SimMotors(SimWorld* world) : world_(world) {}
+  void write(const MotorMix& mix) override { world_->setMotors(mix); }
+  void stop() override { world_->setMotors(MotorMix{}); }
   void writeOne(int, float) override {}   // bench-test only; not simulated
   void stopOne(int) override {}
 private:
-  SimWorld& world_;
+  SimWorld* world_;
 };

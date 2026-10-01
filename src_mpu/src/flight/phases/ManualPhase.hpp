@@ -20,19 +20,22 @@
 #include "IFlightPhase.hpp"
 #include "../state/PhaseState.hpp"
 #include "../state/FlightSettings.hpp"        // MANUAL_* tuning
-#include "../services/Motors.hpp"           // motors
-#include "../services/MotorController.hpp"  // motorController
+#include "../services/Motors.hpp"           // Motors
+#include "../services/MotorController.hpp"  // MotorController
 #include "../services/NavMath.hpp"          // gpsDistanceMeters, gpsBearing, bearingToNorthEast
-#include "../services/Failsafes.hpp"        // checkRadioFailsafe
+#include "../services/Failsafes.hpp"        // Failsafes
 
 class ManualPhase : public IFlightPhase {
 public:
+  ManualPhase(Motors* motors, MotorController* motorController, Failsafes* failsafes)
+    : motors_(motors), motorController_(motorController), failsafes_(failsafes) {}
+
   FlightPhase id() const override { return PHASE_MANUAL; }
 
   void onEnter(const EnterContext& ctx) override {
     // Start from "hold exactly where we are, level" so taking control doesn't
     // jolt the drone; the sticks move the setpoints from here.
-    motorController.reset();
+    motorController_->reset();
     shared.cruise_manual.targetAltFt      = ctx.currentAltFt;
     shared.cruise_manual.yawTargetHeading = ctx.currentHeadingDeg;
     shared.cruise_manual.targetRollDeg    = 0.0f;
@@ -65,8 +68,8 @@ public:
     });
     // Manual skips the core failsafes (manual is manual), but with no radio
     // there IS no pilot -- so the radio-loss check still applies here.
-    if (checkRadioFailsafe()) return;
-    if (checkBatteryFailsafe()) return;
+    if (failsafes_->checkRadio()) return;
+    if (failsafes_->checkBattery()) return;
 
     // throttle: 0..1 with 0.5 centered -> -1..1 deflection (up = climb).
     float climb   = deadband((s.throttle - 0.5f) * 2.0f) * settings().manual.climbRateFps;
@@ -95,8 +98,8 @@ public:
       bearingToNorthEast(distM, bearing, northM, eastM);
       float forwardM, rightM;   // world north/east -> the drone's own forward/right
       northEastToForwardRight(northM, eastM, headingDeg, forwardM, rightM);
-      targetRoll  = motorController.rightNavigationCorrection(rightM, navDt);
-      targetPitch = motorController.forwardNavigationCorrection(forwardM, navDt);
+      targetRoll  = motorController_->rightNavigationCorrection(rightM, navDt);
+      targetPitch = motorController_->forwardNavigationCorrection(forwardM, navDt);
     } else {
       // Manual lean (or hold disabled / no GPS fix): fly by the sticks and drop
       // the anchor, so we re-anchor to the new spot next time you center.
@@ -128,11 +131,11 @@ public:
       r = shared.raw;
     });
 
-    MotorMix mix = motorController.computeMotorMix(
+    MotorMix mix = motorController_->computeMotorMix(
       c.targetAltFt, c.targetRollDeg, c.targetPitchDeg, c.yawTargetHeading,
       r.baroAltitudeFt, r.imu.gyroX, r.imu.gyroY, r.compassHeadingDeg, r.imu.yawRateDps, dt);
 
-    motors.writeMix(mix);
+    motors_->writeMix(mix);
 
     withMutex([&]() {
       shared.dashboard_manual.m1              = mix.m1;
@@ -150,4 +153,8 @@ private:
   static float deadband(float v) {
     return (v > -settings().manual.stickDeadband && v < settings().manual.stickDeadband) ? 0.0f : v;
   }
+
+  Motors*           motors_;
+  MotorController*  motorController_;
+  Failsafes*        failsafes_;
 };

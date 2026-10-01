@@ -4,10 +4,10 @@
 // SCENARIO -- one sim test. Each scenario is its own file in this folder, and
 // can only do three kinds of thing:
 //
-//   1. change the WORLD        a gust, a weak pack          (rig.world)
+//   1. change the WORLD        a gust, a weak pack          (rig.world->...)
 //   2. break a SENSOR          wrap one of the plugs in     (rig.io, in setup())
 //                              something that misbehaves
-//   3. be the PILOT            flip switches, move sticks   (rig.radio, in tick())
+//   3. be the PILOT            flip switches, move sticks   (rig.radio->..., in tick())
 //
 // Rule changes (a smaller geofence, a shorter time limit, another route) are
 // settings, so they live in override files instead:
@@ -24,8 +24,8 @@
 
 // What a scenario gets to work with.
 struct SimRig {
-  SimWorld& world;   // what's true
-  SimRadio& radio;   // what the pilot holds
+  SimWorld* world;   // what's true
+  SimRadio* radio;   // what the pilot holds
   FlightIo  io;      // the plugs the flight controller will get (setup() may swap one)
 };
 
@@ -49,7 +49,7 @@ public:
 // mission. Tries again every 1.5 s until the drone reacts.
 class Pilot {
 public:
-  void fly(SimRadio& radio, bool mission) {
+  void fly(SimRadio* radio, bool mission) {
     unsigned long now = millis();
     if (t0Ms_ == 0) t0Ms_ = now;
     FlightPhase phase = fc::phase();
@@ -59,7 +59,7 @@ public:
 
     if (now - t0Ms_ > 2500 && now - lastPressMs_ > 1500 &&
         (phase == PHASE_PARKED || (phase == PHASE_HOLD && mission))) {
-      radio.pressStart();
+      radio->pressStart();
       lastPressMs_ = now;
     }
   }
