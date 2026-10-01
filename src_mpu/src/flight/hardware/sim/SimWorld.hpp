@@ -27,7 +27,8 @@
 // that is the true heading and turn rate. QuadSim yaw = +heading.
 //
 // Scenarios change the world through gust() and setCharge(), never by
-// changing what a sensor says (that's a sensor wrapper's job, see scenarios/).
+// changing what a sensor says (that's a sensor wrapper's job, see
+// apps/sim/scenarios/).
 // ============================================================================
 
 #include <Arduino.h>

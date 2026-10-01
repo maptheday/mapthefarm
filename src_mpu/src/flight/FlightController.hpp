@@ -234,12 +234,6 @@ inline bool loadSettings(String& errors, const std::vector<String>& overrides = 
   return ok;
 }
 
-// Is there an override file with this name on the drone? (For apps that pick
-// up an override only when one exists, like the sim's per-scenario files.)
-inline bool hasSettingsOverride(const String& name) {
-  return LittleFS.begin(false) && LittleFS.exists(settingsOverridePath(name).c_str());
-}
-
 // Print a message and stop forever. For "can't safely continue" at startup.
 inline void halt(const String& why) {
   Serial.println("[HALT] " + why);

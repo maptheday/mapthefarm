@@ -1,0 +1,19 @@
+Run log: /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/sim_20261001_000417.log
+== On-ESP sim scenarios ==
+  max_timeout.py
+== Running on-ESP sim: max_timeout.py ==
+[esp-sim] connected /dev/cu.usbmodem14201 (reset -> fresh flight)
+[esp-sim] scenario 'timeout'; waiting up to 180s to finish...
+   [FC] Flight controller running. Mission: Farmer field fence line (8 waypoints).
+   [SCENARIO] selected: timeout
+   [SAFETY] Max flight time reached — landing here.
+   [NAV] Landed — motors disarmed.
+[esp-sim] finished -- requesting log
+[timeout] phases: PARKED -> RAISE -> HOLD -> MISSION -> LANDING -> LANDED   LANDING began at 21s
+[esp-sim] wrote 443 samples -> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/max_timeout.json
+[timeout] PASS (max flight time -> landed where it was)
+PASS  max_timeout.py  (-> /Users/joblaundry/JobLaundry/drone/testrun/src_mpu/simulate/logs/max_timeout.json)
+
+================================
+Results: 1 passed, 0 failed
+================================

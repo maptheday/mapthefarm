@@ -7,8 +7,8 @@
 
 #include <Arduino.h>
 #include <TinyGPSPlus.h>
-#include "../FlightIo.hpp"               // IGps
-#include "../state/FlightSettings.hpp"   // settings().wiring.gpsRx / gpsTx / gpsBaud
+#include "../../FlightIo.hpp"               // IGps
+#include "../../state/FlightSettings.hpp"   // settings().wiring.gpsRx / gpsTx / gpsBaud
 
 class Bn880Gps : public IGps {
 public:

@@ -4,8 +4,8 @@
 // HARDWARE IO -- what gets plugged into each of the flight controller's
 // plugs (see FlightIo.hpp), in one place:
 //
-//   fc::begin(realHardware());        // the real drone: the fly / first_mission apps
-//   simHardware(world, radio)         // the sim app's fakes (apps/sim)
+//   fc::begin(realHardware());        // the real drone (drivers in real/)
+//   simHardware(world, radio)         // the sim app's fakes (in sim/)
 //
 // Small apps can also use the parts directly, without starting the flight
 // controller (bench_test spins single motors and reads the sensors). Every
@@ -14,15 +14,20 @@
 // ============================================================================
 
 #include "../FlightIo.hpp"
-#include "Mpu6050Imu.hpp"
-#include "Bme280Altimeter.hpp"
-#include "Bn880Gps.hpp"
-#include "Qmc5883Compass.hpp"
-#include "AdcBatterySensor.hpp"
-#include "PwmMotors.hpp"
-#include "CrsfRadio.hpp"
-#include "../../apps/sim/SimSensors.hpp"   // the sim's fake parts
-#include "../../apps/sim/SimRadio.hpp"
+#include "real/Mpu6050Imu.hpp"
+#include "real/Bme280Altimeter.hpp"
+#include "real/Bn880Gps.hpp"
+#include "real/Qmc5883Compass.hpp"
+#include "real/AdcBatterySensor.hpp"
+#include "real/PwmMotors.hpp"
+#include "real/CrsfRadio.hpp"
+#include "sim/SimImu.hpp"
+#include "sim/SimAltimeter.hpp"
+#include "sim/SimGps.hpp"
+#include "sim/SimCompass.hpp"
+#include "sim/SimBatterySensor.hpp"
+#include "sim/SimMotors.hpp"
+#include "sim/SimRadio.hpp"
 
 // All seven real parts. (Nothing is switched on yet: fc::begin() calls each
 // part's begin(), or an app does it itself.)

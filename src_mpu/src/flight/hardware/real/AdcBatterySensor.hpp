@@ -8,8 +8,8 @@
 // ============================================================================
 
 #include <Arduino.h>
-#include "../FlightIo.hpp"               // IBatterySensor
-#include "../state/FlightSettings.hpp"   // settings().wiring.batteryAdc, settings().battery.dividerScale
+#include "../../FlightIo.hpp"               // IBatterySensor
+#include "../../state/FlightSettings.hpp"   // settings().wiring.batteryAdc, settings().battery.dividerScale
 
 class AdcBatterySensor : public IBatterySensor {
 public:

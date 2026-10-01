@@ -6,9 +6,9 @@
 // ============================================================================
 
 #include <Arduino.h>
-#include "../FlightIo.hpp"               // IMotors
-#include "../state/FlightSettings.hpp"   // settings().wiring.motorPins / escPwmHz
-#include "../services/Log.hpp"           // logLine
+#include "../../FlightIo.hpp"               // IMotors
+#include "../../state/FlightSettings.hpp"   // settings().wiring.motorPins / escPwmHz
+#include "../../services/Log.hpp"           // logLine
 #include "EspPwmESC.hpp"
 
 class PwmMotors : public IMotors {

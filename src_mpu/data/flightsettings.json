@@ -76,17 +76,16 @@
   },
   "radio": {
     "channels": {
-      "roll": 0,
-      "pitch": 1,
-      "throttle": 2,
-      "yaw": 3,
-      "start": 4,
-      "stop": 5,
-      "manual": 6,
-      "land": 7
+      "roll": 1,
+      "pitch": 2,
+      "throttle": 3,
+      "yaw": 4,
+      "start": 5,
+      "stop": 6,
+      "manual": 7,
+      "land": 8
     },
-    "switchHighThreshold": 1700,
-    "switchLowThreshold": 1300
+    "switchUpAbove": 1700
   },
   "wiring": {
     "motorPins": [

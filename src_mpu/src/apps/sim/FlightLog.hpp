@@ -10,7 +10,7 @@
 #include <Arduino.h>
 #include <LittleFS.h>
 #include "flight/FlightController.hpp"   // fc::phase(), fc::batteryState(), ...
-#include "SimWorld.hpp"
+#include "flight/hardware/sim/SimWorld.hpp"
 
 class FlightLog {
 public:

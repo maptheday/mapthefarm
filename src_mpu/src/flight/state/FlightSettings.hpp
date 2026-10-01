@@ -100,11 +100,12 @@ struct FlightSettings {
     bool  positionHold;
   } manual;
 
-  // Which radio channel does what (0-based: channel 1 on the radio = 0 here).
+  // Which radio channel does what, numbered like the radio's own screen
+  // (CH1..CH16).
   struct {
     int roll, pitch, throttle, yaw;
     int start, stop, manual, land;
-    int highThreshold, lowThreshold;   // switch UP above high, DOWN below low
+    int switchUpAbove;   // microseconds: a switch reads ~1000 down, ~1500 middle, ~2000 up
   } radio;
 
   // Where everything is plugged in.
@@ -285,8 +286,7 @@ inline bool loadFlightSettings(FlightSettings& out, String& errors,
   need(ch["stop"],     "radio.channels.stop",     out.radio.stop,     errors);
   need(ch["manual"],   "radio.channels.manual",   out.radio.manual,   errors);
   need(ch["land"],     "radio.channels.land",     out.radio.land,     errors);
-  need(r["switchHighThreshold"], "radio.switchHighThreshold", out.radio.highThreshold, errors);
-  need(r["switchLowThreshold"],  "radio.switchLowThreshold",  out.radio.lowThreshold,  errors);
+  need(r["switchUpAbove"], "radio.switchUpAbove", out.radio.switchUpAbove, errors);
 
   JsonVariantConst w = doc["wiring"];
   JsonArrayConst motorPins = w["motorPins"];

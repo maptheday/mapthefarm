@@ -7,7 +7,7 @@
 
 #include <Arduino.h>
 #include <Wire.h>
-#include "../state/FlightSettings.hpp"   // settings().wiring.i2cSda / i2cScl
+#include "../../state/FlightSettings.hpp"   // settings().wiring.i2cSda / i2cScl
 
 inline void startI2c() {
   static bool started = false;

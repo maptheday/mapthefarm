@@ -8,8 +8,8 @@
 // ============================================================================
 
 #include <Arduino.h>
-#include "../FlightIo.hpp"      // IAltimeter
-#include "../services/Log.hpp"  // logLine
+#include "../../FlightIo.hpp"      // IAltimeter
+#include "../../services/Log.hpp"  // logLine
 #include "EspBarometer.hpp"
 #include "I2cBus.hpp"           // startI2c
 

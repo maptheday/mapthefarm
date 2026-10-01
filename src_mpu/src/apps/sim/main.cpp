@@ -6,13 +6,14 @@
 //   settings:  pio run -e sim -t uploadfs        (the same data/ folder)
 //   run:       ./simulate/run_hil.sh             (flashes, runs every scenario, checks them)
 //
-// The pieces (each in its own file here):
-//   SimWorld     what's TRUE: the QuadSim physics, the pack's charge
-//   SimSensors   the fake sensors (they look at the world) and motors (they push it)
-//   SimRadio     the fake transmitter the scenario's pilot holds
-//   scenarios/   one file per test: what it does to the world, which plug it
-//                breaks, and what the pilot does
-//   FlightLog    the flight recorder (/flight.csv, streamed back by DUMPLOG)
+// The pieces:
+//   flight/hardware/sim/   the fake parts (one file each) and SimWorld, what's
+//                          TRUE: the QuadSim physics and the pack's charge.
+//                          simHardware() in flight/hardware/HardwareIo.hpp
+//                          plugs them in.
+//   scenarios/             one file per test: what it does to the world, which
+//                          plug it breaks, and what the pilot does
+//   FlightLog.hpp          the flight recorder (/flight.csv, streamed back by DUMPLOG)
 //
 // Talks to the laptop over USB:
 //   SCENARIO:<name>  pick the scenario (sent right after reset, before takeoff):
@@ -23,9 +24,7 @@
 // ============================================================================
 
 #include "flight/FlightController.hpp"
-#include "SimWorld.hpp"
-#include "flight/hardware/HardwareIo.hpp"   // simHardware()
-#include "SimRadio.hpp"
+#include "flight/hardware/HardwareIo.hpp"   // simHardware(), SimWorld, SimRadio
 #include "FlightLog.hpp"
 #include "scenarios/FlyMission.hpp"
 #include "scenarios/LowBattery.hpp"
@@ -90,11 +89,11 @@ void setup() {
   // The settings, layered like appsettings files in .NET:
   //   flightsettings.json                  the drone
   //   + the scenario's own files           (testroute: the real first_mission.json)
-  //   + flightsettings/sim.json            the sim's own changes (10-min limit)
-  //   + flightsettings/sim.<scenario>.json if this scenario has one (e.g. geofence)
+  //   + flightsettings/sim.<scenario>.json this scenario's changes ({} if none).
+  //                                          Every scenario has one; a missing
+  //                                          file stops the sim.
   std::vector<String> overrides = scenario->settingsFiles();
-  overrides.push_back("sim");
-  if (fc::hasSettingsOverride("sim." + name)) overrides.push_back("sim." + name);
+  overrides.push_back("sim." + name);
 
   String errors;
   if (!fc::loadSettings(errors, overrides)) fc::halt("Can't load flight settings:\n" + errors);

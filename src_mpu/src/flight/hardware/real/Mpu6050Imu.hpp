@@ -9,9 +9,9 @@
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
 #include <MadgwickAHRS.h>
-#include "../FlightIo.hpp"              // IImu
-#include "../state/FlightConstants.hpp" // PHYSICS_LOOP_HZ
-#include "../services/Log.hpp"          // logLine
+#include "../../FlightIo.hpp"              // IImu
+#include "../../state/FlightConstants.hpp" // PHYSICS_LOOP_HZ
+#include "../../services/Log.hpp"          // logLine
 #include "I2cBus.hpp"                   // startI2c
 
 class Mpu6050Imu : public IImu {

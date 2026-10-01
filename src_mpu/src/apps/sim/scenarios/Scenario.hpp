@@ -11,7 +11,8 @@
 //
 // Rule changes (a smaller geofence, a shorter time limit, another route) are
 // settings, so they live in override files instead:
-//   data/flightsettings/sim.<scenario name>.json   picked up automatically
+//   data/flightsettings/sim.<scenario name>.json   every scenario has one ({} if
+//                                                  it changes nothing); required
 //   settingsFiles()                                any other file, e.g. the
 //                                                  real first_mission.json
 // ============================================================================
@@ -19,8 +20,8 @@
 #include <Arduino.h>
 #include <vector>
 #include "flight/FlightController.hpp"   // fc::phase(), FlightIo
-#include "../SimWorld.hpp"
-#include "../SimRadio.hpp"
+#include "flight/hardware/sim/SimWorld.hpp"
+#include "flight/hardware/sim/SimRadio.hpp"
 
 // What a scenario gets to work with.
 struct SimRig {
@@ -34,7 +35,7 @@ public:
   virtual ~Scenario() {}
   virtual const char* name() const = 0;
 
-  // Extra settings override files, loaded before sim.json.
+  // Extra settings override files, loaded before sim.<name>.json.
   virtual std::vector<String> settingsFiles() const { return {}; }
 
   // Once, before the drone powers up: change the world, or wrap a plug.

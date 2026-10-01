@@ -12,8 +12,8 @@
 #include <Arduino.h>
 #include <QMC5883LCompass.h>
 #include <Preferences.h>
-#include "../FlightIo.hpp"      // ICompass
-#include "../services/Log.hpp"  // logLine
+#include "../../FlightIo.hpp"      // ICompass
+#include "../../services/Log.hpp"  // logLine
 #include "I2cBus.hpp"           // startI2c
 
 class Qmc5883Compass : public ICompass {
